@@ -1,0 +1,23 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+
+# env — never commit real secrets
+.env
+.env*.local
+
+# build artifacts
+dist/
+tsconfig.tsbuildinfo
+
+# test output
+coverage/
+playwright-report/
+test-results/
+
+# misc
+.DS_Store
+*.log
