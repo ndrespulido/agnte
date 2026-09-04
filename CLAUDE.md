@@ -79,6 +79,14 @@ the **most restrictive** visibility among its tags; default `private`.
 notes and financial screenshots; a single mis-tag must not leak. Implement this
 in exactly one place in the domain layer, and test it thoroughly.
 
+**Erasure of contributed Verses** — if a user contributed Verses to someone
+else's shared tag, account deletion **anonymizes** them (content kept,
+attribution stripped, including media EXIF and event log) rather than deleting
+them. One person must not be able to destroy another's trip record.
+
+**No application-level media encryption** — decided. It would break server-side
+thumbnailing; R2's at-rest encryption plus signed URLs is the security model.
+
 **Shortcuts** — `Tag.shortcut`, unique per user. `.m` expands to `.movies`.
 Verticals default to their first letter; collisions leave the second tag
 without a default rather than reassigning.
@@ -163,9 +171,13 @@ Sober, minimalist, iOS-glass, with the feel of a 1990s paper agenda.
 
 ## Constraints that shape everything
 
-- **The user develops via pipeline and tests from a phone browser.** Every PR
-  must produce a deployable preview environment with its own URL. Automated
-  tests are load-bearing, not optional — they're the only safety net.
+- **Local dev AND pipeline both matter.** The user iterates locally (WSL2 on a
+  Snapdragon/ARM64 Surface, native Postgres, **no Docker available**) and
+  verifies on deployed preview URLs from a phone. `npm run dev` must work with
+  no GCP account, no Cloudflare account and no containers — see
+  `docs/architecture.md` §7.1 for the local adapter set (filesystem storage,
+  in-process job queue, console email transport). Every PR still produces a
+  preview URL, and automated tests remain load-bearing.
 - **Cost must stay near zero.** Scale-to-zero services, `max-instances` caps on
   everything, no NAT gateway, no always-on load balancer. Cloudflare R2 for
   object storage specifically because it has no egress fees.
@@ -197,14 +209,11 @@ Sober, minimalist, iOS-glass, with the feel of a 1990s paper agenda.
 
 ## Open decisions
 
-Language, cloud and architecture are now settled. Still open:
+Settled: language (Node/TS), cloud (GCP), architecture (modular monolith),
+erasure behaviour (anonymize), media encryption (none), local dev (kept alive).
 
-1. **Erasure of contributed Verses** — if the user contributed Verses to
-   someone else's shared tag, does erasure anonymize them (proposed, so one
-   person can't destroy another's trip record) or delete them?
-2. **`contribute` sharing permission** — can a collaborator add Verses to a
+Still open — neither blocks Phase 0:
+
+1. **`contribute` sharing permission** — can a collaborator add Verses to a
    shared tag in v2, or is sharing read-only first?
-3. **Shortcut scope** — global per user (recommended) or per-tag context?
-4. **Local dev alongside the pipeline** — the user has a Surface Pro 11
-   (Snapdragon/ARM64) with WSL2 + Postgres working. Pipeline-only iteration is
-   ~8 minutes per change versus seconds locally.
+2. **Shortcut scope** — global per user (recommended) or per-tag context?

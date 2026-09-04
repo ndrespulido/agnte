@@ -230,6 +230,43 @@ Preview-per-PR with a seeded database is what makes phone-only testing workable.
 Automated tests aren't optional here — they're the safety net that replaces your
 ability to check things locally.
 
+### 7.1 Local development
+
+**Decided: local dev stays alive alongside the pipeline.** Fast iteration
+locally; the pipeline is what proves it actually works. The existing setup —
+WSL2 on the Surface (Snapdragon/ARM64) with native Postgres — is the target
+environment.
+
+The constraint that shapes this: **`npm run dev` must work with no GCP account,
+no Cloudflare account, and no Docker.** Docker Desktop wasn't installable on
+that machine, so anything requiring a container locally is out.
+
+This is where ports & adapters stops being theoretical. Each external
+dependency gets two adapters, selected by environment:
+
+| Port | Production | Local |
+|---|---|---|
+| Object storage | Cloudflare R2 (presigned PUT) | Filesystem under `.local-storage/`, served by a dev-only route |
+| Deferred jobs | Cloud Tasks → `/internal/*` | In-process queue calling the same handler directly |
+| Cron | Cloud Scheduler | `setInterval` in dev, or a manual trigger route |
+| Email | Resend | Console transport — prints the verification/reset link to the terminal |
+| Database | Neon | Local Postgres |
+
+Rules that keep this honest:
+
+- **The adapter is the only thing that differs.** Handlers, use cases and domain
+  logic are identical in both environments — if a code path only exists in one,
+  the pipeline is testing something you never ran.
+- **The console email transport prints the real token URL**, so registration and
+  password reset are fully testable offline. This matters: email is otherwise
+  the most annoying flow to test.
+- **Seed script** (`npm run seed`) populates a realistic dataset — verses across
+  past and future, shared and private tags, deep-time entries — so local state
+  resembles the preview environments.
+- **CI runs against the production adapters** (a Neon branch, a scratch R2
+  bucket) so adapter-specific bugs surface in the pipeline rather than in
+  production.
+
 ---
 
 ## 8. The previously-missing pieces, designed in
@@ -342,12 +379,12 @@ obligations, and erasure in particular is far cheaper to design in now.
 event → each module purges its own data (exactly what module boundaries buy you)
 → media purged from R2 → hard delete after a 30-day grace window.
 
-> **Design decision worth your review:** if you contributed Verses to someone
-> else's shared trip tag, erasure **anonymizes** those rather than deleting them.
-> Deleting would let one person destroy another's trip record. The anonymized
-> Verse keeps its content, loses all attribution. Flagging it because it's a
-> judgement call, not a technical necessity — say if you'd rather they be
-> deleted outright.
+> **Decided:** if you contributed Verses to someone else's shared trip tag,
+> erasure **anonymizes** them rather than deleting them — the Verse keeps its
+> content and loses all attribution. Deleting would let one person destroy
+> another's trip record. Implementation note: anonymization must also strip
+> authorship from any media EXIF and from the event log, not just null the
+> `userId` column.
 
 **Portability** — the export in §8.5.
 
@@ -364,10 +401,10 @@ data on your behalf; each needs a DPA on file. All four offer standard ones.
 anything beyond core function. Not a formality once you have users who aren't
 you.
 
-**Encryption** — provider-level at rest, TLS in transit. Application-level media
-encryption is deliberately *not* recommended: it would break server-side
-thumbnailing, and the added protection over R2's at-rest encryption is small
-relative to that cost.
+**Encryption** — provider-level at rest, TLS in transit. **Decided:** no
+application-level media encryption. It would break server-side thumbnailing, and
+the added protection over R2's at-rest encryption is small relative to that
+cost.
 
 ### 8.8 Backups
 
@@ -425,11 +462,13 @@ Each phase ends deployable and checkable from your phone.
 
 ## 10. Still needing your input
 
-1. **Erasure of contributed Verses** — anonymize (proposed) or delete? (§8.7)
-2. **`contribute` sharing permission** — can someone add Verses to your shared
-   tag in v2, or is sharing read-only first?
-3. **Shortcut scope** — global per user (recommended), or per-tag context?
-4. Whether to **keep local dev working** alongside the pipeline. You have the
-   Surface with WSL2 running; pipeline-only means ~8 minutes per iteration
-   instead of seconds, which over a build this size is the difference between
-   weeks and months.
+Settled: language, cloud, architecture, erasure behaviour, media encryption,
+local dev.
+
+1. **`contribute` sharing permission** — can a collaborator add Verses to a
+   shared tag in v2, or is sharing read-only first? (Read-only is less work and
+   less to get wrong; `contribute` is what makes a shared trip genuinely
+   collaborative.)
+2. **Shortcut scope** — global per user (recommended), or per-tag context?
+
+Neither blocks Phase 0.

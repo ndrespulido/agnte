@@ -33,9 +33,9 @@ Build order is in `docs/architecture.md` §9.
 
 ## Constraints worth knowing before you touch anything
 
-- **Development happens through the pipeline; testing happens on a phone.**
-  Every PR must produce a working preview URL. Automated tests are the only
-  safety net.
+- **Local dev and pipeline both matter.** `npm run dev` must work with no GCP
+  account, no Cloudflare account and no Docker — see `docs/architecture.md`
+  §7.1. Every PR still produces a preview URL for checking on a phone.
 - **Cost must stay near zero.** Scale-to-zero, `max-instances` caps, no NAT
   gateway, no load balancer. See `docs/architecture.md` §3.1 — the billing kill
   switch is part of Phase 0, not an afterthought.
