@@ -28,7 +28,7 @@ compressed relative to recent time.
 
 **v1 exists and works** (Next.js monolith, Prisma, Postgres, Google sign-in,
 deployed nowhere yet). It is being **rebuilt as v2** with a different
-architecture. Read `agnte-v2-architecture.md` in this repo for the full
+architecture. Read `docs/architecture.md` for the full
 decision record — it contains the reasoning behind everything below and a list
 of open decisions.
 
@@ -97,7 +97,7 @@ without a default rather than reassigning.
 
 **Locked:** Node/TypeScript · GCP · **modular monolith** (not microservices).
 
-Full reasoning in `agnte-v2-architecture.md`. Summary:
+Full reasoning in `docs/architecture.md`. Summary:
 
 - **One deployable**, internally split into modules with hard boundaries:
   `identity`, `verse`, `media`, `insights`, `notifications`, `privacy`.
