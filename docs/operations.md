@@ -17,8 +17,8 @@ Everything below is a one-time setup step. Per-deploy infrastructure lives in
 | GCP bootstrap | Project, APIs, Artifact Registry, service accounts, budget | 0.3 | ☐ |
 | Neon project | Database, connection strings | 0.4 | ☐ |
 | Cloudflare R2 | Bucket, scoped API token | 0.5 | ☐ |
+| Workload Identity | Keyless GitHub Actions → GCP auth | 0.3b | ☐ |
 | Kill switch | Pub/Sub topic, billing-disable function | 0.6 | ☐ |
-| Workload Identity | Keyless GitHub Actions → GCP auth | 0.8 | ☐ |
 
 ---
 
@@ -62,6 +62,34 @@ Default `europe-west3` (Frankfurt), to sit in the same metro as the Neon
 project. App-to-database latency is paid on every query; user-to-app latency is
 paid once per request, and Cloudflare will absorb some of that later. Override
 with `REGION=` if you pick a different Neon region.
+
+---
+
+## 1b. Workload Identity Federation (task 0.3b)
+
+Moved ahead of the first deploy. The original plan had a manual deploy from a
+locally built image, which is not possible here: the development machine has no
+Docker (§7.1). The image can only be built in CI, so CI needs to authenticate
+before anything can be deployed at all.
+
+```bash
+PROJECT_ID=agnte-prod GITHUB_REPO=ndrespulido/agnte ./infra/bootstrap-wif.sh
+```
+
+Then set the four values it prints as **repository variables** (not secrets):
+Settings → Secrets and variables → Actions → Variables.
+
+The script refuses to proceed if an existing provider is not pinned to this
+repository. That condition is the security boundary — an OIDC provider without
+it trusts a GitHub Actions token from *any* repository on GitHub, and it is the
+step most commonly missed.
+
+### Two service accounts, two jobs
+
+`GCP_DEPLOYER_SA` is what CI impersonates. `GCP_RUNTIME_SA` is what the Cloud
+Run service *runs as*, and it holds no project-level roles. Passing the deployer
+to `--service-account` would give a public, internet-facing container the
+ability to deploy revisions of itself; keep them distinct.
 
 ---
 
