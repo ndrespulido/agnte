@@ -37,6 +37,24 @@ jobs:
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
 
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # Migrations run here, not at container boot. Booting instances would race
+      # each other for the advisory lock and pay the cost on every cold start.
+      # Running before the deploy also means a failed migration stops the
+      # release rather than leaving a revision talking to the wrong schema.
+      #
+      # The direct URL is read from Secret Manager with the deployer's own
+      # identity, so no connection string is stored in GitHub.
+      - name: Run migrations
+        run: |
+          npm ci
+          DIRECT_URL="$(gcloud secrets versions access latest --secret=agnte-direct-url)" \
+            npx prisma migrate deploy
+
       - name: Build and push
         id: build
         run: |
@@ -74,6 +92,7 @@ jobs:
             --concurrency=80
             --timeout=60s
             --set-env-vars=APP_ENV=production,GIT_SHA=${GITHUB_SHA::7}
+            --set-secrets=DATABASE_URL=agnte-database-url:latest
           )
           if [[ "${{ steps.existing.outputs.exists }}" == "true" ]]; then
             FLAGS+=(--no-traffic --tag=candidate)
@@ -104,6 +123,8 @@ jobs:
             || { echo "::error::Health check did not report ok"; exit 1; }
           echo "$BODY" | grep -q "\"commit\":\"${GITHUB_SHA::7}\"" \
             || { echo "::error::Serving revision is not this commit"; exit 1; }
+          echo "$BODY" | grep -q '"name":"database","status":"ok"' \
+            || { echo "::error::Database check is not ok on the new revision"; exit 1; }
 
       # Only reached if the smoke test passed, so a broken revision never
       # serves a single production request — better than deploying and rolling

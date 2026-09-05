@@ -1,0 +1,14 @@
+// Phase 0 has no models. What it establishes is the migration pipeline and the
+// per-module schema layout from docs/architecture.md §1.1, so that Phase 1 adds
+// tables into a structure that already exists rather than retrofitting one.
+//
+// Connection URLs live in prisma.config.ts, not here: Prisma 7 removed `url`
+// and `directUrl` from the schema and connects through a driver adapter.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}

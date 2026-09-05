@@ -28,6 +28,12 @@ ARG GIT_SHA=unknown
 ENV GIT_SHA=$GIT_SHA
 
 ENV NEXT_TELEMETRY_DISABLED=1
+
+# The client is generated into node_modules and is imported by the app, so it
+# must exist before the build. It cannot be generated in the deps stage: only
+# package.json is present there, not prisma/schema.prisma.
+RUN npx prisma generate
+
 RUN npm run build
 
 
