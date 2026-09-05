@@ -52,6 +52,26 @@ BILLING_ACCOUNT=0X0X0X-0X0X0X-0X0X0X \
 Safe to re-run: every step checks before it creates. If it fails partway,
 fix the cause and run it again rather than cleaning up by hand.
 
+### If it fails partway
+
+Re-run it. Every step checks before it creates, so a second run picks up where
+the first stopped rather than duplicating anything.
+
+**`PERMISSION_DENIED` on a resource you clearly own** — usually
+`artifactregistry.repositories.create` — is almost always API propagation, not
+IAM. Enabling an API returns as soon as the request is accepted, and calls made
+before it is actually serving fail with a denial that reads like a
+misconfigured account. The message even says "(or it may not exist)". The
+script now waits for each API to report enabled and retries with backoff, so
+this should not surface; if it does after several minutes, check you hold Owner
+on the project:
+
+```bash
+gcloud projects get-iam-policy agnte-prod \
+  --flatten=bindings[].members --format='value(bindings.role)' \
+  --filter="bindings.members:$(gcloud config get-value account)"
+```
+
 ### What it deliberately does not do
 
 - **No `compute.googleapis.com`.** Cloud Run does not need it, and a NAT

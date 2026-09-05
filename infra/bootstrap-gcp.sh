@@ -36,6 +36,40 @@ DEPLOYER_SA="agnte-deployer"
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 note() { printf '    %s\n' "$*"; }
 
+# Enabling an API returns as soon as the request is accepted, not once the API
+# is actually serving. Calls made in that window fail with PERMISSION_DENIED
+# ("...or it may not exist"), which reads like a misconfigured account rather
+# than a race. These two helpers are what stop that from derailing a first run.
+
+wait_for_api() {
+  local api="$1" waited=0
+  while ! gcloud services list --enabled --project="${PROJECT_ID}" \
+      --filter="config.name=${api}" --format='value(config.name)' 2>/dev/null | grep -q .; do
+    if (( waited >= 180 )); then
+      echo "  ${api} did not become active within 180s. Re-run the script."
+      return 1
+    fi
+    note "waiting for ${api} to become active (${waited}s)"
+    sleep 10
+    waited=$(( waited + 10 ))
+  done
+}
+
+retry() {
+  local attempts="$1"; shift
+  local delay=5 n=1
+  until "$@"; do
+    if (( n >= attempts )); then
+      echo "  Command still failing after ${n} attempts: $*"
+      return 1
+    fi
+    note "attempt ${n} failed; retrying in ${delay}s"
+    sleep "${delay}"
+    delay=$(( delay * 2 ))
+    n=$(( n + 1 ))
+  done
+}
+
 # ----------------------------------------------------------------------------
 # Preflight
 # ----------------------------------------------------------------------------
@@ -123,11 +157,13 @@ note "Enabled."
 # ----------------------------------------------------------------------------
 
 say "Artifact Registry"
+wait_for_api artifactregistry.googleapis.com
+
 if gcloud artifacts repositories describe "${REPOSITORY}" \
      --location="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
   note "Repository already exists."
 else
-  gcloud artifacts repositories create "${REPOSITORY}" \
+  retry 5 gcloud artifacts repositories create "${REPOSITORY}" \
     --repository-format=docker \
     --location="${REGION}" \
     --description="Agnte container images" \
@@ -136,7 +172,7 @@ else
 fi
 
 POLICY_FILE="$(dirname "$0")/artifact-registry-cleanup-policy.json"
-gcloud artifacts repositories set-cleanup-policies "${REPOSITORY}" \
+retry 5 gcloud artifacts repositories set-cleanup-policies "${REPOSITORY}" \
   --location="${REGION}" \
   --project="${PROJECT_ID}" \
   --policy="${POLICY_FILE}" \
@@ -201,6 +237,7 @@ note "roles/iam.serviceAccountUser (scoped to ${RUNTIME_SA})"
 # ----------------------------------------------------------------------------
 
 say "Budget"
+wait_for_api billingbudgets.googleapis.com
 BUDGET_NAME="agnte-${PROJECT_ID}"
 if gcloud billing budgets list --billing-account="${BILLING_ACCOUNT}" \
      --format='value(displayName)' 2>/dev/null | grep -qx "${BUDGET_NAME}"; then
