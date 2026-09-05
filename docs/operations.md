@@ -34,6 +34,13 @@ gcloud auth login
 gcloud billing accounts list      # note the ACCOUNT_ID column
 ```
 
+**Check the `OPEN` column reads `True`.** A closed billing account cannot be
+linked to a project, and nothing in this project works without it. If it reads
+`False`, open the [billing console](https://console.cloud.google.com/billing)
+and either reactivate the account — usually by adding a valid payment method —
+or create a new one and use its ID. The script refuses to run against a closed
+account rather than creating a project it cannot finish configuring.
+
 ### Run
 
 ```bash

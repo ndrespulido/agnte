@@ -47,6 +47,31 @@ gcloud auth list --filter=status:ACTIVE --format='value(account)' | grep -q . \
 note "Authenticated as $(gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -1)"
 note "Project: ${PROJECT_ID}   Region: ${REGION}   Budget: EUR ${BUDGET_EUR}"
 
+# A closed billing account cannot be linked to a project. Checking here rather
+# than letting `gcloud billing projects link` fail further down means the
+# script stops before creating anything, with a message that says what to do.
+BILLING_OPEN="$(gcloud billing accounts describe "${BILLING_ACCOUNT}" \
+  --format='value(open)' 2>/dev/null || true)"
+if [[ -z "${BILLING_OPEN}" ]]; then
+  echo
+  echo "  Billing account ${BILLING_ACCOUNT} not found, or you lack access to it."
+  echo "  List the ones you can see with: gcloud billing accounts list"
+  exit 1
+fi
+if [[ "${BILLING_OPEN,,}" != "true" ]]; then
+  echo
+  echo "  Billing account ${BILLING_ACCOUNT} is CLOSED (open: ${BILLING_OPEN})."
+  echo
+  echo "  A closed account cannot be linked to a project, so nothing here would"
+  echo "  work. Open https://console.cloud.google.com/billing and either:"
+  echo "    - reactivate this account (usually: add a valid payment method), or"
+  echo "    - create a new billing account and re-run with its ACCOUNT_ID."
+  echo
+  echo "  Nothing has been created. Re-run once billing is active."
+  exit 1
+fi
+note "Billing account ${BILLING_ACCOUNT} is open."
+
 # ----------------------------------------------------------------------------
 # Project and billing
 # ----------------------------------------------------------------------------
