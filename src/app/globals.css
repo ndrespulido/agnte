@@ -1,0 +1,158 @@
+/*
+ * Phase 0 styling only — enough to make the status page legible on a phone.
+ * The design system (tokens.ts, glass, sticky date header) lands in Phase 3;
+ * this borrows the palette from CLAUDE.md so the first deployed page already
+ * looks like the project rather than like a default template.
+ */
+
+:root {
+  --paper: #faf9f6;
+  --ink: #1c1c1e;
+  --ink-soft: #6b6b70;
+  --rule: rgba(28, 28, 30, 0.14);
+  --ok: #2f6f4f;
+  --pending: #8a6d3b;
+  --failed: #9b2c2c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #141416;
+    --ink: #ececee;
+    --ink-soft: #9a9aa0;
+    --rule: rgba(236, 236, 238, 0.16);
+    --ok: #7fbf9a;
+    --pending: #d9b370;
+    --failed: #e08585;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+main {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 4rem;
+}
+
+h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.25rem;
+}
+
+.lede {
+  color: var(--ink-soft);
+  margin: 0 0 2rem;
+  font-size: 0.9375rem;
+}
+
+h2 {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin: 2rem 0 0.5rem;
+}
+
+dl {
+  margin: 0;
+  border-top: 0.5px solid var(--rule);
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  padding: 0.625rem 0;
+  border-bottom: 0.5px solid var(--rule);
+}
+
+dt {
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+  flex: none;
+}
+
+dd {
+  margin: 0;
+  /* Flex items default to min-width:auto, which lets a long value (an ISO
+     timestamp, a commit SHA) push the row wider than a phone viewport.
+     min-width:0 is what allows overflow-wrap below to actually take effect. */
+  min-width: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+.check {
+  display: flex;
+  align-items: baseline;
+  gap: 0.625rem;
+  padding: 0.625rem 0;
+  border-bottom: 0.5px solid var(--rule);
+}
+
+.dot {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  translate: 0 -0.1rem;
+}
+
+.dot[data-status='ok'] {
+  background: var(--ok);
+}
+.dot[data-status='not-configured'] {
+  background: var(--pending);
+}
+.dot[data-status='failed'] {
+  background: var(--failed);
+}
+
+.check-name {
+  font-weight: 500;
+  font-size: 0.875rem;
+}
+
+.check-detail {
+  color: var(--ink-soft);
+  font-size: 0.8125rem;
+  margin-left: auto;
+  min-width: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+footer {
+  margin-top: 2.5rem;
+  color: var(--ink-soft);
+  font-size: 0.8125rem;
+}
+
+a {
+  color: inherit;
+}

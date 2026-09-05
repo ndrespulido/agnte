@@ -1,0 +1,9 @@
+.next/
+node_modules/
+coverage/
+package-lock.json
+
+# Prose is hand-wrapped and reviewed as prose; Prettier reflowing it produces
+# large diffs that hide the actual edit.
+*.md
+docs/
