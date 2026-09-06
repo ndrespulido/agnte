@@ -89,12 +89,35 @@ else
 fi
 
 # Cloud Billing publishes budget notifications as a Google-managed service
-# account, which needs permission on this topic.
-gcloud pubsub topics add-iam-policy-binding "${TOPIC}" \
-  --member="serviceAccount:billing-budgets@system.gserviceaccount.com" \
-  --role=roles/pubsub.publisher \
-  --project="${PROJECT_ID}" --quiet >/dev/null
-note "Cloud Billing may publish to it."
+# agent. Rather than hardcode its address — the first attempt guessed
+# billing-budgets@system.gserviceaccount.com, which does not exist — ask GCP to
+# provision and name it.
+#
+# Best-effort on purpose. Attaching a topic to a budget provisions this access
+# on Google's side, so the explicit grant is belt and braces; and the rehearsal
+# publishes to the topic directly, so the function path is fully testable
+# without it. Only real budget alerts depend on this, and a failure here must
+# not stop the deployment of the switch itself.
+say "Letting Cloud Billing publish to the topic"
+BUDGET_AGENT="$(gcloud beta services identity create \
+  --service=billingbudgets.googleapis.com --project="${PROJECT_ID}" \
+  --format='value(email)' 2>/dev/null || true)"
+
+if [[ -n "${BUDGET_AGENT}" ]]; then
+  if gcloud pubsub topics add-iam-policy-binding "${TOPIC}" \
+       --member="serviceAccount:${BUDGET_AGENT}" \
+       --role=roles/pubsub.publisher \
+       --project="${PROJECT_ID}" --quiet >/dev/null 2>&1; then
+    note "Granted to ${BUDGET_AGENT}."
+  else
+    note "Could not grant to ${BUDGET_AGENT}; continuing."
+    note "See 'Confirming real alerts reach the topic' in docs/operations.md."
+  fi
+else
+  note "GCP did not name a service agent for billingbudgets; continuing."
+  note "Attaching the topic to the budget below normally provisions this."
+  note "See 'Confirming real alerts reach the topic' in docs/operations.md."
+fi
 
 # ----------------------------------------------------------------------------
 # Service account

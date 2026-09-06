@@ -302,6 +302,29 @@ The service account gets `roles/billing.admin` **on the billing account** — a
 genuinely powerful grant, and why this identity exists for nothing else. It is
 not the runtime account and not the deployer.
 
+### Confirming real alerts reach the topic
+
+The rehearsal publishes to the topic directly, so it proves the function, the
+trigger and the IAM — but not that *Cloud Billing itself* can publish. Those are
+separate paths, and only the second one carries a real budget alert.
+
+Attaching the topic to the budget normally provisions Google's publisher access
+automatically. The deploy script also tries to grant it explicitly, asking GCP
+to name its own service agent rather than hardcoding an address — an earlier
+version guessed `billing-budgets@system.gserviceaccount.com`, which does not
+exist. That grant is best-effort and never stops the deployment.
+
+To confirm the wiring after deploying, check the budget shows the topic:
+
+```bash
+gcloud billing budgets list --billing-account=<id>   --format='value(displayName, notificationsRule.pubsubTopic)'
+```
+
+Cloud Billing reports delivery failures against the budget in the console under
+Billing → Budgets & alerts. If notifications are not arriving, granting
+`roles/pubsub.publisher` on `agnte-budget-alerts` to the identity named there is
+the fix.
+
 ### Rehearse before arming
 
 An untested kill switch is a guess, and the alternative way to test it is to
