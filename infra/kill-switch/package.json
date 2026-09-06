@@ -1,0 +1,11 @@
+{
+  "name": "agnte-kill-switch",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "index.mjs",
+  "dependencies": {
+    "@google-cloud/billing": "^6.0.0",
+    "@google-cloud/functions-framework": "^5.0.0"
+  }
+}

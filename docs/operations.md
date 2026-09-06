@@ -17,7 +17,7 @@ Everything below is a one-time setup step. Per-deploy infrastructure lives in
 | GCP bootstrap | Project, APIs, Artifact Registry, service accounts, budget | 0.3 | ☑ |
 | Workload Identity | Keyless GitHub Actions → GCP auth | 0.3b | ☑ |
 | Neon project | Database, connection strings | 0.4 | ☑ |
-| Cloudflare R2 | Bucket, scoped API token | 0.5 | ☐ |
+| Cloudflare R2 | Bucket, scoped API token | 0.5 | ☑ |
 | Kill switch | Pub/Sub topic, billing-disable function | 0.6 | ☐ |
 
 ---
@@ -288,6 +288,48 @@ before the switch ever fires, so it is a backstop against a slow leak — a
 forgotten resource, an image pile-up — not a cap. Treat items 1 and 2 as the
 real protection.
 
+### Deploying it (task 0.6)
+
+```bash
+PROJECT_ID=agnte-prod BILLING_ACCOUNT=012753-4C8C98-4A0FD4 ./infra/deploy-kill-switch.sh
+```
+
+Creates the Pub/Sub topic, a dedicated service account, the Cloud Function, and
+points the existing budget at the topic. **It deploys disarmed**: the function
+logs what it would do and changes nothing.
+
+The service account gets `roles/billing.admin` **on the billing account** — a
+genuinely powerful grant, and why this identity exists for nothing else. It is
+not the runtime account and not the deployer.
+
+### Rehearse before arming
+
+An untested kill switch is a guess, and the alternative way to test it is to
+overspend for real. Same argument as backups (§8.8): rehearse the one thing
+whose failure is unrecoverable.
+
+```bash
+PROJECT_ID=agnte-prod ./infra/rehearse-kill-switch.sh
+```
+
+Publishes a synthetic over-threshold notification and shows what the function
+logged. While disarmed you should see:
+
+```
+kill-switch: WOULD DISABLE BILLING for agnte-prod — budget exceeded: 999.99 of 30 EUR
+```
+
+Only once you have seen that, arm it:
+
+```bash
+ARMED=true PROJECT_ID=agnte-prod BILLING_ACCOUNT=... ./infra/deploy-kill-switch.sh
+```
+
+Rehearsing again **now really disables billing** — the script demands you type
+`DISABLE BILLING` first. Doing that drill once, deliberately, is worth it: you
+find out whether it works and you walk the recovery path calmly rather than
+during an incident.
+
 ### When the kill switch fires
 
 Billing is disabled project-wide. Everything stops, including the function that
@@ -305,6 +347,21 @@ disabled it. This is correct for a last resort, and it is recoverable:
 GCP deletes resources in a project with billing disabled after a grace period.
 Everything in this project is reproducible from this repository, which is why
 the destructive option is acceptable here.
+
+**The function disables its own project, so it cannot un-disable it.** That is
+by design — a last resort should not be able to undo itself — but it means
+recovery is always manual, through the console or a `gcloud billing projects
+link` from your own account.
+
+### What it will not catch
+
+Budget data lags actual spend by hours. A genuine runaway can pass EUR 30 before
+this function ever runs, so treat it as a backstop against a slow leak — a
+forgotten resource, images piling up — rather than a cap.
+
+The caps that actually bound the bill are `--max-instances=3` on Cloud Run and
+the Compute API being left disabled, which makes a NAT gateway or load balancer
+impossible to create rather than merely discouraged.
 
 ---
 
