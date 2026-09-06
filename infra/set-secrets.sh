@@ -104,6 +104,37 @@ gcloud secrets add-iam-policy-binding agnte-direct-url \
   --project="${PROJECT_ID}" --quiet >/dev/null
 note "deployer -> agnte-direct-url (migrations in CI)"
 
+# ----------------------------------------------------------------------------
+# Verify
+#
+# Granting and having-been-granted are different things: a binding can be
+# written against the wrong secret, or the create can have failed earlier in a
+# way that left nothing to bind to. Reading the policy back is what turns "the
+# script ran" into "the deploy will work".
+# ----------------------------------------------------------------------------
+
+say "Verifying"
+verify() {
+  local secret="$1" member="$2" label="$3"
+  if ! gcloud secrets describe "${secret}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    echo "  ${secret} does not exist. Something above failed; re-run this script."
+    exit 1
+  fi
+  if gcloud secrets get-iam-policy "${secret}" --project="${PROJECT_ID}" \
+       --flatten='bindings[].members' \
+       --filter="bindings.role=roles/secretmanager.secretAccessor AND bindings.members:${member}" \
+       --format='value(bindings.members)' 2>/dev/null | grep -q .; then
+    note "${secret}: ${label} can read it."
+  else
+    echo "  ${secret}: ${label} (${member}) is NOT bound as secretAccessor."
+    echo "  The deploy will fail with PERMISSION_DENIED. Re-run this script."
+    exit 1
+  fi
+}
+
+verify agnte-database-url "${RUNTIME_SA}" "runtime"
+verify agnte-direct-url "${DEPLOYER_SA}" "deployer"
+
 say "Done"
 cat <<'DONE'
 

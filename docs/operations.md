@@ -163,6 +163,20 @@ with its own identity; Cloud Run mounts the pooled one at deploy time.
 
 To rotate: reset the password in the Neon console, then re-run the script.
 
+The script verifies its own work before reporting success: it reads each IAM
+policy back and confirms the binding is actually there. Granting and
+having-been-granted are different things, and the failure mode otherwise
+surfaces much later, as a `PERMISSION_DENIED` in a deploy.
+
+If a deploy fails at **Run migrations** with `secretmanager.versions.access`
+denied, check whether the secret exists at all — GCP returns the same denial
+for a missing resource as for one you cannot read:
+
+```bash
+gcloud secrets list --project=agnte-prod
+gcloud secrets get-iam-policy agnte-direct-url --project=agnte-prod
+```
+
 ### How migrations run
 
 `prisma migrate deploy` runs as a CI step *before* the Cloud Run deploy, never
