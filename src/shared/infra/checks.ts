@@ -1,3 +1,5 @@
+import { getDatabase, MODULE_SCHEMAS } from './database';
+
 /**
  * Dependency checks.
  *
@@ -31,10 +33,32 @@ const checks: Check[] = [
   },
   {
     name: 'database',
-    run: async () => ({
-      status: 'not-configured',
-      detail: 'Neon is wired in task 0.4',
-    }),
+    run: async () => {
+      const db = getDatabase();
+      if (!db) return { status: 'not-configured', detail: 'DATABASE_URL is not set' };
+
+      // Asserts the migration ran, not merely that a connection opened. A
+      // reachable but unmigrated database is the failure this is here to catch.
+      const rows = await db.$queryRaw<{ schema_name: string }[]>`
+        SELECT schema_name
+        FROM information_schema.schemata
+        WHERE schema_name = ANY(${[...MODULE_SCHEMAS]})
+      `;
+
+      const found = rows.length;
+      const total = MODULE_SCHEMAS.length;
+      if (found < total) {
+        const missing = MODULE_SCHEMAS.filter(
+          (schema) => !rows.some((row) => row.schema_name === schema),
+        );
+        return {
+          status: 'failed' as const,
+          detail: `migration incomplete, missing: ${missing.join(', ')}`,
+        };
+      }
+
+      return { status: 'ok' as const, detail: `${found}/${total} module schemas` };
+    },
   },
   {
     name: 'object-storage',

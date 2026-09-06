@@ -9,7 +9,6 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "incremental": true,
     "noEmit": true,
     "skipLibCheck": true,
     "strict": true,
@@ -25,7 +24,8 @@
     ],
     "paths": {
       "@/*": ["./src/*"]
-    }
+    },
+    "incremental": true
   },
   "include": [
     "next-env.d.ts",

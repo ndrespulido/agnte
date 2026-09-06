@@ -14,10 +14,10 @@ Everything below is a one-time setup step. Per-deploy infrastructure lives in
 
 | Step | What it creates | Task | Done |
 |---|---|---|---|
-| GCP bootstrap | Project, APIs, Artifact Registry, service accounts, budget | 0.3 | ☐ |
+| GCP bootstrap | Project, APIs, Artifact Registry, service accounts, budget | 0.3 | ☑ |
+| Workload Identity | Keyless GitHub Actions → GCP auth | 0.3b | ☑ |
 | Neon project | Database, connection strings | 0.4 | ☐ |
 | Cloudflare R2 | Bucket, scoped API token | 0.5 | ☐ |
-| Workload Identity | Keyless GitHub Actions → GCP auth | 0.3b | ☐ |
 | Kill switch | Pub/Sub topic, billing-disable function | 0.6 | ☐ |
 
 ---
@@ -143,6 +143,40 @@ bug to find:
 | `DATABASE_URL` | **Pooled** (host contains `-pooler`) | The app. Cloud Run can start many instances; without the pooler they exhaust Postgres connections. |
 | `DIRECT_URL` | **Direct** (no `-pooler`) | Migrations. The migration engine needs a real session; PgBouncer's transaction pooling breaks it. |
 
+### Storing the connection strings
+
+Never paste either URL into a chat, a file, or a shell argument — an argument
+lands in shell history and in the process table. This script reads both from
+the terminal and stores them in Secret Manager:
+
+```bash
+PROJECT_ID=agnte-prod ./infra/set-secrets.sh
+```
+
+It refuses obvious mix-ups (a pooled URL in the direct slot and vice versa),
+adds a new secret *version* rather than replacing, so a rotation is revertible,
+and grants access per secret: the runtime account can read the pooled URL and
+nothing else; the deployer can read the direct URL for migrations.
+
+Neither string is stored in GitHub. CI reads the direct URL from Secret Manager
+with its own identity; Cloud Run mounts the pooled one at deploy time.
+
+To rotate: reset the password in the Neon console, then re-run the script.
+
+### How migrations run
+
+`prisma migrate deploy` runs as a CI step *before* the Cloud Run deploy, never
+at container boot. Booting instances would race each other for the migration
+advisory lock and pay the cost on every cold start, and a failed migration
+would leave a revision serving against the wrong schema. Running it first means
+a bad migration stops the release instead.
+
+The consequence is that **every migration must be backward-compatible with the
+revision currently serving**, because the old revision keeps serving while the
+new one deploys. Expand and contract: add a column in one release, backfill,
+and only remove the old one in a later release. Rolling back a Cloud Run
+revision does not roll back a migration.
+
 ### Free plan limits that shape the pipeline
 
 - **10 branches per project.** Branch-per-PR runs into this, so teardown on PR
@@ -202,8 +236,9 @@ the destructive option is acceptable here.
 
 | Secret | Lives in | Used by |
 |---|---|---|
-| `DATABASE_URL`, `DIRECT_URL` | Google Secret Manager | Cloud Run at runtime |
-| `NEON_API_KEY` | GitHub Actions secrets | Preview branch create/delete |
+| `agnte-database-url` (pooled) | Google Secret Manager | Cloud Run at runtime |
+| `agnte-direct-url` (direct) | Google Secret Manager | Migrations, read by CI |
+| `NEON_API_KEY` | GitHub Actions secrets | Preview branch create/delete (task 0.9) |
 | R2 credentials | Google Secret Manager | Cloud Run at runtime |
 | `PREVIEW_PASSWORD` | Google Secret Manager | Preview access gate |
 

@@ -14,6 +14,9 @@ FROM node:22-slim AS base
 FROM base AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
+# The postinstall hook runs `prisma generate`, which needs the schema. Without
+# this the install fails here rather than at build time.
+COPY prisma ./prisma
 RUN npm ci
 
 
@@ -28,6 +31,12 @@ ARG GIT_SHA=unknown
 ENV GIT_SHA=$GIT_SHA
 
 ENV NEXT_TELEMETRY_DISABLED=1
+
+# No explicit `prisma generate` here: the deps stage already ran it through the
+# postinstall hook, and its node_modules (with the generated client) is copied
+# in above. Generating in exactly one place keeps CI, Docker and a local
+# `npm install` from diverging — which is how the client came to be missing in
+# CI while local typechecks passed.
 RUN npm run build
 
 
