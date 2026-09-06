@@ -1,4 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { getDatabase, MODULE_SCHEMAS } from './database';
+import { getObjectStorage } from './object-storage';
 
 /**
  * Dependency checks.
@@ -62,10 +64,26 @@ const checks: Check[] = [
   },
   {
     name: 'object-storage',
-    run: async () => ({
-      status: 'not-configured',
-      detail: 'Cloudflare R2 is wired in task 0.5',
-    }),
+    run: async () => {
+      const storage = getObjectStorage();
+      if (!storage) return { status: 'not-configured', detail: 'R2 is not configured' };
+
+      // A write and a read of two independent objects would both pass against
+      // a bucket that silently discards writes. Round-tripping a fresh value
+      // and comparing it is what actually proves the wire.
+      const nonce = randomUUID();
+      await storage.put('_healthcheck/probe', nonce);
+      const roundTripped = await storage.get('_healthcheck/probe');
+
+      if (roundTripped !== nonce) {
+        return {
+          status: 'failed' as const,
+          detail: `round-trip mismatch at ${storage.description}`,
+        };
+      }
+
+      return { status: 'ok' as const, detail: storage.description };
+    },
   },
 ];
 

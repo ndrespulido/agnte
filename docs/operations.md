@@ -16,7 +16,7 @@ Everything below is a one-time setup step. Per-deploy infrastructure lives in
 |---|---|---|---|
 | GCP bootstrap | Project, APIs, Artifact Registry, service accounts, budget | 0.3 | ☑ |
 | Workload Identity | Keyless GitHub Actions → GCP auth | 0.3b | ☑ |
-| Neon project | Database, connection strings | 0.4 | ☐ |
+| Neon project | Database, connection strings | 0.4 | ☑ |
 | Cloudflare R2 | Bucket, scoped API token | 0.5 | ☐ |
 | Kill switch | Pub/Sub topic, billing-disable function | 0.6 | ☐ |
 
@@ -216,6 +216,44 @@ revision does not roll back a migration.
 - **5 GB public network transfer per month.** Cloud Run on GCP talking to Neon
   on AWS is public network transfer. Irrelevant at Phase 0 volumes; worth
   remembering before anything starts shipping large result sets.
+
+---
+
+## 2b. Cloudflare R2 (task 0.5)
+
+In the Cloudflare dashboard:
+
+1. **Create a bucket** — `agnte-media`. Choose the **EU jurisdiction** at
+   creation; it cannot be changed afterwards, and it is what keeps object data
+   in the EU (§8.7).
+2. **Create an S3-compatible API token** — R2 → Manage API tokens → Create
+   token, **Object Read & Write**, scoped to *that bucket only*. Copy the
+   Access Key ID and Secret Access Key; the secret is shown once.
+3. **Note the S3 API endpoint** from the bucket's settings, of the form
+   `https://<account-id>.r2.cloudflarestorage.com`. An EU-jurisdiction bucket
+   has `.eu.` in it — the jurisdiction is part of the endpoint rather than a
+   separate setting, so use exactly what the dashboard shows.
+
+Then store them:
+
+```bash
+PROJECT_ID=agnte-prod ./infra/set-secrets.sh
+```
+
+It asks for the database first and then R2; press Enter at the R2 endpoint
+prompt to skip and leave existing R2 secrets untouched.
+
+### One bucket, prefixes per environment
+
+Preview environments will share this bucket under an `R2_PREFIX` such as
+`pr-12/`, rather than getting one bucket each. Buckets are a limited, manual
+resource; prefixes are free and a lifecycle rule can expire them. Add that rule
+when previews land in task 0.9 — until then nothing writes a prefix.
+
+The application writes one object, `_healthcheck/probe`, on every health check
+and reads it back. Round-tripping a fresh value is what proves the wire: a write
+and a read of two unrelated objects would both pass against a bucket that
+silently discarded writes.
 
 ---
 

@@ -111,7 +111,7 @@ jobs:
             --concurrency=80
             --timeout=60s
             --set-env-vars=APP_ENV=production,GIT_SHA=${GITHUB_SHA::7}
-            --set-secrets=DATABASE_URL=agnte-database-url:latest
+            --set-secrets=DATABASE_URL=agnte-database-url:latest,R2_ENDPOINT=agnte-r2-endpoint:latest,R2_BUCKET=agnte-r2-bucket:latest,R2_ACCESS_KEY_ID=agnte-r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=agnte-r2-secret-access-key:latest
           )
           if [[ "${{ steps.existing.outputs.exists }}" == "true" ]]; then
             FLAGS+=(--no-traffic --tag=candidate)
@@ -144,6 +144,8 @@ jobs:
             || { echo "::error::Serving revision is not this commit"; exit 1; }
           echo "$BODY" | grep -q '"name":"database","status":"ok"' \
             || { echo "::error::Database check is not ok on the new revision"; exit 1; }
+          echo "$BODY" | grep -q '"name":"object-storage","status":"ok"' \
+            || { echo "::error::Object storage check is not ok on the new revision"; exit 1; }
 
       # Only reached if the smoke test passed, so a broken revision never
       # serves a single production request — better than deploying and rolling

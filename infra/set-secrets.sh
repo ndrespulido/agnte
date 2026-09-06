@@ -97,9 +97,63 @@ store() {
   fi
 }
 
+# ----------------------------------------------------------------------------
+# Cloudflare R2
+#
+# Optional so the database can be configured before the bucket exists. Skipping
+# leaves any previously stored R2 secrets untouched.
+# ----------------------------------------------------------------------------
+
+cat <<'EXPLAIN'
+
+Cloudflare R2 next. From the R2 dashboard:
+
+  - the bucket name
+  - an S3-compatible API token scoped to that bucket (Manage API tokens ->
+    Create token, Object Read & Write, scoped to this bucket only), which gives
+    an Access Key ID and a Secret Access Key
+  - the S3 API endpoint shown on the bucket's settings page, of the form
+    https://<account-id>.r2.cloudflarestorage.com
+    (an EU-jurisdiction bucket has .eu. before r2, and that URL is the one to
+    use — the jurisdiction is part of the endpoint, not a separate setting)
+
+Press Enter at the endpoint prompt to skip R2 for now.
+
+EXPLAIN
+
+read -rp "  R2 S3 API endpoint: " R2_ENDPOINT
+
+if [[ -n "${R2_ENDPOINT}" ]]; then
+  read -rp "  R2 bucket name:     " R2_BUCKET
+  read -rsp "  R2 access key ID:   " R2_ACCESS_KEY_ID; echo
+  read -rsp "  R2 secret key:      " R2_SECRET_ACCESS_KEY; echo
+
+  [[ -n "${R2_BUCKET}" && -n "${R2_ACCESS_KEY_ID}" && -n "${R2_SECRET_ACCESS_KEY}" ]] \
+    || { echo "  All four R2 values are required once an endpoint is given."; exit 1; }
+
+  if [[ "${R2_ENDPOINT}" != https://* ]]; then
+    echo "  The endpoint must be an https:// URL."
+    exit 1
+  fi
+  # The application rejects a partially configured R2 at boot; catching a
+  # bucket name pasted into the endpoint slot here is cheaper than at deploy.
+  if [[ "${R2_ENDPOINT}" != *"r2.cloudflarestorage.com"* ]]; then
+    echo "  That does not look like an R2 S3 API endpoint."
+    echo "  Expected something like https://<account-id>.r2.cloudflarestorage.com"
+    exit 1
+  fi
+fi
+
 say "Storing secrets"
 store agnte-database-url "${DATABASE_URL}"
 store agnte-direct-url "${DIRECT_URL}"
+
+if [[ -n "${R2_ENDPOINT}" ]]; then
+  store agnte-r2-endpoint "${R2_ENDPOINT}"
+  store agnte-r2-bucket "${R2_BUCKET}"
+  store agnte-r2-access-key-id "${R2_ACCESS_KEY_ID}"
+  store agnte-r2-secret-access-key "${R2_SECRET_ACCESS_KEY}"
+fi
 
 # ----------------------------------------------------------------------------
 # Grant
@@ -120,6 +174,16 @@ gcloud secrets add-iam-policy-binding agnte-direct-url \
   --role=roles/secretmanager.secretAccessor \
   --project="${PROJECT_ID}" --quiet >/dev/null
 note "deployer -> agnte-direct-url (migrations in CI)"
+
+if [[ -n "${R2_ENDPOINT}" ]]; then
+  for secret in agnte-r2-endpoint agnte-r2-bucket agnte-r2-access-key-id agnte-r2-secret-access-key; do
+    gcloud secrets add-iam-policy-binding "${secret}" \
+      --member="serviceAccount:${RUNTIME_SA}" \
+      --role=roles/secretmanager.secretAccessor \
+      --project="${PROJECT_ID}" --quiet >/dev/null
+    note "runtime  -> ${secret}"
+  done
+fi
 
 # ----------------------------------------------------------------------------
 # Verify
@@ -151,6 +215,12 @@ verify() {
 
 verify agnte-database-url "${RUNTIME_SA}" "runtime"
 verify agnte-direct-url "${DEPLOYER_SA}" "deployer"
+
+if [[ -n "${R2_ENDPOINT}" ]]; then
+  for secret in agnte-r2-endpoint agnte-r2-bucket agnte-r2-access-key-id agnte-r2-secret-access-key; do
+    verify "${secret}" "${RUNTIME_SA}" "runtime"
+  done
+fi
 
 say "Done"
 cat <<'DONE'
