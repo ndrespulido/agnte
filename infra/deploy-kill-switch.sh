@@ -147,6 +147,18 @@ note "Granted."
 # Function
 # ----------------------------------------------------------------------------
 
+# An Eventarc trigger invokes the function as its own identity, separate from
+# the runtime identity. Left unset it falls back to the default compute service
+# account — which this project does not have, because the Compute API is
+# deliberately disabled so a NAT gateway or load balancer cannot be created
+# (§3.1). So the trigger identity is named explicitly, and needs two roles:
+# eventReceiver to accept the event, and run.invoker to call the function.
+say "Roles for the trigger identity"
+retry 3 gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+  --member="serviceAccount:${KILL_EMAIL}" \
+  --role=roles/eventarc.eventReceiver --condition=None --quiet >/dev/null
+note "roles/eventarc.eventReceiver"
+
 say "Deploying the function (ARMED=${ARMED})"
 retry 3 gcloud functions deploy "${FUNCTION}" \
   --gen2 \
@@ -156,12 +168,24 @@ retry 3 gcloud functions deploy "${FUNCTION}" \
   --entry-point=killSwitch \
   --trigger-topic="${TOPIC}" \
   --service-account="${KILL_EMAIL}" \
+  --trigger-service-account="${KILL_EMAIL}" \
   --set-env-vars="TARGET_PROJECT_ID=${PROJECT_ID},ARMED=${ARMED}" \
   --max-instances=1 \
   --memory=256Mi \
   --timeout=60s \
   --project="${PROJECT_ID}"
 note "Deployed."
+
+# Granted after the deploy because the underlying Cloud Run service does not
+# exist until then. Scoped to that one service rather than the project, so the
+# kill switch cannot invoke the application.
+say "Allowing the trigger to invoke the function"
+retry 5 gcloud run services add-iam-policy-binding "${FUNCTION}" \
+  --region="${REGION}" \
+  --member="serviceAccount:${KILL_EMAIL}" \
+  --role=roles/run.invoker \
+  --project="${PROJECT_ID}" --quiet >/dev/null
+note "roles/run.invoker on ${FUNCTION}"
 
 # Building the function pushes images into a gcf-artifacts repository, which is
 # storage that costs money while idle — the same reason the app's repository has

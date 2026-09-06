@@ -302,6 +302,30 @@ The service account gets `roles/billing.admin` **on the billing account** — a
 genuinely powerful grant, and why this identity exists for nothing else. It is
 not the runtime account and not the deployer.
 
+### The trigger has its own identity
+
+An Eventarc trigger invokes the function as a *different* identity from the one
+the function runs as. Left unset it falls back to the default compute service
+account — which this project does not have, because the Compute API is
+deliberately disabled (§3.1) so a NAT gateway or load balancer cannot be
+created at all.
+
+The first deployment hit exactly that:
+
+```
+The request was not authenticated ... The IAM principal lacks {run.routes.invoke}
+```
+
+The script now names the trigger identity explicitly and grants it
+`roles/eventarc.eventReceiver` on the project and `roles/run.invoker` scoped to
+the function's own Cloud Run service — not project-wide, so the kill switch
+cannot invoke the application.
+
+Worth remembering when anything else event-driven is added: Cloud Tasks and
+Cloud Scheduler callbacks in later phases will need the same treatment, and the
+symptom is an unauthenticated-invocation warning rather than a permissions
+error naming the missing role.
+
 ### Confirming real alerts reach the topic
 
 The rehearsal publishes to the topic directly, so it proves the function, the
