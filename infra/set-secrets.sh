@@ -142,6 +142,20 @@ if [[ -n "${R2_ENDPOINT}" ]]; then
     echo "  Expected something like https://<account-id>.r2.cloudflarestorage.com"
     exit 1
   fi
+
+  # Prove the credentials work before storing them. The failure this catches is
+  # a jurisdiction mismatch — an EU-created bucket is only reachable through the
+  # ".eu." endpoint, and the default one answers NoSuchBucket, which reads like a
+  # mistyped bucket name. Seconds here against a failed deploy later.
+  say "Checking the R2 credentials"
+  if command -v node >/dev/null && [[ -d node_modules/@aws-sdk ]]; then
+    R2_ENDPOINT="${R2_ENDPOINT}" R2_BUCKET="${R2_BUCKET}" \
+    R2_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID}" R2_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY}" \
+      node "$(dirname "$0")/verify-r2.mjs" || exit 1
+  else
+    note "Skipped: needs node and \`npm install\` in this repository."
+    note "The deploy's smoke test will catch a bad configuration instead."
+  fi
 fi
 
 say "Storing secrets"

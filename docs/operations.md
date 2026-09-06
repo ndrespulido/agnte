@@ -243,6 +243,15 @@ PROJECT_ID=agnte-prod ./infra/set-secrets.sh
 It asks for the database first and then R2; press Enter at the R2 endpoint
 prompt to skip and leave existing R2 secrets untouched.
 
+Before storing anything it round-trips a real object through the bucket with the
+credentials given, so a wrong endpoint, bucket or token fails in seconds rather
+than at the next deploy.
+
+**The endpoint must match the bucket's jurisdiction.** An EU-created bucket is
+reachable only through the endpoint containing `.eu.`; the default endpoint
+answers `NoSuchBucket`, which reads like a mistyped bucket name. Cloudflare
+shows both endpoints on the same page, so this is easy to get wrong.
+
 ### One bucket, prefixes per environment
 
 Preview environments will share this bucket under an `R2_PREFIX` such as
