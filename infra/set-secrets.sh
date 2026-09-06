@@ -42,21 +42,38 @@ switches between them.
 EXPLAIN
 
 read -rsp "  Pooled connection string (DATABASE_URL): " DATABASE_URL; echo
-read -rsp "  Direct connection string (DIRECT_URL):  " DIRECT_URL; echo
+[[ -n "${DATABASE_URL}" ]] || { echo "  Required — nothing was entered."; exit 1; }
 
-[[ -n "${DATABASE_URL}" && -n "${DIRECT_URL}" ]] || { echo "  Both are required."; exit 1; }
-
-# Cheap guards against the commonest paste mistake — swapping them.
 if [[ "${DATABASE_URL}" != *"-pooler"* ]]; then
   echo
-  echo "  The pooled URL does not contain '-pooler'. Check you copied the"
-  echo "  pooled one; using a direct URL from Cloud Run exhausts connections."
+  echo "  That string has no '-pooler' in its host, so it is the direct URL,"
+  echo "  not the pooled one. In the Neon console the connection widget has a"
+  echo "  pooled/direct switch; the pooled host looks like:"
+  echo "      ep-something-1234-pooler.<region>.aws.neon.tech"
   exit 1
 fi
+
+# The pooler is a separate hostname for the same database, so the direct URL is
+# the pooled one without "-pooler". Deriving it rather than asking twice removes
+# the commonest failure here: pasting the same string into both prompts, which
+# silently breaks migrations later rather than failing now.
+DERIVED_DIRECT="${DATABASE_URL/-pooler/}"
+
+# Show the hosts to confirm, with credentials masked — the point is to check the
+# hostnames differ in exactly the expected way, not to display the secret.
+mask_url() { sed -E 's#(://[^:]*:)[^@]*(@)#\1********\2#' <<<"$1"; }
+
+echo
+echo "  Pooled (application):  $(mask_url "${DATABASE_URL}")"
+echo "  Direct (migrations):   $(mask_url "${DERIVED_DIRECT}")"
+echo
+read -rsp "  Press Enter to accept, or paste a different direct URL: " DIRECT_OVERRIDE; echo
+DIRECT_URL="${DIRECT_OVERRIDE:-${DERIVED_DIRECT}}"
+
 if [[ "${DIRECT_URL}" == *"-pooler"* ]]; then
   echo
-  echo "  The direct URL contains '-pooler'. Migrations against the pooler fail"
-  echo "  in ways that look like corruption rather than a wrong URL."
+  echo "  The direct URL still contains '-pooler'. Migrations against the pooler"
+  echo "  fail in ways that look like corruption rather than a wrong URL."
   exit 1
 fi
 

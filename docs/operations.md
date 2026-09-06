@@ -133,6 +133,21 @@ Console setup, three steps:
    workflow uses to create and delete a branch per PR.
 3. Copy both connection strings for the `main` branch.
 
+### You only need to copy one string
+
+The pooler is a separate hostname for the same database, so the direct URL is
+the pooled one with `-pooler` removed:
+
+```
+...@ep-something-1234-pooler.<region>.aws.neon.tech/neondb...   pooled
+...@ep-something-1234.<region>.aws.neon.tech/neondb...          direct
+```
+
+`infra/set-secrets.sh` asks for the pooled string and derives the direct one,
+showing both hosts with credentials masked so you can confirm before it stores
+them. Pasting the same string into both slots was the easiest mistake to make
+and the slowest to diagnose, so the script no longer offers the chance.
+
 ### Two connection strings, not one
 
 Prisma needs both, and using the wrong one for the wrong job is a slow, ugly
