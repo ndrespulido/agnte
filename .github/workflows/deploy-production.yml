@@ -52,8 +52,27 @@ jobs:
       - name: Run migrations
         run: |
           npm ci
-          DIRECT_URL="$(gcloud secrets versions access latest --secret=agnte-direct-url)" \
-            npx prisma migrate deploy
+
+          # Fetched as its own statement, deliberately. As an assignment prefix
+          # (VAR="$(...)" cmd) a failed substitution does NOT stop the step under
+          # set -e — only the final command's status counts — so prisma would run
+          # with an empty URL and report "Connection url is empty", burying the
+          # real error. That is exactly what happened the first time this ran.
+          if ! DIRECT_URL="$(gcloud secrets versions access latest --secret=agnte-direct-url 2>&1)"; then
+            echo "::error::Cannot read the agnte-direct-url secret."
+            echo "$DIRECT_URL"
+            echo "Check whether it exists and whether the deployer can read it:"
+            echo "  gcloud secrets list --project=${{ vars.GCP_PROJECT_ID }}"
+            echo "  gcloud secrets get-iam-policy agnte-direct-url --project=${{ vars.GCP_PROJECT_ID }}"
+            echo "If it is missing, run: PROJECT_ID=${{ vars.GCP_PROJECT_ID }} ./infra/set-secrets.sh"
+            exit 1
+          fi
+          if [[ -z "$DIRECT_URL" ]]; then
+            echo "::error::agnte-direct-url is empty."
+            exit 1
+          fi
+          export DIRECT_URL
+          npx prisma migrate deploy
 
       - name: Build and push
         id: build
@@ -92,7 +111,7 @@ jobs:
             --concurrency=80
             --timeout=60s
             --set-env-vars=APP_ENV=production,GIT_SHA=${GITHUB_SHA::7}
-            --set-secrets=DATABASE_URL=agnte-database-url:latest
+            --set-secrets=DATABASE_URL=agnte-database-url:latest,R2_ENDPOINT=agnte-r2-endpoint:latest,R2_BUCKET=agnte-r2-bucket:latest,R2_ACCESS_KEY_ID=agnte-r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=agnte-r2-secret-access-key:latest
           )
           if [[ "${{ steps.existing.outputs.exists }}" == "true" ]]; then
             FLAGS+=(--no-traffic --tag=candidate)
@@ -125,6 +144,8 @@ jobs:
             || { echo "::error::Serving revision is not this commit"; exit 1; }
           echo "$BODY" | grep -q '"name":"database","status":"ok"' \
             || { echo "::error::Database check is not ok on the new revision"; exit 1; }
+          echo "$BODY" | grep -q '"name":"object-storage","status":"ok"' \
+            || { echo "::error::Object storage check is not ok on the new revision"; exit 1; }
 
       # Only reached if the smoke test passed, so a broken revision never
       # serves a single production request — better than deploying and rolling

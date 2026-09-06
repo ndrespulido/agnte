@@ -16,7 +16,7 @@ Everything below is a one-time setup step. Per-deploy infrastructure lives in
 |---|---|---|---|
 | GCP bootstrap | Project, APIs, Artifact Registry, service accounts, budget | 0.3 | ☑ |
 | Workload Identity | Keyless GitHub Actions → GCP auth | 0.3b | ☑ |
-| Neon project | Database, connection strings | 0.4 | ☐ |
+| Neon project | Database, connection strings | 0.4 | ☑ |
 | Cloudflare R2 | Bucket, scoped API token | 0.5 | ☐ |
 | Kill switch | Pub/Sub topic, billing-disable function | 0.6 | ☐ |
 
@@ -133,6 +133,21 @@ Console setup, three steps:
    workflow uses to create and delete a branch per PR.
 3. Copy both connection strings for the `main` branch.
 
+### You only need to copy one string
+
+The pooler is a separate hostname for the same database, so the direct URL is
+the pooled one with `-pooler` removed:
+
+```
+...@ep-something-1234-pooler.<region>.aws.neon.tech/neondb...   pooled
+...@ep-something-1234.<region>.aws.neon.tech/neondb...          direct
+```
+
+`infra/set-secrets.sh` asks for the pooled string and derives the direct one,
+showing both hosts with credentials masked so you can confirm before it stores
+them. Pasting the same string into both slots was the easiest mistake to make
+and the slowest to diagnose, so the script no longer offers the chance.
+
 ### Two connection strings, not one
 
 Prisma needs both, and using the wrong one for the wrong job is a slow, ugly
@@ -163,6 +178,20 @@ with its own identity; Cloud Run mounts the pooled one at deploy time.
 
 To rotate: reset the password in the Neon console, then re-run the script.
 
+The script verifies its own work before reporting success: it reads each IAM
+policy back and confirms the binding is actually there. Granting and
+having-been-granted are different things, and the failure mode otherwise
+surfaces much later, as a `PERMISSION_DENIED` in a deploy.
+
+If a deploy fails at **Run migrations** with `secretmanager.versions.access`
+denied, check whether the secret exists at all — GCP returns the same denial
+for a missing resource as for one you cannot read:
+
+```bash
+gcloud secrets list --project=agnte-prod
+gcloud secrets get-iam-policy agnte-direct-url --project=agnte-prod
+```
+
 ### How migrations run
 
 `prisma migrate deploy` runs as a CI step *before* the Cloud Run deploy, never
@@ -187,6 +216,53 @@ revision does not roll back a migration.
 - **5 GB public network transfer per month.** Cloud Run on GCP talking to Neon
   on AWS is public network transfer. Irrelevant at Phase 0 volumes; worth
   remembering before anything starts shipping large result sets.
+
+---
+
+## 2b. Cloudflare R2 (task 0.5)
+
+In the Cloudflare dashboard:
+
+1. **Create a bucket** — `agnte-media`. Choose the **EU jurisdiction** at
+   creation; it cannot be changed afterwards, and it is what keeps object data
+   in the EU (§8.7).
+2. **Create an S3-compatible API token** — R2 → Manage API tokens → Create
+   token, **Object Read & Write**, scoped to *that bucket only*. Copy the
+   Access Key ID and Secret Access Key; the secret is shown once.
+3. **Note the S3 API endpoint** from the bucket's settings, of the form
+   `https://<account-id>.r2.cloudflarestorage.com`. An EU-jurisdiction bucket
+   has `.eu.` in it — the jurisdiction is part of the endpoint rather than a
+   separate setting, so use exactly what the dashboard shows.
+
+Then store them:
+
+```bash
+PROJECT_ID=agnte-prod ./infra/set-secrets.sh
+```
+
+It asks for the database first and then R2; press Enter at the R2 endpoint
+prompt to skip and leave existing R2 secrets untouched.
+
+Before storing anything it round-trips a real object through the bucket with the
+credentials given, so a wrong endpoint, bucket or token fails in seconds rather
+than at the next deploy.
+
+**The endpoint must match the bucket's jurisdiction.** An EU-created bucket is
+reachable only through the endpoint containing `.eu.`; the default endpoint
+answers `NoSuchBucket`, which reads like a mistyped bucket name. Cloudflare
+shows both endpoints on the same page, so this is easy to get wrong.
+
+### One bucket, prefixes per environment
+
+Preview environments will share this bucket under an `R2_PREFIX` such as
+`pr-12/`, rather than getting one bucket each. Buckets are a limited, manual
+resource; prefixes are free and a lifecycle rule can expire them. Add that rule
+when previews land in task 0.9 — until then nothing writes a prefix.
+
+The application writes one object, `_healthcheck/probe`, on every health check
+and reads it back. Round-tripping a fresh value is what proves the wire: a write
+and a read of two unrelated objects would both pass against a bucket that
+silently discarded writes.
 
 ---
 

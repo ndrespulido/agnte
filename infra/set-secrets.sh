@@ -42,21 +42,38 @@ switches between them.
 EXPLAIN
 
 read -rsp "  Pooled connection string (DATABASE_URL): " DATABASE_URL; echo
-read -rsp "  Direct connection string (DIRECT_URL):  " DIRECT_URL; echo
+[[ -n "${DATABASE_URL}" ]] || { echo "  Required — nothing was entered."; exit 1; }
 
-[[ -n "${DATABASE_URL}" && -n "${DIRECT_URL}" ]] || { echo "  Both are required."; exit 1; }
-
-# Cheap guards against the commonest paste mistake — swapping them.
 if [[ "${DATABASE_URL}" != *"-pooler"* ]]; then
   echo
-  echo "  The pooled URL does not contain '-pooler'. Check you copied the"
-  echo "  pooled one; using a direct URL from Cloud Run exhausts connections."
+  echo "  That string has no '-pooler' in its host, so it is the direct URL,"
+  echo "  not the pooled one. In the Neon console the connection widget has a"
+  echo "  pooled/direct switch; the pooled host looks like:"
+  echo "      ep-something-1234-pooler.<region>.aws.neon.tech"
   exit 1
 fi
+
+# The pooler is a separate hostname for the same database, so the direct URL is
+# the pooled one without "-pooler". Deriving it rather than asking twice removes
+# the commonest failure here: pasting the same string into both prompts, which
+# silently breaks migrations later rather than failing now.
+DERIVED_DIRECT="${DATABASE_URL/-pooler/}"
+
+# Show the hosts to confirm, with credentials masked — the point is to check the
+# hostnames differ in exactly the expected way, not to display the secret.
+mask_url() { sed -E 's#(://[^:]*:)[^@]*(@)#\1********\2#' <<<"$1"; }
+
+echo
+echo "  Pooled (application):  $(mask_url "${DATABASE_URL}")"
+echo "  Direct (migrations):   $(mask_url "${DERIVED_DIRECT}")"
+echo
+read -rsp "  Press Enter to accept, or paste a different direct URL: " DIRECT_OVERRIDE; echo
+DIRECT_URL="${DIRECT_OVERRIDE:-${DERIVED_DIRECT}}"
+
 if [[ "${DIRECT_URL}" == *"-pooler"* ]]; then
   echo
-  echo "  The direct URL contains '-pooler'. Migrations against the pooler fail"
-  echo "  in ways that look like corruption rather than a wrong URL."
+  echo "  The direct URL still contains '-pooler'. Migrations against the pooler"
+  echo "  fail in ways that look like corruption rather than a wrong URL."
   exit 1
 fi
 
@@ -80,9 +97,77 @@ store() {
   fi
 }
 
+# ----------------------------------------------------------------------------
+# Cloudflare R2
+#
+# Optional so the database can be configured before the bucket exists. Skipping
+# leaves any previously stored R2 secrets untouched.
+# ----------------------------------------------------------------------------
+
+cat <<'EXPLAIN'
+
+Cloudflare R2 next. From the R2 dashboard:
+
+  - the bucket name
+  - an S3-compatible API token scoped to that bucket (Manage API tokens ->
+    Create token, Object Read & Write, scoped to this bucket only), which gives
+    an Access Key ID and a Secret Access Key
+  - the S3 API endpoint shown on the bucket's settings page, of the form
+    https://<account-id>.r2.cloudflarestorage.com
+    (an EU-jurisdiction bucket has .eu. before r2, and that URL is the one to
+    use — the jurisdiction is part of the endpoint, not a separate setting)
+
+Press Enter at the endpoint prompt to skip R2 for now.
+
+EXPLAIN
+
+read -rp "  R2 S3 API endpoint: " R2_ENDPOINT
+
+if [[ -n "${R2_ENDPOINT}" ]]; then
+  read -rp "  R2 bucket name:     " R2_BUCKET
+  read -rsp "  R2 access key ID:   " R2_ACCESS_KEY_ID; echo
+  read -rsp "  R2 secret key:      " R2_SECRET_ACCESS_KEY; echo
+
+  [[ -n "${R2_BUCKET}" && -n "${R2_ACCESS_KEY_ID}" && -n "${R2_SECRET_ACCESS_KEY}" ]] \
+    || { echo "  All four R2 values are required once an endpoint is given."; exit 1; }
+
+  if [[ "${R2_ENDPOINT}" != https://* ]]; then
+    echo "  The endpoint must be an https:// URL."
+    exit 1
+  fi
+  # The application rejects a partially configured R2 at boot; catching a
+  # bucket name pasted into the endpoint slot here is cheaper than at deploy.
+  if [[ "${R2_ENDPOINT}" != *"r2.cloudflarestorage.com"* ]]; then
+    echo "  That does not look like an R2 S3 API endpoint."
+    echo "  Expected something like https://<account-id>.r2.cloudflarestorage.com"
+    exit 1
+  fi
+
+  # Prove the credentials work before storing them. The failure this catches is
+  # a jurisdiction mismatch — an EU-created bucket is only reachable through the
+  # ".eu." endpoint, and the default one answers NoSuchBucket, which reads like a
+  # mistyped bucket name. Seconds here against a failed deploy later.
+  say "Checking the R2 credentials"
+  if command -v node >/dev/null && [[ -d node_modules/@aws-sdk ]]; then
+    R2_ENDPOINT="${R2_ENDPOINT}" R2_BUCKET="${R2_BUCKET}" \
+    R2_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID}" R2_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY}" \
+      node "$(dirname "$0")/verify-r2.mjs" || exit 1
+  else
+    note "Skipped: needs node and \`npm install\` in this repository."
+    note "The deploy's smoke test will catch a bad configuration instead."
+  fi
+fi
+
 say "Storing secrets"
 store agnte-database-url "${DATABASE_URL}"
 store agnte-direct-url "${DIRECT_URL}"
+
+if [[ -n "${R2_ENDPOINT}" ]]; then
+  store agnte-r2-endpoint "${R2_ENDPOINT}"
+  store agnte-r2-bucket "${R2_BUCKET}"
+  store agnte-r2-access-key-id "${R2_ACCESS_KEY_ID}"
+  store agnte-r2-secret-access-key "${R2_SECRET_ACCESS_KEY}"
+fi
 
 # ----------------------------------------------------------------------------
 # Grant
@@ -103,6 +188,53 @@ gcloud secrets add-iam-policy-binding agnte-direct-url \
   --role=roles/secretmanager.secretAccessor \
   --project="${PROJECT_ID}" --quiet >/dev/null
 note "deployer -> agnte-direct-url (migrations in CI)"
+
+if [[ -n "${R2_ENDPOINT}" ]]; then
+  for secret in agnte-r2-endpoint agnte-r2-bucket agnte-r2-access-key-id agnte-r2-secret-access-key; do
+    gcloud secrets add-iam-policy-binding "${secret}" \
+      --member="serviceAccount:${RUNTIME_SA}" \
+      --role=roles/secretmanager.secretAccessor \
+      --project="${PROJECT_ID}" --quiet >/dev/null
+    note "runtime  -> ${secret}"
+  done
+fi
+
+# ----------------------------------------------------------------------------
+# Verify
+#
+# Granting and having-been-granted are different things: a binding can be
+# written against the wrong secret, or the create can have failed earlier in a
+# way that left nothing to bind to. Reading the policy back is what turns "the
+# script ran" into "the deploy will work".
+# ----------------------------------------------------------------------------
+
+say "Verifying"
+verify() {
+  local secret="$1" member="$2" label="$3"
+  if ! gcloud secrets describe "${secret}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    echo "  ${secret} does not exist. Something above failed; re-run this script."
+    exit 1
+  fi
+  if gcloud secrets get-iam-policy "${secret}" --project="${PROJECT_ID}" \
+       --flatten='bindings[].members' \
+       --filter="bindings.role=roles/secretmanager.secretAccessor AND bindings.members:${member}" \
+       --format='value(bindings.members)' 2>/dev/null | grep -q .; then
+    note "${secret}: ${label} can read it."
+  else
+    echo "  ${secret}: ${label} (${member}) is NOT bound as secretAccessor."
+    echo "  The deploy will fail with PERMISSION_DENIED. Re-run this script."
+    exit 1
+  fi
+}
+
+verify agnte-database-url "${RUNTIME_SA}" "runtime"
+verify agnte-direct-url "${DEPLOYER_SA}" "deployer"
+
+if [[ -n "${R2_ENDPOINT}" ]]; then
+  for secret in agnte-r2-endpoint agnte-r2-bucket agnte-r2-access-key-id agnte-r2-secret-access-key; do
+    verify "${secret}" "${RUNTIME_SA}" "runtime"
+  done
+fi
 
 say "Done"
 cat <<'DONE'

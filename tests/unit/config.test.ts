@@ -35,6 +35,26 @@ describe('loadConfig', () => {
     expect(config.NEON_BRANCH).toBe('pr-12');
   });
 
+  it('rejects a partially configured R2, which would silently disable storage', () => {
+    process.env.R2_ENDPOINT = 'https://example.r2.cloudflarestorage.com';
+    process.env.R2_BUCKET = 'agnte';
+    delete process.env.R2_ACCESS_KEY_ID;
+    delete process.env.R2_SECRET_ACCESS_KEY;
+    resetConfigForTests();
+
+    expect(() => loadConfig()).toThrowError(/R2 is partially configured/);
+  });
+
+  it('accepts R2 when all four values are present', () => {
+    process.env.R2_ENDPOINT = 'https://example.r2.cloudflarestorage.com';
+    process.env.R2_BUCKET = 'agnte';
+    process.env.R2_ACCESS_KEY_ID = 'key';
+    process.env.R2_SECRET_ACCESS_KEY = 'secret';
+    resetConfigForTests();
+
+    expect(loadConfig().R2_BUCKET).toBe('agnte');
+  });
+
   it('fails fast and names the offending variable', () => {
     process.env.APP_ENV = 'staging';
     resetConfigForTests();
