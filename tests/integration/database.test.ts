@@ -2,7 +2,11 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { runChecks } from '@/shared/infra/checks';
-import { getDatabase, MIGRATED_SCHEMAS } from '@/shared/infra/database';
+import {
+  getDatabase,
+  MIGRATED_SCHEMAS,
+  shippedMigrations,
+} from '@/shared/infra/database';
 
 /**
  * Runs against a real Postgres. Skips when none is configured, so `npm test`
@@ -20,14 +24,58 @@ describe.skipIf(!DATABASE_URL)('database check against real Postgres', () => {
     await getDatabase()?.$disconnect();
   });
 
-  it('reports ok when every migrated schema exists', async () => {
+  it('reports ok when every schema and every migration is present', async () => {
     const results = await runChecks();
     const database = results.find((r) => r.name === 'database');
 
     expect(database?.status).toBe('ok');
     expect(database?.detail).toBe(
-      `${MIGRATED_SCHEMAS.length}/${MIGRATED_SCHEMAS.length} schemas`,
+      `${MIGRATED_SCHEMAS.length}/${MIGRATED_SCHEMAS.length} schemas, ` +
+        `${shippedMigrations().length} migrations applied`,
     );
+  });
+
+  it('fails when the database is migrated to an older release than this build', async () => {
+    // The failure schemas alone cannot see, and the second time it has bitten.
+    // The check was made to track schemas when `platform` was added; every
+    // migration since adds *tables* to schemas that already exist, so a
+    // database stopped at an earlier release still reports all seven schemas.
+    //
+    // Simulated by removing the newest migration's row rather than by building
+    // a second database: it is the same state the check has to notice, and it
+    // needs no fixture.
+    const newest = shippedMigrations().at(-1)!;
+    const db = getDatabase()!;
+
+    const [saved] = await db.$queryRawUnsafe<Record<string, unknown>[]>(
+      `DELETE FROM public._prisma_migrations WHERE migration_name = '${newest}' RETURNING *`,
+    );
+    expect(saved).toBeDefined();
+
+    try {
+      const database = (await runChecks()).find((r) => r.name === 'database');
+      expect(database?.status).toBe('failed');
+      expect(database?.detail).toContain(newest);
+    } finally {
+      // Restored whatever the assertions did, or every later test runs against
+      // a database this check now considers broken.
+      await db.$executeRawUnsafe(
+        `INSERT INTO public._prisma_migrations
+           (id, checksum, finished_at, migration_name, logs, rolled_back_at, started_at, applied_steps_count)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        saved!.id,
+        saved!.checksum,
+        saved!.finished_at,
+        saved!.migration_name,
+        saved!.logs,
+        saved!.rolled_back_at,
+        saved!.started_at,
+        saved!.applied_steps_count,
+      );
+    }
+
+    // And back to healthy, so the restore above is proved rather than assumed.
+    expect((await runChecks()).find((r) => r.name === 'database')?.status).toBe('ok');
   });
 
   it('opens a real connection rather than reporting from cache', async () => {

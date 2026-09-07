@@ -1,3 +1,5 @@
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 
@@ -30,6 +32,29 @@ export const PLATFORM_SCHEMA = 'platform' as const;
  * failed to apply, which is precisely the failure it exists to catch.
  */
 export const MIGRATED_SCHEMAS = [...MODULE_SCHEMAS, PLATFORM_SCHEMA] as const;
+
+/**
+ * The migrations shipped alongside this build, by directory name.
+ *
+ * Read from disk rather than generated, so there is nothing to keep in sync:
+ * adding a migration directory is what adds it here. The Dockerfile copies
+ * prisma/migrations into the runtime image for exactly this.
+ *
+ * Empty when the directory is absent — which the health check reports rather
+ * than treating as "nothing to check".
+ */
+export function shippedMigrations(): string[] {
+  try {
+    return readdirSync(join(process.cwd(), 'prisma', 'migrations'), {
+      withFileTypes: true,
+    })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Next reloads modules in development, which would otherwise open a new pool on

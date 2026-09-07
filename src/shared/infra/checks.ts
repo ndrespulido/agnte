@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { loadConfig } from './config';
-import { getDatabase, MIGRATED_SCHEMAS } from './database';
+import { getDatabase, MIGRATED_SCHEMAS, shippedMigrations } from './database';
 import { getEmailTransport } from './email';
 import { getObjectStorage } from './object-storage';
 
@@ -60,11 +60,65 @@ const checks: Check[] = [
         );
         return {
           status: 'failed' as const,
-          detail: `migration incomplete, missing: ${missing.join(', ')}`,
+          detail: `migration incomplete, missing schemas: ${missing.join(', ')}`,
         };
       }
 
-      return { status: 'ok' as const, detail: `${found}/${total} schemas` };
+      // Schemas are not enough, and this is the second time that has bitten.
+      // The check was made to track schemas when `platform` was added; every
+      // migration since adds *tables* to schemas that already exist, so a
+      // database migrated only as far as an older release still reports every
+      // schema present. Verified: a database with all seven schemas and none of
+      // identity's tables passed this check.
+      //
+      // So compare what the image ships against what the database says it
+      // applied. That answers the question the check is actually for — is this
+      // the database this build expects — and it keeps answering it as
+      // migrations are added, because the list comes from the directory rather
+      // than from a constant someone has to remember to update.
+      const shipped = shippedMigrations();
+      if (shipped.length === 0) {
+        return {
+          status: 'failed' as const,
+          detail: 'no migrations found on disk, so nothing can be verified',
+        };
+      }
+
+      // to_regclass returns null rather than raising when the table is absent,
+      // which is the difference between "never migrated" — a clear, actionable
+      // failure — and a raw 42P01 surfacing as an unhandled error.
+      const [bookkeeping] = await db.$queryRaw<{ present: boolean }[]>`
+        SELECT to_regclass('public._prisma_migrations') IS NOT NULL AS present
+      `;
+
+      if (!bookkeeping?.present) {
+        return {
+          status: 'failed' as const,
+          detail: 'no migration history: this database has never been migrated',
+        };
+      }
+
+      const applied = await db.$queryRaw<{ migration_name: string }[]>`
+        SELECT migration_name FROM public._prisma_migrations
+        WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL
+      `;
+
+      const appliedNames = new Set(applied.map((row) => row.migration_name));
+      const pending = shipped.filter((name) => !appliedNames.has(name));
+
+      if (pending.length > 0) {
+        return {
+          status: 'failed' as const,
+          // Named, not counted: the first pending migration is what someone
+          // debugging this at 3am needs, and a count sends them to the logs.
+          detail: `${pending.length} migration(s) not applied: ${pending.slice(0, 3).join(', ')}`,
+        };
+      }
+
+      return {
+        status: 'ok' as const,
+        detail: `${found}/${total} schemas, ${shipped.length} migrations applied`,
+      };
     },
   },
   {

@@ -62,6 +62,13 @@ RUN groupadd --system --gid 1001 nodejs \
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
+# The migration directory names, for the health check.
+#
+# It compares what this image ships against what the database says it applied,
+# which is the only way to notice a database migrated to an older release — the
+# schemas are all there, so counting schemas cannot see it. A few KB of SQL.
+COPY --from=builder --chown=nextjs:nodejs /app/prisma/migrations ./prisma/migrations
+
 ARG GIT_SHA=unknown
 ENV GIT_SHA=$GIT_SHA
 
