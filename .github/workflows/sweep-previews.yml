@@ -1,0 +1,85 @@
+name: Sweep orphaned previews
+
+# Teardown-on-close does not always run: a workflow edited mid-pull-request, a
+# cancelled job, a branch created by a run that then failed. Neon's free plan
+# caps branch count, so cleanup is load-bearing rather than tidiness — this is
+# the backstop that keeps the pipeline working in month three.
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: read
+
+env:
+  SERVICE: agnte-preview
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Which pull requests are open?
+        id: open
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          OPEN=$(gh pr list --repo "${{ github.repository }}" --state open \
+            --json number --jq '[.[].number] | join(",")')
+          echo "numbers=${OPEN}" >> "$GITHUB_OUTPUT"
+          echo "Open pull requests: ${OPEN:-<none>}"
+
+      - name: Delete orphaned Neon branches
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+        run: |
+          ORPHANS=$(node infra/neon-branch.mjs orphans --open "${{ steps.open.outputs.numbers }}")
+          if [[ -z "${ORPHANS}" ]]; then
+            echo "No orphaned Neon branches."
+            exit 0
+          fi
+          echo "Orphaned: ${ORPHANS}"
+          while read -r branch; do
+            [[ -z "${branch}" ]] && continue
+            node infra/neon-branch.mjs delete --pr "${branch#pr-}"
+          done <<< "${ORPHANS}"
+
+      - name: Remove orphaned Cloud Run tags
+        continue-on-error: true
+        run: |
+          gcloud run services describe "${SERVICE}" --region="${{ vars.GCP_REGION }}" \
+            >/dev/null 2>&1 || { echo "No preview service yet."; exit 0; }
+
+          TAGS=$(gcloud run services describe "${SERVICE}" --region="${{ vars.GCP_REGION }}" \
+            --format='value(status.traffic[].tag)' | tr ';' '\n' | grep '^pr-' || true)
+          OPEN=",${{ steps.open.outputs.numbers }},"
+
+          for tag in ${TAGS}; do
+            if [[ "${OPEN}" != *",${tag#pr-},"* ]]; then
+              echo "Removing ${tag}"
+              gcloud run services update-traffic "${SERVICE}" \
+                --region="${{ vars.GCP_REGION }}" --remove-tags="${tag}" || true
+            fi
+          done

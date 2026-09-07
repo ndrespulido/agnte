@@ -18,7 +18,8 @@ Everything below is a one-time setup step. Per-deploy infrastructure lives in
 | Workload Identity | Keyless GitHub Actions → GCP auth | 0.3b | ☑ |
 | Neon project | Database, connection strings | 0.4 | ☑ |
 | Cloudflare R2 | Bucket, scoped API token | 0.5 | ☑ |
-| Kill switch | Pub/Sub topic, billing-disable function | 0.6 | ☐ |
+| Kill switch | Pub/Sub topic, billing-disable function | 0.6 | ☑ deployed, disarmed |
+| Preview environments | Neon API key, preview Cloud Run service | 0.9 | ☐ |
 
 ---
 
@@ -427,6 +428,65 @@ forgotten resource, images piling up — rather than a cap.
 The caps that actually bound the bill are `--max-instances=3` on Cloud Run and
 the Compute API being left disabled, which makes a NAT gateway or load balancer
 impossible to create rather than merely discouraged.
+
+---
+
+## 3b. Preview environments (task 0.9)
+
+Every pull request from this repository gets its own URL, backed by its own Neon
+branch and its own R2 key prefix.
+
+### What you need to set once
+
+| Where | Name | Value |
+|---|---|---|
+| Actions → **Secrets** | `NEON_API_KEY` | Neon console → org **Settings → API keys**, or user menu → **Account settings → API keys** for a personal project. Prefer a project-scoped key. |
+| Actions → **Variables** | `NEON_PROJECT_ID` | The project id from Neon's project settings |
+
+The API key cannot live in Secret Manager: CI needs it before it authenticates
+to GCP, so there is nothing to fetch it with.
+
+### What happens
+
+```
+PR opened or pushed
+  → Neon branch pr-<n> created, or reused on a later push
+  → migrations run against it
+  → image built, tagged pr-<n>-<sha>
+  → deployed to agnte-preview as a tagged revision, no traffic
+  → smoke test asserts runtime, database and object storage
+  → one comment on the PR carries the URL, edited rather than repeated
+PR closed
+  → Cloud Run tag removed, Neon branch deleted
+Nightly
+  → orphans of both swept
+```
+
+### Why the pieces are shaped this way
+
+**A separate `agnte-preview` service.** `max-instances` is a service-level cap,
+so previews sharing production's would let a preview starve it (§3.1).
+Production keeps 3, previews get 2 between them.
+
+**One bucket, prefixes per pull request.** Buckets are a limited manual
+resource; `R2_PREFIX=pr-<n>/` is free. **Add a lifecycle rule** on the bucket in
+the Cloudflare dashboard expiring objects under `pr-` after ~14 days — that part
+is not automated.
+
+**The nightly sweep is not tidiness.** Neon's free plan caps branch count, so a
+teardown that silently does not run eventually breaks the pipeline. Teardown on
+close does not always happen: a workflow edited mid-pull-request, a cancelled
+job, a run that created a branch and then failed.
+
+**Previews are publicly reachable with no access gate** — a deliberate choice
+while they hold only synthetic data. Anyone with the URL can open one. Revisit
+before real data reaches a preview.
+
+### No seed data yet
+
+`architecture.md` §7.1 calls for `npm run seed`. There is nothing to seed: Phase
+0 has no domain, and the migration creates empty schemas. The seed becomes
+meaningful when `identity` lands in Phase 1, and previews will want it then.
 
 ---
 

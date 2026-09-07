@@ -1,15 +1,30 @@
 [
   {
     "name": "delete-untagged",
-    "action": { "type": "Delete" },
+    "action": {
+      "type": "Delete"
+    },
     "condition": {
       "tagState": "UNTAGGED",
       "olderThan": "7d"
     }
   },
   {
+    "name": "delete-old-preview-images",
+    "action": {
+      "type": "Delete"
+    },
+    "condition": {
+      "tagState": "TAGGED",
+      "tagPrefixes": ["pr-"],
+      "olderThan": "14d"
+    }
+  },
+  {
     "name": "keep-recent-releases",
-    "action": { "type": "Keep" },
+    "action": {
+      "type": "Keep"
+    },
     "mostRecentVersions": {
       "keepCount": 10
     }
