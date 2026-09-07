@@ -17,7 +17,7 @@ Everything below is a one-time setup step. Per-deploy infrastructure lives in
 | GCP bootstrap | Project, APIs, Artifact Registry, service accounts, budget | 0.3 | ☑ |
 | Workload Identity | Keyless GitHub Actions → GCP auth | 0.3b | ☑ |
 | Neon project | Database, connection strings | 0.4 | ☑ |
-| Cloudflare R2 | Bucket, scoped API token | 0.5 | ☐ |
+| Cloudflare R2 | Bucket, scoped API token | 0.5 | ☑ |
 | Kill switch | Pub/Sub topic, billing-disable function | 0.6 | ☐ |
 
 ---
@@ -288,6 +288,113 @@ before the switch ever fires, so it is a backstop against a slow leak — a
 forgotten resource, an image pile-up — not a cap. Treat items 1 and 2 as the
 real protection.
 
+### Deploying it (task 0.6)
+
+```bash
+PROJECT_ID=agnte-prod BILLING_ACCOUNT=012753-4C8C98-4A0FD4 ./infra/deploy-kill-switch.sh
+```
+
+Creates the Pub/Sub topic, a dedicated service account, the Cloud Function, and
+points the existing budget at the topic. **It deploys disarmed**: the function
+logs what it would do and changes nothing.
+
+The service account gets `roles/billing.admin` **on the billing account** — a
+genuinely powerful grant, and why this identity exists for nothing else. It is
+not the runtime account and not the deployer.
+
+### The trigger has its own identity
+
+An Eventarc trigger invokes the function as a *different* identity from the one
+the function runs as. Left unset it falls back to the default compute service
+account — which this project does not have, because the Compute API is
+deliberately disabled (§3.1) so a NAT gateway or load balancer cannot be
+created at all.
+
+The first deployment hit exactly that:
+
+```
+The request was not authenticated ... The IAM principal lacks {run.routes.invoke}
+```
+
+The script now names the trigger identity explicitly and grants it
+`roles/eventarc.eventReceiver` on the project and `roles/run.invoker` scoped to
+the function's own Cloud Run service — not project-wide, so the kill switch
+cannot invoke the application.
+
+Worth remembering when anything else event-driven is added: Cloud Tasks and
+Cloud Scheduler callbacks in later phases will need the same treatment, and the
+symptom is an unauthenticated-invocation warning rather than a permissions
+error naming the missing role.
+
+### Confirming real alerts reach the topic
+
+Cloud Billing publishes budget notifications **periodically**, not only when a
+threshold is crossed, so the real path proves itself within an hour of wiring
+without any budget being exceeded. Look for lines like:
+
+```
+kill-switch: no action — 0% of budget (0 of 30 EUR)
+```
+
+That is the strongest confirmation available: Cloud Billing → Pub/Sub →
+Eventarc → function, including Cloud Billing's own publish permission, which
+the rehearsal cannot exercise because it publishes to the topic directly.
+
+```bash
+gcloud functions logs read agnte-kill-switch --region=europe-west3   --project=agnte-prod --limit=20
+```
+
+### If those lines never appear
+
+The rehearsal publishes to the topic directly, so it proves the function, the
+trigger and the IAM — but not that *Cloud Billing itself* can publish. Those are
+separate paths, and only the second one carries a real budget alert.
+
+Attaching the topic to the budget normally provisions Google's publisher access
+automatically. The deploy script also tries to grant it explicitly, asking GCP
+to name its own service agent rather than hardcoding an address — an earlier
+version guessed `billing-budgets@system.gserviceaccount.com`, which does not
+exist. That grant is best-effort and never stops the deployment.
+
+To confirm the wiring after deploying, check the budget shows the topic:
+
+```bash
+gcloud billing budgets list --billing-account=<id>   --format='value(displayName, notificationsRule.pubsubTopic)'
+```
+
+Cloud Billing reports delivery failures against the budget in the console under
+Billing → Budgets & alerts. If notifications are not arriving, granting
+`roles/pubsub.publisher` on `agnte-budget-alerts` to the identity named there is
+the fix.
+
+### Rehearse before arming
+
+An untested kill switch is a guess, and the alternative way to test it is to
+overspend for real. Same argument as backups (§8.8): rehearse the one thing
+whose failure is unrecoverable.
+
+```bash
+PROJECT_ID=agnte-prod ./infra/rehearse-kill-switch.sh
+```
+
+Publishes a synthetic over-threshold notification and shows what the function
+logged. While disarmed you should see:
+
+```
+kill-switch: WOULD DISABLE BILLING for agnte-prod — budget exceeded: 999.99 of 30 EUR
+```
+
+Only once you have seen that, arm it:
+
+```bash
+ARMED=true PROJECT_ID=agnte-prod BILLING_ACCOUNT=... ./infra/deploy-kill-switch.sh
+```
+
+Rehearsing again **now really disables billing** — the script demands you type
+`DISABLE BILLING` first. Doing that drill once, deliberately, is worth it: you
+find out whether it works and you walk the recovery path calmly rather than
+during an incident.
+
 ### When the kill switch fires
 
 Billing is disabled project-wide. Everything stops, including the function that
@@ -305,6 +412,21 @@ disabled it. This is correct for a last resort, and it is recoverable:
 GCP deletes resources in a project with billing disabled after a grace period.
 Everything in this project is reproducible from this repository, which is why
 the destructive option is acceptable here.
+
+**The function disables its own project, so it cannot un-disable it.** That is
+by design — a last resort should not be able to undo itself — but it means
+recovery is always manual, through the console or a `gcloud billing projects
+link` from your own account.
+
+### What it will not catch
+
+Budget data lags actual spend by hours. A genuine runaway can pass EUR 30 before
+this function ever runs, so treat it as a backstop against a slow leak — a
+forgotten resource, images piling up — rather than a cap.
+
+The caps that actually bound the bill are `--max-instances=3` on Cloud Run and
+the Compute API being left disabled, which makes a NAT gateway or load balancer
+impossible to create rather than merely discouraged.
 
 ---
 

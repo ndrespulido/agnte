@@ -25,3 +25,4 @@ test-results/
 # misc
 .DS_Store
 *.log
+infra/kill-switch/node_modules/
