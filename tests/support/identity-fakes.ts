@@ -4,9 +4,14 @@ import type {
   IdentityMailer,
   IssuedToken,
   PasswordHasher,
+  OAuthAccountLink,
+  OAuthAccountRepository,
+  OAuthProvider,
+  OAuthStateSigner,
   PasswordResetTokenRepository,
   PendingRegistrationRepository,
   PresentTokenOutcome,
+  ProviderIdentity,
   RedeemResetOutcome,
   RedeemOutcome,
   RefreshTokenRepository,
@@ -277,5 +282,58 @@ export class FakeRefreshTokenRepository implements RefreshTokenRepository {
       }
     }
     return revoked;
+  }
+}
+
+export class FakeOAuthAccountRepository implements OAuthAccountRepository {
+  readonly links: OAuthAccountLink[] = [];
+
+  async findByProviderAccount(
+    provider: string,
+    subject: string,
+  ): Promise<OAuthAccountLink | null> {
+    return (
+      this.links.find(
+        (l) => l.provider === provider && l.providerAccountId === subject,
+      ) ?? null
+    );
+  }
+
+  async link(input: OAuthAccountLink): Promise<void> {
+    this.links.push(input);
+  }
+}
+
+/** Accepts only states it issued, so a test can forge one and be refused. */
+export class FakeStateSigner implements OAuthStateSigner {
+  private readonly issued = new Set<string>();
+  private counter = 0;
+
+  async issue(): Promise<string> {
+    this.counter += 1;
+    const state = `state-${this.counter}`;
+    this.issued.add(state);
+    return state;
+  }
+
+  async verify(state: string): Promise<boolean> {
+    return this.issued.has(state);
+  }
+}
+
+export class FakeOAuthProvider implements OAuthProvider {
+  exchanges = 0;
+
+  /** Either what the provider asserts, or an error it throws instead. */
+  constructor(private readonly result: ProviderIdentity | Error) {}
+
+  authorizationUrl(input: { redirectUri: string; state: string }): string {
+    return `https://accounts.google.test/authorize?state=${input.state}&redirect_uri=${encodeURIComponent(input.redirectUri)}`;
+  }
+
+  async exchange(): Promise<ProviderIdentity> {
+    this.exchanges += 1;
+    if (this.result instanceof Error) throw this.result;
+    return this.result;
   }
 }

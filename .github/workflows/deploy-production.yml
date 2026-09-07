@@ -137,6 +137,15 @@ jobs:
             echo "::warning::No JWT signing key; sign-in will answer 503. Run ./infra/set-secrets.sh"
           fi
 
+          # Production only. Google will not accept a wildcard redirect URI, so
+          # a preview's per-pull-request URL cannot be registered in advance —
+          # previews use the email and password path and report Google sign-in
+          # as not-configured on the status page.
+          if gcloud secrets describe agnte-google-client-id >/dev/null 2>&1 \
+            && gcloud secrets describe agnte-google-client-secret >/dev/null 2>&1; then
+            SECRETS="${SECRETS},GOOGLE_CLIENT_ID=agnte-google-client-id:latest,GOOGLE_CLIENT_SECRET=agnte-google-client-secret:latest"
+          fi
+
           FLAGS=(
             --image="${{ steps.build.outputs.image }}"
             --region="${{ vars.GCP_REGION }}"

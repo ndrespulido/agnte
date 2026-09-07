@@ -94,7 +94,11 @@ model User {
 
   /// Argon2id PHC string. Carries its own salt and parameters, which is what
   /// lets the cost be raised later without invalidating existing hashes.
-  passwordHash String @map("password_hash")
+  ///
+  /// Null for an account that only ever signs in with Google. A placeholder
+  /// hash would be a credential nobody chose and nobody can use, and the one
+  /// thing worse than no password is a password you do not know you have.
+  passwordHash String? @map("password_hash")
 
   displayName String? @map("display_name")
 
@@ -110,6 +114,7 @@ model User {
 
   refreshTokens       RefreshToken[]
   passwordResetTokens PasswordResetToken[]
+  oauthAccounts       OAuthAccount[]
 
   @@map("user")
   @@schema("identity")
@@ -244,5 +249,39 @@ model PasswordResetToken {
   @@index([userId])
   @@index([expiresAt])
   @@map("password_reset_token")
+  @@schema("identity")
+}
+
+/// A third-party identity linked to an account (architecture.md §4).
+///
+/// Separate from User rather than columns on it, because "which providers can
+/// sign this person in" is a list, not a field. Google today, Apple plausibly
+/// later for the native client, and adding one should not be a migration on the
+/// user table.
+///
+/// The unique constraint is on (provider, providerAccountId) — Google's stable
+/// subject id, never the email. An email can move between Google accounts and a
+/// Google account can change its email; `sub` is the only identifier Google
+/// promises is stable and unique forever.
+model OAuthAccount {
+  provider String
+
+  /// The provider's own id for this person — Google's `sub` claim.
+  providerAccountId String @map("provider_account_id")
+
+  userId String @map("user_id") @db.Uuid
+
+  /// The address the provider asserted at link time, kept for support and for
+  /// noticing later that it has drifted from ours. Never used to *find* an
+  /// account — see the unique constraint above.
+  email String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+  @@index([userId])
+  @@map("oauth_account")
   @@schema("identity")
 }

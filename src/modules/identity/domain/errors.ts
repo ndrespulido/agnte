@@ -20,6 +20,9 @@ export const IdentityErrorCode = {
   ResetTokenInvalid: 'identity.reset_token_invalid',
   ResetTokenExpired: 'identity.reset_token_expired',
   ResetTokenAlreadyUsed: 'identity.reset_token_already_used',
+  OAuthStateInvalid: 'identity.oauth_state_invalid',
+  OAuthExchangeFailed: 'identity.oauth_exchange_failed',
+  OAuthEmailUnverified: 'identity.oauth_email_unverified',
 } as const;
 
 export type IdentityErrorCode =
@@ -113,4 +116,31 @@ export const resetTokenAlreadyUsed = (): DomainError =>
   new DomainError(
     IdentityErrorCode.ResetTokenAlreadyUsed,
     'This reset link has already been used. Request a new one if you still need it.',
+  );
+
+export const oauthStateInvalid = (): DomainError =>
+  new DomainError(
+    IdentityErrorCode.OAuthStateInvalid,
+    'That sign-in attempt is no longer valid. Start again.',
+  );
+
+export const oauthExchangeFailed = (detail: string): DomainError =>
+  new DomainError(IdentityErrorCode.OAuthExchangeFailed, 'Google sign-in failed.', {
+    // The provider's reason is worth keeping for logs, but it is a machine
+    // detail: whatever Google said, the person's next step is to try again.
+    details: { detail },
+  });
+
+/**
+ * Google asserted an address it has not verified.
+ *
+ * Refused rather than linked. Matching on an unverified address is the classic
+ * OAuth account-takeover: anyone who can get a provider to assert a victim's
+ * address — trivial on a Workspace domain an attacker controls — would
+ * otherwise be handed the victim's account.
+ */
+export const oauthEmailUnverified = (): DomainError =>
+  new DomainError(
+    IdentityErrorCode.OAuthEmailUnverified,
+    'Google has not verified that email address, so it cannot be used to sign in.',
   );

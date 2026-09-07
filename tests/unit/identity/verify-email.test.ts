@@ -136,8 +136,10 @@ describe('account pre-hijacking', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(await hasher.verify(result.value.user.passwordHash, VICTIM)).toBe(true);
-    expect(await hasher.verify(result.value.user.passwordHash, ATTACKER)).toBe(false);
+    expect(await hasher.verify(result.value.user.passwordHash ?? '', VICTIM)).toBe(true);
+    expect(await hasher.verify(result.value.user.passwordHash ?? '', ATTACKER)).toBe(
+      false,
+    );
   });
 
   it('gives the victim their own password when the attacker registered second', async () => {
@@ -150,8 +152,10 @@ describe('account pre-hijacking', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(await hasher.verify(result.value.user.passwordHash, VICTIM)).toBe(true);
-    expect(await hasher.verify(result.value.user.passwordHash, ATTACKER)).toBe(false);
+    expect(await hasher.verify(result.value.user.passwordHash ?? '', VICTIM)).toBe(true);
+    expect(await hasher.verify(result.value.user.passwordHash ?? '', ATTACKER)).toBe(
+      false,
+    );
   });
 
   it("leaves the attacker's link unable to change an account that now exists", async () => {

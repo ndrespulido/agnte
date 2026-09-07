@@ -173,8 +173,8 @@ describe('resetPassword', () => {
     expect(result.ok).toBe(true);
 
     const user = await users.findById(userId);
-    expect(await hasher.verify(user!.passwordHash, NEW_PASSWORD)).toBe(true);
-    expect(await hasher.verify(user!.passwordHash, OLD_PASSWORD)).toBe(false);
+    expect(await hasher.verify(user!.passwordHash ?? '', NEW_PASSWORD)).toBe(true);
+    expect(await hasher.verify(user!.passwordHash ?? '', OLD_PASSWORD)).toBe(false);
   });
 
   it('lets the new password sign in and stops the old one', async () => {
@@ -264,7 +264,7 @@ describe('a password change invalidates every outstanding reset link', () => {
 
     // And the password is still the owner's.
     const user = await users.findById(userId);
-    expect(await hasher.verify(user!.passwordHash, NEW_PASSWORD)).toBe(true);
+    expect(await hasher.verify(user!.passwordHash ?? '', NEW_PASSWORD)).toBe(true);
   });
 });
 

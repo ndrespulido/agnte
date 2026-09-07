@@ -11,7 +11,11 @@ import type { Email } from './email';
 export interface User {
   readonly id: string;
   readonly email: Email;
-  readonly passwordHash: string;
+  /**
+   * Null for an account that only signs in with Google (architecture.md §4).
+   * A placeholder hash would be a credential nobody chose and nobody can use.
+   */
+  readonly passwordHash: string | null;
   readonly displayName: string | null;
 
   /**
@@ -46,7 +50,7 @@ export const isVerified = (user: User): boolean => user.emailVerifiedAt !== null
  */
 export function createVerifiedUser(input: {
   email: Email;
-  passwordHash: string;
+  passwordHash: string | null;
   displayName?: string | null;
   clock: Clock;
 }): User {

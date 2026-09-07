@@ -192,6 +192,15 @@ cookie sessions — a native app is a planned client, and cookies don't translat
 - Forgot password → reset token (single-use, 1h, invalidated on use *and* on
   password change)
 - Google OAuth → same token pair, so there's one auth model downstream
+
+> **Confirmed in Phase 1: previews cannot offer Google sign-in.** Google rejects
+> wildcard redirect URIs, and a preview URL is per pull request, so it cannot be
+> registered in advance. Previews use email and password; the status page
+> reports `google-sign-in: not-configured` with that reason. An account created
+> through Google carries no password hash — a placeholder would be a credential
+> nobody chose — so `User.passwordHash` is nullable, and password sign-in
+> refuses such an account with the same error and the same timing as a wrong
+> password.
 - Logout → refresh token revoked
 
 > **Added in Phase 1: refresh token rotation with reuse detection.** A thirty-day

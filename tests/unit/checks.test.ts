@@ -18,6 +18,7 @@ describe('runChecks', () => {
       'object-storage',
       'email',
       'access-tokens',
+      'google-sign-in',
     ]);
     expect(results.every((r) => typeof r.durationMs === 'number')).toBe(true);
   });

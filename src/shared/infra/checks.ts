@@ -129,6 +129,29 @@ const checks: Check[] = [
       return { status: 'not-configured' as const, detail: 'JWT_SECRET is not set' };
     },
   },
+  {
+    name: 'google-sign-in',
+    run: async () => {
+      const config = loadConfig();
+
+      // Not-configured is the *expected* state in a preview: Google does not
+      // accept wildcard redirect URIs, so a per-pull-request URL cannot be
+      // registered in advance. Reported rather than treated as a fault, so the
+      // status page says why Google sign-in is missing instead of leaving
+      // someone to discover it at the button.
+      if (!config.GOOGLE_CLIENT_ID) {
+        return {
+          status: 'not-configured' as const,
+          detail:
+            config.APP_ENV === 'preview'
+              ? 'previews cannot register a redirect URI with Google'
+              : 'GOOGLE_CLIENT_ID is not set',
+        };
+      }
+
+      return { status: 'ok' as const, detail: 'configured' };
+    },
+  },
 ];
 
 export async function runChecks(): Promise<CheckResult[]> {

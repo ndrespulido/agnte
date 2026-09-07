@@ -70,6 +70,17 @@ const schema = z.object({
    * on the next cold start would log everyone out at random.
    */
   JWT_SECRET: z.string().min(32).optional(),
+
+  /**
+   * Google OAuth (architecture.md §4). Both required together.
+   *
+   * Unset means Google sign-in is simply not offered — which is the normal
+   * state for every preview environment, because Google does not accept
+   * wildcard redirect URIs and a per-pull-request URL cannot be registered in
+   * advance. Previews use the email and password path.
+   */
+  GOOGLE_CLIENT_ID: z.string().min(1).optional(),
+  GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
 });
 
 /**
@@ -86,6 +97,8 @@ const R2_KEYS = [
 
 /** Same reasoning as R2: half-configured email is a dropped secret, not a choice. */
 const EMAIL_KEYS = ['RESEND_API_KEY', 'EMAIL_FROM'] as const;
+
+const GOOGLE_KEYS = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'] as const;
 
 const schemaWithChecks = schema.superRefine((value, ctx) => {
   const present = R2_KEYS.filter((key) => value[key] !== undefined);
@@ -105,6 +118,16 @@ const schemaWithChecks = schema.superRefine((value, ctx) => {
       code: 'custom',
       path: [missing[0] ?? 'RESEND_API_KEY'],
       message: `Email is partially configured. Missing: ${missing.join(', ')}`,
+    });
+  }
+
+  const googlePresent = GOOGLE_KEYS.filter((key) => value[key] !== undefined);
+  if (googlePresent.length > 0 && googlePresent.length < GOOGLE_KEYS.length) {
+    const missing = GOOGLE_KEYS.filter((key) => value[key] === undefined);
+    ctx.addIssue({
+      code: 'custom',
+      path: [missing[0] ?? 'GOOGLE_CLIENT_ID'],
+      message: `Google OAuth is partially configured. Missing: ${missing.join(', ')}`,
     });
   }
 });

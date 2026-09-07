@@ -238,3 +238,57 @@ export interface PasswordResetTokenRepository {
    */
   invalidateAllForUser(userId: string, now: Date): Promise<number>;
 }
+
+/**
+ * What a provider told us about the person who just signed in.
+ *
+ * `subject` is the provider's own stable id. It, not the email, is the
+ * identity: an address can move between accounts and an account can change its
+ * address, and `sub` is the only value Google promises is stable and unique
+ * forever.
+ */
+export interface ProviderIdentity {
+  readonly provider: 'google';
+  readonly subject: string;
+  readonly email: Email;
+  readonly emailVerified: boolean;
+  readonly displayName: string | null;
+}
+
+export interface OAuthProvider {
+  /** Where to send the browser, plus the state to check when it comes back. */
+  authorizationUrl(input: { redirectUri: string; state: string }): string;
+
+  /** Exchanges the code for tokens and returns what the provider asserted. */
+  exchange(input: { code: string; redirectUri: string }): Promise<ProviderIdentity>;
+}
+
+export interface OAuthAccountLink {
+  readonly provider: string;
+  readonly providerAccountId: string;
+  readonly userId: string;
+  readonly email: string | null;
+}
+
+export interface OAuthAccountRepository {
+  findByProviderAccount(
+    provider: string,
+    subject: string,
+  ): Promise<OAuthAccountLink | null>;
+  link(input: OAuthAccountLink): Promise<void>;
+}
+
+/**
+ * Short-lived signed state for the OAuth round trip.
+ *
+ * Signed rather than stored: the value has to survive a redirect out to Google
+ * and back with nothing kept in between, and a signature gives that for free.
+ * Its only job is to prove the callback belongs to a flow this server started —
+ * without it, an attacker can feed a victim a callback URL carrying the
+ * attacker's code and silently link the victim's browser to the attacker's
+ * account.
+ */
+export interface OAuthStateSigner {
+  issue(): Promise<string>;
+  verify(state: string): Promise<boolean>;
+}

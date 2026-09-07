@@ -239,6 +239,49 @@ else
   note "Generated a new 32-byte key."
 fi
 
+# ----------------------------------------------------------------------------
+# Google OAuth (architecture.md §4)
+#
+# Optional like R2 and Resend. Production only, by necessity: Google does not
+# accept wildcard redirect URIs, so a preview's per-pull-request URL cannot be
+# registered in advance.
+# ----------------------------------------------------------------------------
+
+say "Google sign-in"
+cat <<'EXPLAIN'
+
+  From the Google Cloud console (APIs & Services -> Credentials):
+
+  - Create an OAuth 2.0 Client ID of type "Web application"
+  - Add this exact authorised redirect URI:
+
+      <your production URL>/v1/auth/google/callback
+
+  The URI must match byte for byte, including the scheme and any trailing path.
+  Google rejects wildcards, so preview environments cannot use Google sign-in —
+  they use email and password, and their status page says so.
+
+Press Enter at the client ID prompt to skip Google sign-in for now.
+
+EXPLAIN
+
+read -rp "  Google client ID:     " GOOGLE_CLIENT_ID
+
+if [[ -n "${GOOGLE_CLIENT_ID}" ]]; then
+  read -rsp "  Google client secret: " GOOGLE_CLIENT_SECRET; echo
+
+  [[ -n "${GOOGLE_CLIENT_SECRET}" ]] \
+    || { echo "  A client secret is required once a client ID is given."; exit 1; }
+
+  # A Google web client ID always ends this way. Catching a project id or an API
+  # key pasted here is cheaper than a redirect_uri_mismatch at sign-in.
+  if [[ "${GOOGLE_CLIENT_ID}" != *.apps.googleusercontent.com ]]; then
+    echo "  A Google client ID ends with \".apps.googleusercontent.com\"."
+    echo "  That looks like something else — check you copied the Client ID."
+    exit 1
+  fi
+fi
+
 say "Storing secrets"
 store agnte-database-url "${DATABASE_URL}"
 store agnte-direct-url "${DIRECT_URL}"
@@ -257,6 +300,11 @@ fi
 if [[ -n "${RESEND_API_KEY}" ]]; then
   store agnte-resend-api-key "${RESEND_API_KEY}"
   store agnte-email-from "${EMAIL_FROM}"
+fi
+
+if [[ -n "${GOOGLE_CLIENT_ID}" ]]; then
+  store agnte-google-client-id "${GOOGLE_CLIENT_ID}"
+  store agnte-google-client-secret "${GOOGLE_CLIENT_SECRET}"
 fi
 
 # ----------------------------------------------------------------------------
@@ -307,6 +355,16 @@ if [[ -n "${RESEND_API_KEY}" ]]; then
   done
 fi
 
+if [[ -n "${GOOGLE_CLIENT_ID}" ]]; then
+  for secret in agnte-google-client-id agnte-google-client-secret; do
+    gcloud secrets add-iam-policy-binding "${secret}" \
+      --member="serviceAccount:${RUNTIME_SA}" \
+      --role=roles/secretmanager.secretAccessor \
+      --project="${PROJECT_ID}" --quiet >/dev/null
+    note "runtime  -> ${secret}"
+  done
+fi
+
 # ----------------------------------------------------------------------------
 # Verify
 #
@@ -348,6 +406,12 @@ verify agnte-jwt-secret "${RUNTIME_SA}" "runtime"
 
 if [[ -n "${RESEND_API_KEY}" ]]; then
   for secret in agnte-resend-api-key agnte-email-from; do
+    verify "${secret}" "${RUNTIME_SA}" "runtime"
+  done
+fi
+
+if [[ -n "${GOOGLE_CLIENT_ID}" ]]; then
+  for secret in agnte-google-client-id agnte-google-client-secret; do
     verify "${secret}" "${RUNTIME_SA}" "runtime"
   done
 fi

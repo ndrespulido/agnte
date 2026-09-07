@@ -52,6 +52,15 @@ export async function login(
     return err(invalidCredentials());
   }
 
+  if (user.passwordHash === null) {
+    // A Google-only account. Same error and same cost as a wrong password:
+    // answering "this account uses Google" would confirm the address exists and
+    // name the provider, and returning early would say it faster than any
+    // wording could.
+    await deps.hasher.burnVerificationTime();
+    return err(invalidCredentials());
+  }
+
   const matches = await deps.hasher.verify(user.passwordHash, command.password);
   if (!matches) return err(invalidCredentials());
 
