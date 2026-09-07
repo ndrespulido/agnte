@@ -76,3 +76,82 @@ model RateLimitWindow {
   @@map("rate_limit_window")
   @@schema("platform")
 }
+
+/// A person with an account (§4).
+///
+/// `emailVerifiedAt` is the single fact about verification rather than a
+/// separate status column: a status and a timestamp can disagree, and the one
+/// that can disagree is the one that eventually does.
+model User {
+  /// Client-generated UUIDv7 (§2) — see src/shared/kernel/id.ts.
+  id String @id @db.Uuid
+
+  /// Stored already normalised (trimmed, lowercased). The migration adds a
+  /// CHECK that enforces that in the database, so a write path that forgets to
+  /// normalise fails loudly instead of creating a second account that differs
+  /// only in case.
+  email String @unique
+
+  /// Argon2id PHC string. Carries its own salt and parameters, which is what
+  /// lets the cost be raised later without invalidating existing hashes.
+  passwordHash String @map("password_hash")
+
+  displayName String? @map("display_name")
+
+  /// Null until the address is proven. Nothing but verification sets it.
+  emailVerifiedAt DateTime? @map("email_verified_at") @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  /// Optimistic concurrency (§2): a write sends the version it read, and a
+  /// mismatch is a 409 rather than a silent overwrite.
+  version Int @default(0)
+
+  @@map("user")
+  @@schema("identity")
+}
+
+/// A registration that has been started but not yet proven (architecture.md §4).
+///
+/// The account does not exist until the address is verified, and the candidate
+/// password lives *here*, on the token, rather than on a placeholder user row.
+///
+/// That is a deliberate departure from §4's "create then activate" wording, and
+/// it closes an account pre-hijacking hole. With one user row per address whose
+/// password is overwritten by whoever registered most recently, an attacker can
+/// register a victim's address first; when the victim registers and then clicks
+/// the link in their inbox, the row they activate can carry the attacker's
+/// password. Per-token credentials remove the shared mutable state: each link
+/// activates the registration that produced it, so the victim clicking *their
+/// own* email always gets their own password, whatever the attacker did first.
+///
+/// There is no `consumedAt`. The row is deleted on redemption — single-use by
+/// deletion, which also means an abandoned attempt's password hash is not kept
+/// around any longer than its 24h expiry.
+model PendingRegistration {
+  /// Hex SHA-256 of the token in the emailed link.
+  ///
+  /// SHA-256 rather than Argon2 — deliberately, and for the opposite reason
+  /// passwords use Argon2. A password is low-entropy and guessable, so its hash
+  /// must be slow and salted. This token is 256 bits from a CSPRNG, so guessing
+  /// is already hopeless, and it has to be *looked up* by value, which a per-row
+  /// salt would make impossible.
+  tokenHash String @id @map("token_hash")
+
+  /// Normalised the same way User.email is; the migration enforces it.
+  email String
+
+  /// Argon2id PHC string for the password this registration was made with.
+  passwordHash String @map("password_hash")
+
+  displayName String? @map("display_name")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  @@index([email])
+  @@index([expiresAt])
+  @@map("pending_registration")
+  @@schema("identity")
+}

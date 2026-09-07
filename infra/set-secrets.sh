@@ -158,6 +158,66 @@ if [[ -n "${R2_ENDPOINT}" ]]; then
   fi
 fi
 
+# ----------------------------------------------------------------------------
+# Resend (architecture.md §3)
+#
+# Optional in exactly the same way R2 is: without it the app deploys, the status
+# page reports email as not-configured, and POST /v1/auth/register answers 503
+# rather than accepting a registration whose verification link it cannot send.
+# ----------------------------------------------------------------------------
+
+say "Resend (email)"
+cat <<'EXPLAIN'
+
+  From the Resend dashboard you need:
+
+  - an API key (API Keys -> Create API Key, sending access is enough)
+  - a From address on a domain you have verified there
+
+  Until a domain is verified, Resend only delivers to the address that owns the
+  Resend account, and only from onboarding@resend.dev. That is enough to test
+  registration yourself, and not enough for anyone else — so verify a domain
+  before inviting a second person.
+
+Press Enter at the API key prompt to skip email for now.
+
+EXPLAIN
+
+read -rsp "  Resend API key:  " RESEND_API_KEY; echo
+
+if [[ -n "${RESEND_API_KEY}" ]]; then
+  read -rp "  From address:    " EMAIL_FROM
+
+  [[ -n "${EMAIL_FROM}" ]] || { echo "  A From address is required once a key is given."; exit 1; }
+
+  # The app rejects a half-configured transport at boot; catching a From address
+  # pasted into the key slot here is cheaper than at deploy.
+  if [[ "${RESEND_API_KEY}" != re_* ]]; then
+    echo "  A Resend API key starts with \"re_\". That does not look like one."
+    exit 1
+  fi
+  # Accepts both "a@b.com" and "Name <a@b.com>".
+  if [[ "${EMAIL_FROM}" != *@*.* ]]; then
+    echo "  The From address needs to contain an address, e.g."
+    echo "  \"Agnte <no-reply@your-domain>\" or no-reply@your-domain"
+    exit 1
+  fi
+
+  # Prove the key works before storing it, the same way the R2 credentials are
+  # proved. A 401 here is seconds; the same 401 discovered at registration is a
+  # person waiting for an email that will never arrive.
+  say "Checking the Resend key"
+  RESEND_STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+    -H "Authorization: Bearer ${RESEND_API_KEY}" \
+    https://api.resend.com/domains || echo "000")
+  case "${RESEND_STATUS}" in
+    2*) note "Resend accepted the key." ;;
+    401|403) echo "  Resend rejected that key (HTTP ${RESEND_STATUS})."; exit 1 ;;
+    000) note "Could not reach Resend; storing the key unverified." ;;
+    *)  note "Resend answered HTTP ${RESEND_STATUS}; storing the key unverified." ;;
+  esac
+fi
+
 say "Storing secrets"
 store agnte-database-url "${DATABASE_URL}"
 store agnte-direct-url "${DIRECT_URL}"
@@ -167,6 +227,11 @@ if [[ -n "${R2_ENDPOINT}" ]]; then
   store agnte-r2-bucket "${R2_BUCKET}"
   store agnte-r2-access-key-id "${R2_ACCESS_KEY_ID}"
   store agnte-r2-secret-access-key "${R2_SECRET_ACCESS_KEY}"
+fi
+
+if [[ -n "${RESEND_API_KEY}" ]]; then
+  store agnte-resend-api-key "${RESEND_API_KEY}"
+  store agnte-email-from "${EMAIL_FROM}"
 fi
 
 # ----------------------------------------------------------------------------
@@ -191,6 +256,16 @@ note "deployer -> agnte-direct-url (migrations in CI)"
 
 if [[ -n "${R2_ENDPOINT}" ]]; then
   for secret in agnte-r2-endpoint agnte-r2-bucket agnte-r2-access-key-id agnte-r2-secret-access-key; do
+    gcloud secrets add-iam-policy-binding "${secret}" \
+      --member="serviceAccount:${RUNTIME_SA}" \
+      --role=roles/secretmanager.secretAccessor \
+      --project="${PROJECT_ID}" --quiet >/dev/null
+    note "runtime  -> ${secret}"
+  done
+fi
+
+if [[ -n "${RESEND_API_KEY}" ]]; then
+  for secret in agnte-resend-api-key agnte-email-from; do
     gcloud secrets add-iam-policy-binding "${secret}" \
       --member="serviceAccount:${RUNTIME_SA}" \
       --role=roles/secretmanager.secretAccessor \
@@ -232,6 +307,12 @@ verify agnte-direct-url "${DEPLOYER_SA}" "deployer"
 
 if [[ -n "${R2_ENDPOINT}" ]]; then
   for secret in agnte-r2-endpoint agnte-r2-bucket agnte-r2-access-key-id agnte-r2-secret-access-key; do
+    verify "${secret}" "${RUNTIME_SA}" "runtime"
+  done
+fi
+
+if [[ -n "${RESEND_API_KEY}" ]]; then
+  for secret in agnte-resend-api-key agnte-email-from; do
     verify "${secret}" "${RUNTIME_SA}" "runtime"
   done
 fi

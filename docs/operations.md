@@ -20,6 +20,7 @@ Everything below is a one-time setup step. Per-deploy infrastructure lives in
 | Cloudflare R2 | Bucket, scoped API token | 0.5 | ☑ |
 | Kill switch | Pub/Sub topic, billing-disable function | 0.6 | ☑ deployed, disarmed |
 | Preview environments | Neon API key, preview Cloud Run service | 0.9 | ☐ |
+| Resend | API key + From address for verification emails | 1.3 | ☐ |
 
 ---
 
@@ -277,6 +278,72 @@ The application writes one object, `_healthcheck/probe`, on every health check
 and reads it back. Round-tripping a fresh value is what proves the wire: a write
 and a read of two unrelated objects would both pass against a bucket that
 silently discarded writes.
+
+---
+
+## 2c. Resend (task 1.3)
+
+Email is optional in exactly the way R2 is: the app deploys without it. The
+status page reports `email: not-configured`, and `POST /v1/auth/register`
+answers `503` rather than accepting a registration whose verification link it
+cannot send.
+
+### Setting it up
+
+1. Create an API key in the Resend dashboard (API Keys → Create API Key;
+   sending access is enough).
+2. Run `PROJECT_ID=agnte-prod ./infra/set-secrets.sh` and answer the two Resend
+   prompts. Everything before them can be re-entered unchanged.
+
+The script checks the key against Resend before storing it, so a wrong key is
+caught in seconds rather than by someone waiting for an email that never comes.
+Both secrets are stored in Secret Manager and read only by the runtime service
+account — nothing goes into GitHub.
+
+### Until a domain is verified, only you get email
+
+Resend will not deliver to arbitrary addresses from an unverified domain. Until
+you verify one, it sends only to the address that owns the Resend account, and
+only from `onboarding@resend.dev`.
+
+That is enough to test registration end to end yourself. It is not enough for a
+second person, so verify a domain before inviting anyone.
+
+### The deploy tolerates the secrets not existing
+
+Both workflows check whether `agnte-resend-api-key` and `agnte-email-from` exist
+before mounting them. Referencing a missing secret makes a Cloud Run deploy
+fail outright, which would have meant the code that needs the secret could not
+be deployed until the secret existed. Production logs a warning when it skips
+them.
+
+### Where the link points
+
+Verification links are built from `APP_BASE_URL`. Both deploy workflows read the
+service's own URL back from Cloud Run and set it — production to the service
+URL, previews to the tagged revision URL (`https://pr-N---<service host>`).
+
+When it is unset the origin is taken from the incoming request instead. That is
+what lets the very first deploy of a service work before there is a URL to read,
+but it trusts a client-supplied `Host` header: a forged one would put an
+attacker's domain into a link carrying the victim's token. Deployed
+environments therefore set it explicitly, and only fall back on that first run.
+
+### Locally
+
+Nothing to configure. With no `RESEND_API_KEY`, local development prints emails
+to the terminal, which is where the verification link is easiest to click
+anyway:
+
+```
+── email ──────────────
+to:      you@example.com
+subject: Confirm your Agnte address
+
+Open this link to finish creating your Agnte account:
+http://localhost:3000/v1/auth/verify-email?token=...
+───────────────────────
+```
 
 ---
 

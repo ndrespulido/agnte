@@ -109,7 +109,21 @@ jobs:
           # Written by python with json.dumps: a JSON string is a valid YAML
           # scalar, so any character in the value survives without hand-rolled
           # quoting.
-          TAG="${TAG}" python3 - > /tmp/preview-env.yaml <<'PY'
+          # The tagged revision's own URL, so email links point at this preview
+          # rather than at whatever Host a request happened to carry. Cloud Run
+          # composes it as <tag>---<service host>, and the service's base URL is
+          # read back rather than written down. Empty on the very first preview
+          # deploy, where the app falls back to the request origin.
+          SERVICE_URL=$(gcloud run services describe "${SERVICE}" \
+            --region="${{ vars.GCP_REGION }}" \
+            --format='value(status.url)' 2>/dev/null || true)
+          if [[ -n "$SERVICE_URL" ]]; then
+            APP_BASE_URL="${SERVICE_URL/https:\/\//https:\/\/${TAG}---}"
+          else
+            APP_BASE_URL=""
+          fi
+
+          TAG="${TAG}" APP_BASE_URL="${APP_BASE_URL}" python3 - > /tmp/preview-env.yaml <<'PY'
           import json, os
           values = {
               "APP_ENV": "preview",
@@ -119,9 +133,22 @@ jobs:
               "R2_PREFIX": os.environ["TAG"] + "/",
               "DATABASE_URL": os.environ["DATABASE_URL"],
           }
+          # Omitted rather than sent empty: the config schema validates this as
+          # a URL, and "" would fail the parse and take the whole app down.
+          if os.environ.get("APP_BASE_URL"):
+              values["APP_BASE_URL"] = os.environ["APP_BASE_URL"]
           for key, value in values.items():
               print(f"{key}: {json.dumps(value)}")
           PY
+
+          SECRETS="R2_ENDPOINT=agnte-r2-endpoint:latest,R2_BUCKET=agnte-r2-bucket:latest,R2_ACCESS_KEY_ID=agnte-r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=agnte-r2-secret-access-key:latest"
+
+          # Same conditional mount as production: previews deploy green before
+          # Resend exists, and report email as not-configured on the status page.
+          if gcloud secrets describe agnte-resend-api-key >/dev/null 2>&1 \
+            && gcloud secrets describe agnte-email-from >/dev/null 2>&1; then
+            SECRETS="${SECRETS},RESEND_API_KEY=agnte-resend-api-key:latest,EMAIL_FROM=agnte-email-from:latest"
+          fi
 
           FLAGS=(
             --image="${{ steps.build.outputs.image }}"
@@ -134,7 +161,7 @@ jobs:
             --timeout=60s
             --tag="${TAG}"
             --env-vars-file=/tmp/preview-env.yaml
-            --set-secrets=R2_ENDPOINT=agnte-r2-endpoint:latest,R2_BUCKET=agnte-r2-bucket:latest,R2_ACCESS_KEY_ID=agnte-r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=agnte-r2-secret-access-key:latest
+            --set-secrets="${SECRETS}"
           )
           if [[ "${{ steps.existing.outputs.exists }}" == "true" ]]; then
             FLAGS+=(--no-traffic)

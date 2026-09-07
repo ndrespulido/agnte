@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { getDatabase, MIGRATED_SCHEMAS } from './database';
+import { getEmailTransport } from './email';
 import { getObjectStorage } from './object-storage';
 
 /**
@@ -86,6 +87,25 @@ const checks: Check[] = [
       }
 
       return { status: 'ok' as const, detail: storage.description };
+    },
+  },
+  {
+    name: 'email',
+    run: async () => {
+      const transport = getEmailTransport();
+
+      // Reported, not exercised: a check that actually sent a message would
+      // send one on every health poll, and Cloud Run polls.
+      //
+      // Deliberately 'not-configured' rather than 'failed' when there is no
+      // transport in a deployed environment. It *is* broken — registration
+      // answers 503 without it — but the deploy smoke test gates promotion on
+      // this endpoint, and making it fatal would block deploying the very code
+      // that needs the secret set. Visible on the status page is the honest
+      // middle: the gap shows up on the phone rather than at registration.
+      if (!transport) return { status: 'not-configured', detail: 'no email transport' };
+
+      return { status: 'ok' as const, detail: transport.description };
     },
   },
 ];

@@ -198,6 +198,31 @@ cookie sessions — a native app is a planned client, and cookies don't translat
 Verification and reset tokens are stored **hashed** — a database leak shouldn't
 hand over working account-takeover links.
 
+> **Amended in Phase 1: no account exists until the address is proven.** The
+> flow above says register → token → *activate*, which means a user row created
+> at registration and switched on later. That row is shared mutable state keyed
+> by an address nobody has proven yet, and it opens account pre-hijacking:
+> someone registers your address before you do, you register too, and whichever
+> single password ends up on that row can be theirs when you click the link in
+> your own inbox. Every variant — last registration wins, first wins, revoke the
+> old token — leaves a takeover path.
+>
+> So registration writes a `pending_registration` row instead: the token hash,
+> the address, and the Argon2id hash of *that attempt's* password. The account
+> is created when a link is redeemed, already verified, and redemption deletes
+> the row (`DELETE ... RETURNING`, so exactly one of two concurrent clicks
+> wins). Attempts are never revoked by later ones, which is what makes clicking
+> *your own* email always give you *your own* password.
+>
+> Registration answers identically whether the address was free or taken, the
+> way §8.6 already requires of password reset — and hashes the password on both
+> paths, since skipping ~40ms of Argon2 on the "taken" branch would leak by
+> timing what the identical bodies withhold. The address owner is told by email
+> instead, which reaches the one person entitled to know.
+>
+> Consequence for §4's list: there is no "activate" step on a User, and no
+> unverified users for login (1.4) to reason about.
+
 ---
 
 ## 5. UI
