@@ -14,6 +14,9 @@ export const IdentityErrorCode = {
   VerificationTokenInvalid: 'identity.verification_token_invalid',
   VerificationTokenExpired: 'identity.verification_token_expired',
   VerificationTokenAlreadyUsed: 'identity.verification_token_already_used',
+  InvalidCredentials: 'identity.invalid_credentials',
+  RefreshTokenInvalid: 'identity.refresh_token_invalid',
+  SessionRevoked: 'identity.session_revoked',
 } as const;
 
 export type IdentityErrorCode =
@@ -52,4 +55,37 @@ export const verificationTokenAlreadyUsed = (): DomainError =>
   new DomainError(
     IdentityErrorCode.VerificationTokenAlreadyUsed,
     'This verification link has already been used.',
+  );
+
+/**
+ * One error for "no such account" and for "wrong password", deliberately.
+ *
+ * Distinguishing them turns sign-in into an account-enumeration oracle: ask
+ * with any password, and a "wrong password" reply confirms the address is
+ * registered. The caller also has to spend the same time on both paths — see
+ * PasswordHasher.burnVerificationTime — since a response that returns before
+ * any hashing happened says the same thing more quietly.
+ */
+export const invalidCredentials = (): DomainError =>
+  new DomainError(
+    IdentityErrorCode.InvalidCredentials,
+    'Email or password is incorrect.',
+  );
+
+export const refreshTokenInvalid = (): DomainError =>
+  new DomainError(
+    IdentityErrorCode.RefreshTokenInvalid,
+    'That session is no longer valid. Sign in again.',
+  );
+
+/**
+ * Distinct from the above because it is worth surfacing differently: this is
+ * what a client sees when its whole family was revoked by reuse detection, and
+ * a client that can say "you were signed out for security reasons" is more
+ * useful than one that just bounces to a login form.
+ */
+export const sessionRevoked = (): DomainError =>
+  new DomainError(
+    IdentityErrorCode.SessionRevoked,
+    'This session was ended for security reasons. Sign in again.',
   );

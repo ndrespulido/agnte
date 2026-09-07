@@ -1,10 +1,13 @@
 import type {
+  AccessTokenIssuer,
   CreateUserOutcome,
   IdentityMailer,
   IssuedToken,
   PasswordHasher,
   PendingRegistrationRepository,
+  PresentTokenOutcome,
   RedeemOutcome,
+  RefreshTokenRepository,
   UserRepository,
   VerificationTokenGenerator,
 } from '@/modules/identity/domain/ports';
@@ -12,6 +15,7 @@ import type { Email } from '@/modules/identity/domain/email';
 import type { RawPassword } from '@/modules/identity/domain/password';
 import type { User } from '@/modules/identity/domain/user';
 import type { PendingRegistration } from '@/modules/identity/domain/verification';
+import type { RefreshToken } from '@/modules/identity/domain/session';
 
 /**
  * In-memory doubles for identity's ports.
@@ -73,6 +77,7 @@ export class FakePendingRegistrationRepository implements PendingRegistrationRep
 /** Reversible stand-in for Argon2, so a test can assert *which* password was hashed. */
 export class FakePasswordHasher implements PasswordHasher {
   hashCalls = 0;
+  burnCalls = 0;
 
   async hash(password: RawPassword): Promise<string> {
     this.hashCalls += 1;
@@ -81,6 +86,11 @@ export class FakePasswordHasher implements PasswordHasher {
 
   async verify(hash: string, candidate: string): Promise<boolean> {
     return hash === `hashed:${candidate}`;
+  }
+
+  /** Counted rather than slept: a test asserts it was called, not that it took time. */
+  async burnVerificationTime(): Promise<void> {
+    this.burnCalls += 1;
   }
 }
 
@@ -120,5 +130,83 @@ export class FakeMailer implements IdentityMailer {
       to: input.to,
       url: input.signInUrl,
     });
+  }
+}
+
+export class FakeAccessTokenIssuer implements AccessTokenIssuer {
+  private counter = 0;
+
+  async issue(userId: string): Promise<string> {
+    this.counter += 1;
+    return `access:${userId}:${this.counter}`;
+  }
+
+  async verify(token: string): Promise<string | null> {
+    const parts = token.split(':');
+    return parts[0] === 'access' && parts[1] ? parts[1] : null;
+  }
+}
+
+export class FakeRefreshTokenRepository implements RefreshTokenRepository {
+  readonly rows = new Map<string, RefreshToken>();
+
+  async start(token: RefreshToken): Promise<void> {
+    this.rows.set(token.tokenHash, token);
+  }
+
+  async present(tokenHash: string, now: Date): Promise<PresentTokenOutcome> {
+    const token = this.rows.get(tokenHash);
+    if (!token) return { kind: 'unknown' };
+
+    // Same order as the real repository, and for the same reason: `reused` must
+    // not be lost behind an expiry that has since caught up with it.
+    if (token.revokedAt !== null) return { kind: 'revoked' };
+    if (token.consumedAt !== null) return { kind: 'reused', token };
+    if (token.expiresAt.getTime() <= now.getTime()) return { kind: 'expired' };
+    return { kind: 'valid', token };
+  }
+
+  async rotate(
+    previousHash: string,
+    replacement: RefreshToken,
+    now: Date,
+  ): Promise<boolean> {
+    const previous = this.rows.get(previousHash);
+    if (!previous || previous.consumedAt !== null || previous.revokedAt !== null)
+      return false;
+
+    this.rows.set(previousHash, { ...previous, consumedAt: now });
+    this.rows.set(replacement.tokenHash, replacement);
+    return true;
+  }
+
+  async revokeFamily(familyId: string, now: Date): Promise<number> {
+    let revoked = 0;
+    for (const [hash, token] of this.rows) {
+      if (
+        token.familyId === familyId &&
+        token.consumedAt === null &&
+        token.revokedAt === null
+      ) {
+        this.rows.set(hash, { ...token, revokedAt: now });
+        revoked += 1;
+      }
+    }
+    return revoked;
+  }
+
+  async revokeAllForUser(userId: string, now: Date): Promise<number> {
+    let revoked = 0;
+    for (const [hash, token] of this.rows) {
+      if (
+        token.userId === userId &&
+        token.consumedAt === null &&
+        token.revokedAt === null
+      ) {
+        this.rows.set(hash, { ...token, revokedAt: now });
+        revoked += 1;
+      }
+    }
+    return revoked;
   }
 }

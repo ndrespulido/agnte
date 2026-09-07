@@ -150,6 +150,13 @@ jobs:
             SECRETS="${SECRETS},RESEND_API_KEY=agnte-resend-api-key:latest,EMAIL_FROM=agnte-email-from:latest"
           fi
 
+          # Same conditional mount, same reason: this deploys green before the
+          # key exists, and the status page reports signing as not-configured
+          # rather than sign-in failing mysteriously.
+          if gcloud secrets describe agnte-jwt-secret >/dev/null 2>&1; then
+            SECRETS="${SECRETS},JWT_SECRET=agnte-jwt-secret:latest"
+          fi
+
           FLAGS=(
             --image="${{ steps.build.outputs.image }}"
             --region="${{ vars.GCP_REGION }}"

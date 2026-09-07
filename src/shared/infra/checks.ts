@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { loadConfig } from './config';
 import { getDatabase, MIGRATED_SCHEMAS } from './database';
 import { getEmailTransport } from './email';
 import { getObjectStorage } from './object-storage';
@@ -106,6 +107,26 @@ const checks: Check[] = [
       if (!transport) return { status: 'not-configured', detail: 'no email transport' };
 
       return { status: 'ok' as const, detail: transport.description };
+    },
+  },
+  {
+    name: 'access-tokens',
+    run: async () => {
+      const config = loadConfig();
+
+      // Reported rather than exercised, like email: signing a throwaway token
+      // on every health poll proves nothing the presence of a key does not.
+      //
+      // Local development generates a per-process key, which is why this says
+      // "ephemeral" rather than ok there — tokens issued before a restart stop
+      // working after it, and that is worth seeing rather than debugging.
+      if (config.JWT_SECRET) return { status: 'ok' as const, detail: 'configured' };
+
+      if (config.APP_ENV === 'local') {
+        return { status: 'ok' as const, detail: 'ephemeral development key' };
+      }
+
+      return { status: 'not-configured' as const, detail: 'JWT_SECRET is not set' };
     },
   },
 ];

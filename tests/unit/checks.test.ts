@@ -17,6 +17,7 @@ describe('runChecks', () => {
       'database',
       'object-storage',
       'email',
+      'access-tokens',
     ]);
     expect(results.every((r) => typeof r.durationMs === 'number')).toBe(true);
   });

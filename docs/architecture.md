@@ -194,6 +194,18 @@ cookie sessions — a native app is a planned client, and cookies don't translat
 - Google OAuth → same token pair, so there's one auth model downstream
 - Logout → refresh token revoked
 
+> **Added in Phase 1: refresh token rotation with reuse detection.** A thirty-day
+> bearer credential is a long time to trust a string, so a refresh token is
+> exchanged — not reused — and every sign-in starts a *family* that rotation
+> extends. Rotation alone only limits a stolen token to the window before the
+> real client next refreshes. What makes theft visible is that a token which has
+> already been exchanged can only be presented again by someone replaying it;
+> since there is no way to tell the thief from the victim, the family is revoked
+> and both sign in again. Consume-and-replace runs in one transaction, so a
+> half-done rotation can neither strand the client without a token nor leave two
+> live tokens in one family — the second of which would make the next honest
+> refresh look like an attack.
+
 **Argon2id** for password hashing. Rate limits on all auth endpoints (§8.6).
 Verification and reset tokens are stored **hashed** — a database leak shouldn't
 hand over working account-takeover links.

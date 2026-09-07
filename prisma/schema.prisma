@@ -108,6 +108,8 @@ model User {
   /// mismatch is a 409 rather than a silent overwrite.
   version Int @default(0)
 
+  refreshTokens RefreshToken[]
+
   @@map("user")
   @@schema("identity")
 }
@@ -153,5 +155,51 @@ model PendingRegistration {
   @@index([email])
   @@index([expiresAt])
   @@map("pending_registration")
+  @@schema("identity")
+}
+
+/// A revocable refresh token (architecture.md §4).
+///
+/// Access tokens are JWTs and cannot be withdrawn once issued — that is the
+/// trade for not hitting the database on every request, and it is why they last
+/// about fifteen minutes. Revocation lives here instead: signing out, or
+/// detecting a stolen token, invalidates the refresh side, and the access token
+/// expires on its own shortly after.
+///
+/// Stored hashed for the same reason verification tokens are: a database leak
+/// must not hand over working sessions. SHA-256, unsalted, because the value is
+/// 256 bits from a CSPRNG and has to be looked up by value.
+model RefreshToken {
+  /// Hex SHA-256 of the token handed to the client.
+  tokenHash String @id @map("token_hash")
+
+  userId String @map("user_id") @db.Uuid
+
+  /// One sign-in, and every token rotated out of it.
+  ///
+  /// Rotation replaces a token on every use, so a stolen one is only useful
+  /// until the real client next refreshes. What makes theft *detectable* is
+  /// this column: if an already-consumed token is presented again, either the
+  /// thief or the real client is replaying, and there is no way to tell which.
+  /// The safe response is to revoke the whole family and make both sign in
+  /// again.
+  familyId String @map("family_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  /// Set when exchanged for a new pair. A consumed token presented again is the
+  /// reuse signal above, which is why the row is kept rather than deleted.
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+
+  /// Set by sign-out, or by reuse detection revoking the family.
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_token")
   @@schema("identity")
 }

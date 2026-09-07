@@ -2,7 +2,13 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { getDatabase } from '@/shared/infra/database';
 import { resetConfigForTests } from '@/shared/infra/config';
 import { resetEmailTransportForTests } from '@/shared/infra/email';
-import { handleRegister, handleVerifyEmail } from '@/modules/identity';
+import {
+  handleLogin,
+  handleLogout,
+  handleRefresh,
+  handleRegister,
+  handleVerifyEmail,
+} from '@/modules/identity';
 
 /**
  * The routes end to end, against a real Postgres: validation, rate limiting,
@@ -61,6 +67,7 @@ describe.skipIf(!DATABASE_URL)('auth routes', () => {
       emailed.push(args.join(' '));
     });
 
+    await getDatabase()!.$executeRawUnsafe('DELETE FROM identity.refresh_token');
     await getDatabase()!.$executeRawUnsafe('DELETE FROM identity.pending_registration');
     await getDatabase()!.$executeRawUnsafe('DELETE FROM identity."user"');
     await getDatabase()!.$executeRawUnsafe('DELETE FROM platform.rate_limit_window');
@@ -233,5 +240,171 @@ describe.skipIf(!DATABASE_URL)('auth routes', () => {
       'SELECT * FROM identity.pending_registration',
     );
     expect(JSON.stringify(rows)).not.toContain(token);
+  });
+
+  // ---- sessions (task 1.4) -------------------------------------------------
+
+  const jsonPost = (
+    handler: (request: Request) => Promise<Response>,
+    path: string,
+    body: unknown,
+    headers: Record<string, string> = {},
+  ) =>
+    handler(
+      new Request(`https://agnte.test${path}`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-forwarded-for': freshIp(),
+          ...headers,
+        },
+        body: JSON.stringify(body),
+      }),
+    );
+
+  /** Register, verify, and sign in — the whole path a real client walks. */
+  const signUpAndIn = async (email = 'user@example.com') => {
+    await register({ email, password: PASSWORD });
+    await verify(tokenFromLastEmail());
+
+    const response = await jsonPost(handleLogin, '/v1/auth/login', {
+      email,
+      password: PASSWORD,
+    });
+    expect(response.status).toBe(200);
+    return (await response.json()) as { accessToken: string; refreshToken: string };
+  };
+
+  it('signs in after verification and returns a usable token pair', async () => {
+    const pair = await signUpAndIn();
+
+    expect(pair.accessToken.split('.')).toHaveLength(3);
+    expect(pair.refreshToken).toBeTruthy();
+  });
+
+  it('refuses to sign in before the address is verified', async () => {
+    // There is no account yet — verification is what creates it — so this is
+    // the ordinary invalid-credentials path, not a special case.
+    await register({ email: 'unverified@example.com', password: PASSWORD });
+
+    const response = await jsonPost(handleLogin, '/v1/auth/login', {
+      email: 'unverified@example.com',
+      password: PASSWORD,
+    });
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toMatchObject({
+      error: { code: 'identity.invalid_credentials' },
+    });
+  });
+
+  it('answers a wrong password and an unknown address identically', async () => {
+    await signUpAndIn('real@example.com');
+
+    const wrong = await jsonPost(handleLogin, '/v1/auth/login', {
+      email: 'real@example.com',
+      password: 'not the right password',
+    });
+    const unknown = await jsonPost(handleLogin, '/v1/auth/login', {
+      email: 'nobody@example.com',
+      password: PASSWORD,
+    });
+
+    expect(wrong.status).toBe(unknown.status);
+    expect(await wrong.json()).toEqual(await unknown.json());
+  });
+
+  it('enforces the 5 per 15 minutes login limit (§8.6)', async () => {
+    const ip = freshIp();
+    const attempt = () =>
+      handleLogin(
+        new Request('https://agnte.test/v1/auth/login', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-forwarded-for': ip },
+          body: JSON.stringify({
+            email: 'limited@example.com',
+            password: 'wrong password here',
+          }),
+        }),
+      );
+
+    for (let i = 0; i < 5; i += 1) expect((await attempt()).status).toBe(401);
+
+    const blocked = await attempt();
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get('ratelimit-limit')).toBe('5');
+  });
+
+  it('refreshes into a new pair and retires the old refresh token', async () => {
+    const pair = await signUpAndIn();
+
+    const refreshed = await jsonPost(handleRefresh, '/v1/auth/refresh', {
+      refreshToken: pair.refreshToken,
+    });
+    expect(refreshed.status).toBe(200);
+
+    const next = (await refreshed.json()) as { refreshToken: string };
+    expect(next.refreshToken).not.toBe(pair.refreshToken);
+
+    const reused = await jsonPost(handleRefresh, '/v1/auth/refresh', {
+      refreshToken: pair.refreshToken,
+    });
+    expect(reused.status).toBe(401);
+  });
+
+  it('kills the session when a spent refresh token is replayed', async () => {
+    const pair = await signUpAndIn();
+
+    const refreshed = await jsonPost(handleRefresh, '/v1/auth/refresh', {
+      refreshToken: pair.refreshToken,
+    });
+    const next = (await refreshed.json()) as { refreshToken: string };
+
+    // The replay.
+    const replay = await jsonPost(handleRefresh, '/v1/auth/refresh', {
+      refreshToken: pair.refreshToken,
+    });
+    expect(await replay.json()).toMatchObject({
+      error: { code: 'identity.session_revoked' },
+    });
+
+    // And the honest client is signed out too, which is the point.
+    const honest = await jsonPost(handleRefresh, '/v1/auth/refresh', {
+      refreshToken: next.refreshToken,
+    });
+    expect(honest.status).toBe(401);
+  });
+
+  it('signs out, and the refresh token stops working', async () => {
+    const pair = await signUpAndIn();
+
+    const out = await jsonPost(handleLogout, '/v1/auth/logout', {
+      refreshToken: pair.refreshToken,
+    });
+    expect(out.status).toBe(204);
+
+    const after = await jsonPost(handleRefresh, '/v1/auth/refresh', {
+      refreshToken: pair.refreshToken,
+    });
+    expect(after.status).toBe(401);
+  });
+
+  it('answers sign-out with 204 for a token that never existed', async () => {
+    const out = await jsonPost(handleLogout, '/v1/auth/logout', {
+      refreshToken: 'nonsense',
+    });
+    expect(out.status).toBe(204);
+  });
+
+  it('answers 503 rather than signing tokens with a key that will not survive', async () => {
+    process.env.APP_ENV = 'production';
+    resetConfigForTests();
+    resetEmailTransportForTests();
+
+    const response = await jsonPost(handleLogin, '/v1/auth/login', {
+      email: 'a@example.com',
+      password: PASSWORD,
+    });
+    expect(response.status).toBe(503);
   });
 });

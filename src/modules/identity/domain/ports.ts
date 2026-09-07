@@ -1,6 +1,7 @@
 import type { Email } from './email';
 import type { RawPassword } from './password';
 import type { User } from './user';
+import type { RefreshToken } from './session';
 import type { PendingRegistration } from './verification';
 
 /**
@@ -16,11 +17,18 @@ import type { PendingRegistration } from './verification';
 export interface PasswordHasher {
   hash(password: RawPassword): Promise<string>;
 
-  /**
-   * Must take the same time whether or not the hash is real, so a caller can
-   * defend against timing-based account enumeration. See the Argon2 adapter.
-   */
   verify(hash: string, candidate: string): Promise<boolean>;
+
+  /**
+   * Spend a verification's worth of work without having a hash to check.
+   *
+   * Part of the port, not an adapter detail: sign-in has branches that reach no
+   * stored hash at all — an unknown address, a malformed one — and returning
+   * from those in microseconds while a real check costs tens of milliseconds
+   * tells an attacker which addresses are registered. The domain needs to be
+   * able to say "spend it anyway", so the contract has to offer it.
+   */
+  burnVerificationTime(): Promise<void>;
 }
 
 /** The token handed to the user, paired with the hash that gets stored. */
@@ -104,4 +112,65 @@ export interface IdentityMailer {
     displayName: string | null;
     signInUrl: string;
   }): Promise<void>;
+}
+
+/**
+ * Issues and reads the short-lived access token.
+ *
+ * A port rather than a direct call into a JWT library, for the ordinary reason:
+ * the domain should be able to say "give me a token for this user" without
+ * knowing what a JWT is, and the use cases should be testable without a signing
+ * key.
+ */
+export interface AccessTokenIssuer {
+  issue(userId: string): Promise<string>;
+
+  /** Returns the subject, or null for anything that does not verify. */
+  verify(token: string): Promise<string | null>;
+}
+
+export interface RefreshTokenGenerator {
+  issue(): IssuedToken;
+  hashOf(token: string): string;
+}
+
+/**
+ * What presenting a refresh token turned out to mean.
+ *
+ * `reused` is the one that matters. Rotation alone limits the damage of a
+ * stolen token to the window before the real client next refreshes; it is this
+ * outcome that makes the theft *visible*, because a token that has already been
+ * exchanged can only be presented again by someone replaying it. There is no
+ * way to tell the thief from the victim, so the family goes.
+ */
+export type PresentTokenOutcome =
+  | { kind: 'valid'; token: RefreshToken }
+  | { kind: 'unknown' }
+  | { kind: 'expired' }
+  | { kind: 'revoked' }
+  | { kind: 'reused'; token: RefreshToken };
+
+export interface RefreshTokenRepository {
+  start(token: RefreshToken): Promise<void>;
+
+  /** Reads a token and classifies it, without changing anything. */
+  present(tokenHash: string, now: Date): Promise<PresentTokenOutcome>;
+
+  /**
+   * Atomically consumes a token and stores its replacement.
+   *
+   * Both halves or neither: a consume that succeeded without its replacement
+   * being written would sign the client out mid-refresh, and a replacement
+   * written without the consume would leave two live tokens in one family, so
+   * the next honest refresh would look like reuse and revoke the session.
+   * Returns false if the token was no longer consumable, which is how two
+   * concurrent refreshes resolve to one winner.
+   */
+  rotate(previousHash: string, replacement: RefreshToken, now: Date): Promise<boolean>;
+
+  /** Revokes every live token in a family. Returns how many it revoked. */
+  revokeFamily(familyId: string, now: Date): Promise<number>;
+
+  /** Revokes every live token for a user — "sign out everywhere". */
+  revokeAllForUser(userId: string, now: Date): Promise<number>;
 }

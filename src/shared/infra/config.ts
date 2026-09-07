@@ -56,6 +56,20 @@ const schema = z.object({
    * as a fallback, and production sets it explicitly.
    */
   APP_BASE_URL: z.url().optional(),
+
+  /**
+   * HMAC key for signing access tokens (architecture.md §4).
+   *
+   * 32 bytes minimum, which is the output size of the SHA-256 that HS256 uses —
+   * a shorter key adds no security and a longer one adds none either, since
+   * HMAC folds it back to the block size.
+   *
+   * Unset in local development means a throwaway key generated per process, so
+   * `npm run dev` needs no configuration (§7.1). Unset in a deployed
+   * environment means sign-in answers 503: signing with a value that vanishes
+   * on the next cold start would log everyone out at random.
+   */
+  JWT_SECRET: z.string().min(32).optional(),
 });
 
 /**

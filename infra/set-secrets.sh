@@ -218,6 +218,27 @@ if [[ -n "${RESEND_API_KEY}" ]]; then
   esac
 fi
 
+# ----------------------------------------------------------------------------
+# Access token signing key (architecture.md §4)
+#
+# Generated rather than asked for: it is 32 random bytes, not something you go
+# and fetch, and a prompt would only invite a memorable value. Created once and
+# left alone on re-runs — replacing it signs every user out, so it must not be a
+# side effect of running this script again for an unrelated reason.
+# ----------------------------------------------------------------------------
+
+say "Access token signing key"
+
+if gcloud secrets describe agnte-jwt-secret --project="${PROJECT_ID}" >/dev/null 2>&1; then
+  note "agnte-jwt-secret already exists; leaving it alone."
+  note "To rotate deliberately (this signs everyone out):"
+  note "  openssl rand -hex 32 | gcloud secrets versions add agnte-jwt-secret --data-file=-"
+  JWT_SECRET=""
+else
+  JWT_SECRET="$(openssl rand -hex 32)"
+  note "Generated a new 32-byte key."
+fi
+
 say "Storing secrets"
 store agnte-database-url "${DATABASE_URL}"
 store agnte-direct-url "${DIRECT_URL}"
@@ -227,6 +248,10 @@ if [[ -n "${R2_ENDPOINT}" ]]; then
   store agnte-r2-bucket "${R2_BUCKET}"
   store agnte-r2-access-key-id "${R2_ACCESS_KEY_ID}"
   store agnte-r2-secret-access-key "${R2_SECRET_ACCESS_KEY}"
+fi
+
+if [[ -n "${JWT_SECRET}" ]]; then
+  store agnte-jwt-secret "${JWT_SECRET}"
 fi
 
 if [[ -n "${RESEND_API_KEY}" ]]; then
@@ -263,6 +288,14 @@ if [[ -n "${R2_ENDPOINT}" ]]; then
     note "runtime  -> ${secret}"
   done
 fi
+
+# Unconditional: the secret exists by now either way — this run created it, or
+# an earlier one did — and the binding is idempotent.
+gcloud secrets add-iam-policy-binding agnte-jwt-secret \
+  --member="serviceAccount:${RUNTIME_SA}" \
+  --role=roles/secretmanager.secretAccessor \
+  --project="${PROJECT_ID}" --quiet >/dev/null
+note "runtime  -> agnte-jwt-secret"
 
 if [[ -n "${RESEND_API_KEY}" ]]; then
   for secret in agnte-resend-api-key agnte-email-from; do
@@ -310,6 +343,8 @@ if [[ -n "${R2_ENDPOINT}" ]]; then
     verify "${secret}" "${RUNTIME_SA}" "runtime"
   done
 fi
+
+verify agnte-jwt-secret "${RUNTIME_SA}" "runtime"
 
 if [[ -n "${RESEND_API_KEY}" ]]; then
   for secret in agnte-resend-api-key agnte-email-from; do
