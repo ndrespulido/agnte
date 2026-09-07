@@ -488,6 +488,16 @@ insufficient on its own.**
   where being wrong is unrecoverable.
 - Media in R2: enable versioning plus a lifecycle rule.
 
+> **Built in Phase 1.** A Cloud Run Job (`infra/backup/`) rather than the
+> `/internal/*` route §1.3 uses for other deferred work: a dump can outlive the
+> service's 60s request timeout, and `pg_dump` in the web image would be pulled
+> on every cold start of a service that never runs it. The job refuses to call
+> anything a backup unless the dump exceeds a plausible minimum *and* the object
+> read back from R2 hashes identically to what was sent. The rehearsal is
+> `infra/backup/verify-restore.mjs`, and it is a script rather than a note
+> because §8.8 is right that an untested backup is a guess. Media versioning
+> remains a Cloudflare dashboard action — see docs/operations.md §2g.
+
 ### 8.9 Migrating v1 data
 
 One-off script: read the existing local Postgres → map to the v2 schema →
