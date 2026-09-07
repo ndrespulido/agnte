@@ -193,6 +193,19 @@ gcloud secrets list --project=agnte-prod
 gcloud secrets get-iam-policy agnte-direct-url --project=agnte-prod
 ```
 
+### Authoring a migration
+
+`prisma migrate diff` and `migrate dev` need a scratch database to replay the
+migration history into, so they can work out the difference. Create one once:
+
+```bash
+createdb agnte_shadow
+export SHADOW_DATABASE_URL=postgresql://localhost:5432/agnte_shadow
+```
+
+`migrate deploy` — the only migration command CI and production run — never
+uses it, which is why `prisma.config.ts` treats it as optional.
+
 ### How migrations run
 
 `prisma migrate deploy` runs as a CI step *before* the Cloud Run deploy, never

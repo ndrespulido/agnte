@@ -1,7 +1,3 @@
-// Phase 0 has no models. What it establishes is the migration pipeline and the
-// per-module schema layout from docs/architecture.md §1.1, so that Phase 1 adds
-// tables into a structure that already exists rather than retrofitting one.
-//
 // Connection URLs live in prisma.config.ts, not here: Prisma 7 removed `url`
 // and `directUrl` from the schema and connects through a driver adapter.
 
@@ -11,4 +7,72 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+
+  // One schema per module (docs/architecture.md §1.1), plus `platform` for
+  // cross-cutting infrastructure that belongs to no module — see the amendment
+  // in §1.1. No cross-schema foreign keys and no cross-schema joins: a module
+  // reads another's data through its public API, never its tables.
+  schemas = ["platform", "identity", "verse", "media", "insights", "notifications", "privacy"]
+}
+
+/// Replay protection for write endpoints (§6).
+///
+/// Mobile networks retry under the client, so the same request can arrive
+/// twice. The first attempt claims the key; a retry replays the stored response
+/// instead of doing the work again.
+///
+/// `status` is a string rather than an enum so it can be constrained in SQL
+/// alongside the check that a completed row actually carries a response —
+/// see the migration.
+model IdempotencyKey {
+  /// Who the key belongs to: "user:<uuid>" or "anon:<ip>". Keys are scoped so
+  /// one client cannot replay or block another's request by guessing a key.
+  scope String
+
+  /// The client-supplied Idempotency-Key header value.
+  key String
+
+  /// Hash of method, path and body. A repeat of the same key with a different
+  /// request is a client bug, and answering it with the first response would
+  /// hide that.
+  requestFingerprint String @map("request_fingerprint")
+
+  /// in_progress | completed
+  status String
+
+  responseStatus Int?  @map("response_status")
+  responseBody   Json? @map("response_body")
+
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(3)
+
+  /// 24h after creation (§8.7 retention).
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  @@id([scope, key])
+  @@index([expiresAt])
+  @@map("idempotency_key")
+  @@schema("platform")
+}
+
+/// Fixed-window counters for application-level rate limiting (§8.6).
+///
+/// No Redis: at this scale it would cost more than everything else combined.
+/// A fixed window is coarser than a sliding one — a caller can burst across a
+/// boundary — but the limits here are about stopping abuse and enumeration,
+/// not smoothing traffic.
+model RateLimitWindow {
+  /// Identifies what is limited and for whom, e.g.
+  /// "auth.login:ip=203.0.113.4|email=a@b.c".
+  bucket String
+
+  /// Start of the window this row counts, floored to the window size.
+  windowStart DateTime @map("window_start") @db.Timestamptz(3)
+
+  count Int @default(0)
+
+  @@id([bucket, windowStart])
+  @@index([windowStart])
+  @@map("rate_limit_window")
+  @@schema("platform")
 }
