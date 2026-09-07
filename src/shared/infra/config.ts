@@ -36,6 +36,51 @@ const schema = z.object({
    * one per pull request. A lifecycle rule expires these.
    */
   R2_PREFIX: z.string().default(''),
+
+  /**
+   * Resend (architecture.md §3). Both are required together — see the
+   * refinement below. Unset means the console transport locally, and no email
+   * at all in a deployed environment.
+   */
+  RESEND_API_KEY: z.string().min(1).optional(),
+  EMAIL_FROM: z.string().min(1).optional(),
+
+  /**
+   * Origin used to build links that go into emails, e.g.
+   * "https://agnte.example.com".
+   *
+   * When unset the origin is taken from the incoming request. That is
+   * convenient — a preview URL needs no configuration — but it means a request
+   * carrying a forged Host header would produce a verification link pointing at
+   * the attacker's domain, with the victim's token in it. So it is derived only
+   * as a fallback, and production sets it explicitly.
+   */
+  APP_BASE_URL: z.url().optional(),
+
+  /**
+   * HMAC key for signing access tokens (architecture.md §4).
+   *
+   * 32 bytes minimum, which is the output size of the SHA-256 that HS256 uses —
+   * a shorter key adds no security and a longer one adds none either, since
+   * HMAC folds it back to the block size.
+   *
+   * Unset in local development means a throwaway key generated per process, so
+   * `npm run dev` needs no configuration (§7.1). Unset in a deployed
+   * environment means sign-in answers 503: signing with a value that vanishes
+   * on the next cold start would log everyone out at random.
+   */
+  JWT_SECRET: z.string().min(32).optional(),
+
+  /**
+   * Google OAuth (architecture.md §4). Both required together.
+   *
+   * Unset means Google sign-in is simply not offered — which is the normal
+   * state for every preview environment, because Google does not accept
+   * wildcard redirect URIs and a per-pull-request URL cannot be registered in
+   * advance. Previews use the email and password path.
+   */
+  GOOGLE_CLIENT_ID: z.string().min(1).optional(),
+  GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
 });
 
 /**
@@ -50,6 +95,11 @@ const R2_KEYS = [
   'R2_SECRET_ACCESS_KEY',
 ] as const;
 
+/** Same reasoning as R2: half-configured email is a dropped secret, not a choice. */
+const EMAIL_KEYS = ['RESEND_API_KEY', 'EMAIL_FROM'] as const;
+
+const GOOGLE_KEYS = ['GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'] as const;
+
 const schemaWithChecks = schema.superRefine((value, ctx) => {
   const present = R2_KEYS.filter((key) => value[key] !== undefined);
   if (present.length > 0 && present.length < R2_KEYS.length) {
@@ -58,6 +108,26 @@ const schemaWithChecks = schema.superRefine((value, ctx) => {
       code: 'custom',
       path: [missing[0] ?? 'R2_ENDPOINT'],
       message: `R2 is partially configured. Missing: ${missing.join(', ')}`,
+    });
+  }
+
+  const emailPresent = EMAIL_KEYS.filter((key) => value[key] !== undefined);
+  if (emailPresent.length > 0 && emailPresent.length < EMAIL_KEYS.length) {
+    const missing = EMAIL_KEYS.filter((key) => value[key] === undefined);
+    ctx.addIssue({
+      code: 'custom',
+      path: [missing[0] ?? 'RESEND_API_KEY'],
+      message: `Email is partially configured. Missing: ${missing.join(', ')}`,
+    });
+  }
+
+  const googlePresent = GOOGLE_KEYS.filter((key) => value[key] !== undefined);
+  if (googlePresent.length > 0 && googlePresent.length < GOOGLE_KEYS.length) {
+    const missing = GOOGLE_KEYS.filter((key) => value[key] === undefined);
+    ctx.addIssue({
+      code: 'custom',
+      path: [missing[0] ?? 'GOOGLE_CLIENT_ID'],
+      message: `Google OAuth is partially configured. Missing: ${missing.join(', ')}`,
     });
   }
 });

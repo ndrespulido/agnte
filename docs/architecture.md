@@ -192,11 +192,57 @@ cookie sessions — a native app is a planned client, and cookies don't translat
 - Forgot password → reset token (single-use, 1h, invalidated on use *and* on
   password change)
 - Google OAuth → same token pair, so there's one auth model downstream
+
+> **Confirmed in Phase 1: previews cannot offer Google sign-in.** Google rejects
+> wildcard redirect URIs, and a preview URL is per pull request, so it cannot be
+> registered in advance. Previews use email and password; the status page
+> reports `google-sign-in: not-configured` with that reason. An account created
+> through Google carries no password hash — a placeholder would be a credential
+> nobody chose — so `User.passwordHash` is nullable, and password sign-in
+> refuses such an account with the same error and the same timing as a wrong
+> password.
 - Logout → refresh token revoked
+
+> **Added in Phase 1: refresh token rotation with reuse detection.** A thirty-day
+> bearer credential is a long time to trust a string, so a refresh token is
+> exchanged — not reused — and every sign-in starts a *family* that rotation
+> extends. Rotation alone only limits a stolen token to the window before the
+> real client next refreshes. What makes theft visible is that a token which has
+> already been exchanged can only be presented again by someone replaying it;
+> since there is no way to tell the thief from the victim, the family is revoked
+> and both sign in again. Consume-and-replace runs in one transaction, so a
+> half-done rotation can neither strand the client without a token nor leave two
+> live tokens in one family — the second of which would make the next honest
+> refresh look like an attack.
 
 **Argon2id** for password hashing. Rate limits on all auth endpoints (§8.6).
 Verification and reset tokens are stored **hashed** — a database leak shouldn't
 hand over working account-takeover links.
+
+> **Amended in Phase 1: no account exists until the address is proven.** The
+> flow above says register → token → *activate*, which means a user row created
+> at registration and switched on later. That row is shared mutable state keyed
+> by an address nobody has proven yet, and it opens account pre-hijacking:
+> someone registers your address before you do, you register too, and whichever
+> single password ends up on that row can be theirs when you click the link in
+> your own inbox. Every variant — last registration wins, first wins, revoke the
+> old token — leaves a takeover path.
+>
+> So registration writes a `pending_registration` row instead: the token hash,
+> the address, and the Argon2id hash of *that attempt's* password. The account
+> is created when a link is redeemed, already verified, and redemption deletes
+> the row (`DELETE ... RETURNING`, so exactly one of two concurrent clicks
+> wins). Attempts are never revoked by later ones, which is what makes clicking
+> *your own* email always give you *your own* password.
+>
+> Registration answers identically whether the address was free or taken, the
+> way §8.6 already requires of password reset — and hashes the password on both
+> paths, since skipping ~40ms of Argon2 on the "taken" branch would leak by
+> timing what the identical bodies withhold. The address owner is told by email
+> instead, which reaches the one person entitled to know.
+>
+> Consequence for §4's list: there is no "activate" step on a User, and no
+> unverified users for login (1.4) to reason about.
 
 ---
 
@@ -441,6 +487,16 @@ insufficient on its own.**
   counts. An untested backup is a guess, and this is the one place in the system
   where being wrong is unrecoverable.
 - Media in R2: enable versioning plus a lifecycle rule.
+
+> **Built in Phase 1.** A Cloud Run Job (`infra/backup/`) rather than the
+> `/internal/*` route §1.3 uses for other deferred work: a dump can outlive the
+> service's 60s request timeout, and `pg_dump` in the web image would be pulled
+> on every cold start of a service that never runs it. The job refuses to call
+> anything a backup unless the dump exceeds a plausible minimum *and* the object
+> read back from R2 hashes identically to what was sent. The rehearsal is
+> `infra/backup/verify-restore.mjs`, and it is a script rather than a note
+> because §8.8 is right that an untested backup is a guess. Media versioning
+> remains a Cloudflare dashboard action — see docs/operations.md §2g.
 
 ### 8.9 Migrating v1 data
 

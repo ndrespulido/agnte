@@ -26,3 +26,4 @@ test-results/
 .DS_Store
 *.log
 infra/kill-switch/node_modules/
+test-results.json

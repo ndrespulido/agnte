@@ -158,6 +158,130 @@ if [[ -n "${R2_ENDPOINT}" ]]; then
   fi
 fi
 
+# ----------------------------------------------------------------------------
+# Resend (architecture.md §3)
+#
+# Optional in exactly the same way R2 is: without it the app deploys, the status
+# page reports email as not-configured, and POST /v1/auth/register answers 503
+# rather than accepting a registration whose verification link it cannot send.
+# ----------------------------------------------------------------------------
+
+say "Resend (email)"
+cat <<'EXPLAIN'
+
+  From the Resend dashboard you need:
+
+  - an API key (API Keys -> Create API Key, sending access is enough)
+  - a From address on a domain you have verified there
+
+  Until a domain is verified, Resend only delivers to the address that owns the
+  Resend account, and only from onboarding@resend.dev. That is enough to test
+  registration yourself, and not enough for anyone else — so verify a domain
+  before inviting a second person.
+
+Press Enter at the API key prompt to skip email for now.
+
+EXPLAIN
+
+read -rsp "  Resend API key:  " RESEND_API_KEY; echo
+
+if [[ -n "${RESEND_API_KEY}" ]]; then
+  read -rp "  From address:    " EMAIL_FROM
+
+  [[ -n "${EMAIL_FROM}" ]] || { echo "  A From address is required once a key is given."; exit 1; }
+
+  # The app rejects a half-configured transport at boot; catching a From address
+  # pasted into the key slot here is cheaper than at deploy.
+  if [[ "${RESEND_API_KEY}" != re_* ]]; then
+    echo "  A Resend API key starts with \"re_\". That does not look like one."
+    exit 1
+  fi
+  # Accepts both "a@b.com" and "Name <a@b.com>".
+  if [[ "${EMAIL_FROM}" != *@*.* ]]; then
+    echo "  The From address needs to contain an address, e.g."
+    echo "  \"Agnte <no-reply@your-domain>\" or no-reply@your-domain"
+    exit 1
+  fi
+
+  # Prove the key works before storing it, the same way the R2 credentials are
+  # proved. A 401 here is seconds; the same 401 discovered at registration is a
+  # person waiting for an email that will never arrive.
+  say "Checking the Resend key"
+  RESEND_STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+    -H "Authorization: Bearer ${RESEND_API_KEY}" \
+    https://api.resend.com/domains || echo "000")
+  case "${RESEND_STATUS}" in
+    2*) note "Resend accepted the key." ;;
+    401|403) echo "  Resend rejected that key (HTTP ${RESEND_STATUS})."; exit 1 ;;
+    000) note "Could not reach Resend; storing the key unverified." ;;
+    *)  note "Resend answered HTTP ${RESEND_STATUS}; storing the key unverified." ;;
+  esac
+fi
+
+# ----------------------------------------------------------------------------
+# Access token signing key (architecture.md §4)
+#
+# Generated rather than asked for: it is 32 random bytes, not something you go
+# and fetch, and a prompt would only invite a memorable value. Created once and
+# left alone on re-runs — replacing it signs every user out, so it must not be a
+# side effect of running this script again for an unrelated reason.
+# ----------------------------------------------------------------------------
+
+say "Access token signing key"
+
+if gcloud secrets describe agnte-jwt-secret --project="${PROJECT_ID}" >/dev/null 2>&1; then
+  note "agnte-jwt-secret already exists; leaving it alone."
+  note "To rotate deliberately (this signs everyone out):"
+  note "  openssl rand -hex 32 | gcloud secrets versions add agnte-jwt-secret --data-file=-"
+  JWT_SECRET=""
+else
+  JWT_SECRET="$(openssl rand -hex 32)"
+  note "Generated a new 32-byte key."
+fi
+
+# ----------------------------------------------------------------------------
+# Google OAuth (architecture.md §4)
+#
+# Optional like R2 and Resend. Production only, by necessity: Google does not
+# accept wildcard redirect URIs, so a preview's per-pull-request URL cannot be
+# registered in advance.
+# ----------------------------------------------------------------------------
+
+say "Google sign-in"
+cat <<'EXPLAIN'
+
+  From the Google Cloud console (APIs & Services -> Credentials):
+
+  - Create an OAuth 2.0 Client ID of type "Web application"
+  - Add this exact authorised redirect URI:
+
+      <your production URL>/v1/auth/google/callback
+
+  The URI must match byte for byte, including the scheme and any trailing path.
+  Google rejects wildcards, so preview environments cannot use Google sign-in —
+  they use email and password, and their status page says so.
+
+Press Enter at the client ID prompt to skip Google sign-in for now.
+
+EXPLAIN
+
+read -rp "  Google client ID:     " GOOGLE_CLIENT_ID
+
+if [[ -n "${GOOGLE_CLIENT_ID}" ]]; then
+  read -rsp "  Google client secret: " GOOGLE_CLIENT_SECRET; echo
+
+  [[ -n "${GOOGLE_CLIENT_SECRET}" ]] \
+    || { echo "  A client secret is required once a client ID is given."; exit 1; }
+
+  # A Google web client ID always ends this way. Catching a project id or an API
+  # key pasted here is cheaper than a redirect_uri_mismatch at sign-in.
+  if [[ "${GOOGLE_CLIENT_ID}" != *.apps.googleusercontent.com ]]; then
+    echo "  A Google client ID ends with \".apps.googleusercontent.com\"."
+    echo "  That looks like something else — check you copied the Client ID."
+    exit 1
+  fi
+fi
+
 say "Storing secrets"
 store agnte-database-url "${DATABASE_URL}"
 store agnte-direct-url "${DIRECT_URL}"
@@ -167,6 +291,20 @@ if [[ -n "${R2_ENDPOINT}" ]]; then
   store agnte-r2-bucket "${R2_BUCKET}"
   store agnte-r2-access-key-id "${R2_ACCESS_KEY_ID}"
   store agnte-r2-secret-access-key "${R2_SECRET_ACCESS_KEY}"
+fi
+
+if [[ -n "${JWT_SECRET}" ]]; then
+  store agnte-jwt-secret "${JWT_SECRET}"
+fi
+
+if [[ -n "${RESEND_API_KEY}" ]]; then
+  store agnte-resend-api-key "${RESEND_API_KEY}"
+  store agnte-email-from "${EMAIL_FROM}"
+fi
+
+if [[ -n "${GOOGLE_CLIENT_ID}" ]]; then
+  store agnte-google-client-id "${GOOGLE_CLIENT_ID}"
+  store agnte-google-client-secret "${GOOGLE_CLIENT_SECRET}"
 fi
 
 # ----------------------------------------------------------------------------
@@ -191,6 +329,34 @@ note "deployer -> agnte-direct-url (migrations in CI)"
 
 if [[ -n "${R2_ENDPOINT}" ]]; then
   for secret in agnte-r2-endpoint agnte-r2-bucket agnte-r2-access-key-id agnte-r2-secret-access-key; do
+    gcloud secrets add-iam-policy-binding "${secret}" \
+      --member="serviceAccount:${RUNTIME_SA}" \
+      --role=roles/secretmanager.secretAccessor \
+      --project="${PROJECT_ID}" --quiet >/dev/null
+    note "runtime  -> ${secret}"
+  done
+fi
+
+# Unconditional: the secret exists by now either way — this run created it, or
+# an earlier one did — and the binding is idempotent.
+gcloud secrets add-iam-policy-binding agnte-jwt-secret \
+  --member="serviceAccount:${RUNTIME_SA}" \
+  --role=roles/secretmanager.secretAccessor \
+  --project="${PROJECT_ID}" --quiet >/dev/null
+note "runtime  -> agnte-jwt-secret"
+
+if [[ -n "${RESEND_API_KEY}" ]]; then
+  for secret in agnte-resend-api-key agnte-email-from; do
+    gcloud secrets add-iam-policy-binding "${secret}" \
+      --member="serviceAccount:${RUNTIME_SA}" \
+      --role=roles/secretmanager.secretAccessor \
+      --project="${PROJECT_ID}" --quiet >/dev/null
+    note "runtime  -> ${secret}"
+  done
+fi
+
+if [[ -n "${GOOGLE_CLIENT_ID}" ]]; then
+  for secret in agnte-google-client-id agnte-google-client-secret; do
     gcloud secrets add-iam-policy-binding "${secret}" \
       --member="serviceAccount:${RUNTIME_SA}" \
       --role=roles/secretmanager.secretAccessor \
@@ -232,6 +398,20 @@ verify agnte-direct-url "${DEPLOYER_SA}" "deployer"
 
 if [[ -n "${R2_ENDPOINT}" ]]; then
   for secret in agnte-r2-endpoint agnte-r2-bucket agnte-r2-access-key-id agnte-r2-secret-access-key; do
+    verify "${secret}" "${RUNTIME_SA}" "runtime"
+  done
+fi
+
+verify agnte-jwt-secret "${RUNTIME_SA}" "runtime"
+
+if [[ -n "${RESEND_API_KEY}" ]]; then
+  for secret in agnte-resend-api-key agnte-email-from; do
+    verify "${secret}" "${RUNTIME_SA}" "runtime"
+  done
+fi
+
+if [[ -n "${GOOGLE_CLIENT_ID}" ]]; then
+  for secret in agnte-google-client-id agnte-google-client-secret; do
     verify "${secret}" "${RUNTIME_SA}" "runtime"
   done
 fi

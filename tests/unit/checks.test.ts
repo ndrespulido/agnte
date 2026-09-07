@@ -12,7 +12,14 @@ describe('runChecks', () => {
   it('reports every dependency separately', async () => {
     const results = await runChecks();
 
-    expect(results.map((r) => r.name)).toEqual(['runtime', 'database', 'object-storage']);
+    expect(results.map((r) => r.name)).toEqual([
+      'runtime',
+      'database',
+      'object-storage',
+      'email',
+      'access-tokens',
+      'google-sign-in',
+    ]);
     expect(results.every((r) => typeof r.durationMs === 'number')).toBe(true);
   });
 

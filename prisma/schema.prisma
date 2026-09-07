@@ -76,3 +76,212 @@ model RateLimitWindow {
   @@map("rate_limit_window")
   @@schema("platform")
 }
+
+/// A person with an account (§4).
+///
+/// `emailVerifiedAt` is the single fact about verification rather than a
+/// separate status column: a status and a timestamp can disagree, and the one
+/// that can disagree is the one that eventually does.
+model User {
+  /// Client-generated UUIDv7 (§2) — see src/shared/kernel/id.ts.
+  id String @id @db.Uuid
+
+  /// Stored already normalised (trimmed, lowercased). The migration adds a
+  /// CHECK that enforces that in the database, so a write path that forgets to
+  /// normalise fails loudly instead of creating a second account that differs
+  /// only in case.
+  email String @unique
+
+  /// Argon2id PHC string. Carries its own salt and parameters, which is what
+  /// lets the cost be raised later without invalidating existing hashes.
+  ///
+  /// Null for an account that only ever signs in with Google. A placeholder
+  /// hash would be a credential nobody chose and nobody can use, and the one
+  /// thing worse than no password is a password you do not know you have.
+  passwordHash String? @map("password_hash")
+
+  displayName String? @map("display_name")
+
+  /// Null until the address is proven. Nothing but verification sets it.
+  emailVerifiedAt DateTime? @map("email_verified_at") @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  /// Optimistic concurrency (§2): a write sends the version it read, and a
+  /// mismatch is a 409 rather than a silent overwrite.
+  version Int @default(0)
+
+  refreshTokens       RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
+  oauthAccounts       OAuthAccount[]
+
+  @@map("user")
+  @@schema("identity")
+}
+
+/// A registration that has been started but not yet proven (architecture.md §4).
+///
+/// The account does not exist until the address is verified, and the candidate
+/// password lives *here*, on the token, rather than on a placeholder user row.
+///
+/// That is a deliberate departure from §4's "create then activate" wording, and
+/// it closes an account pre-hijacking hole. With one user row per address whose
+/// password is overwritten by whoever registered most recently, an attacker can
+/// register a victim's address first; when the victim registers and then clicks
+/// the link in their inbox, the row they activate can carry the attacker's
+/// password. Per-token credentials remove the shared mutable state: each link
+/// activates the registration that produced it, so the victim clicking *their
+/// own* email always gets their own password, whatever the attacker did first.
+///
+/// There is no `consumedAt`. The row is deleted on redemption — single-use by
+/// deletion, which also means an abandoned attempt's password hash is not kept
+/// around any longer than its 24h expiry.
+model PendingRegistration {
+  /// Hex SHA-256 of the token in the emailed link.
+  ///
+  /// SHA-256 rather than Argon2 — deliberately, and for the opposite reason
+  /// passwords use Argon2. A password is low-entropy and guessable, so its hash
+  /// must be slow and salted. This token is 256 bits from a CSPRNG, so guessing
+  /// is already hopeless, and it has to be *looked up* by value, which a per-row
+  /// salt would make impossible.
+  tokenHash String @id @map("token_hash")
+
+  /// Normalised the same way User.email is; the migration enforces it.
+  email String
+
+  /// Argon2id PHC string for the password this registration was made with.
+  passwordHash String @map("password_hash")
+
+  displayName String? @map("display_name")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  @@index([email])
+  @@index([expiresAt])
+  @@map("pending_registration")
+  @@schema("identity")
+}
+
+/// A revocable refresh token (architecture.md §4).
+///
+/// Access tokens are JWTs and cannot be withdrawn once issued — that is the
+/// trade for not hitting the database on every request, and it is why they last
+/// about fifteen minutes. Revocation lives here instead: signing out, or
+/// detecting a stolen token, invalidates the refresh side, and the access token
+/// expires on its own shortly after.
+///
+/// Stored hashed for the same reason verification tokens are: a database leak
+/// must not hand over working sessions. SHA-256, unsalted, because the value is
+/// 256 bits from a CSPRNG and has to be looked up by value.
+model RefreshToken {
+  /// Hex SHA-256 of the token handed to the client.
+  tokenHash String @id @map("token_hash")
+
+  userId String @map("user_id") @db.Uuid
+
+  /// One sign-in, and every token rotated out of it.
+  ///
+  /// Rotation replaces a token on every use, so a stolen one is only useful
+  /// until the real client next refreshes. What makes theft *detectable* is
+  /// this column: if an already-consumed token is presented again, either the
+  /// thief or the real client is replaying, and there is no way to tell which.
+  /// The safe response is to revoke the whole family and make both sign in
+  /// again.
+  familyId String @map("family_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  /// Set when exchanged for a new pair. A consumed token presented again is the
+  /// reuse signal above, which is why the row is kept rather than deleted.
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+
+  /// Set by sign-out, or by reuse detection revoking the family.
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_token")
+  @@schema("identity")
+}
+
+/// A single-use password reset token (architecture.md §4).
+///
+/// Separate from PendingRegistration despite the near-identical shape. They
+/// mean different things — one carries a password that does not belong to an
+/// account yet, the other authorises replacing the password on an account that
+/// exists — and they have different lifetimes, different revocation rules and
+/// different blast radii. Merging them into a "token" table with a `purpose`
+/// column would put a registration one wrong WHERE clause away from being a
+/// password reset.
+///
+/// Hashed for the same reason as every other token here: a database leak must
+/// not hand over working account-takeover links.
+model PasswordResetToken {
+  /// Hex SHA-256 of the token in the emailed link.
+  tokenHash String @id @map("token_hash")
+
+  userId String @map("user_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  /// Set when redeemed, rather than the row being deleted.
+  ///
+  /// Unlike a pending registration — which is deleted so an abandoned attempt's
+  /// password hash does not linger — this row holds no secret worth expiring
+  /// early, and keeping it lets a second click be answered with "already used"
+  /// instead of the much less helpful "invalid".
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+
+  /// Set when the password changes by any route, which §4 requires: a reset
+  /// link that outlives the password it was issued against is a way back in for
+  /// whoever requested it.
+  invalidatedAt DateTime? @map("invalidated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_token")
+  @@schema("identity")
+}
+
+/// A third-party identity linked to an account (architecture.md §4).
+///
+/// Separate from User rather than columns on it, because "which providers can
+/// sign this person in" is a list, not a field. Google today, Apple plausibly
+/// later for the native client, and adding one should not be a migration on the
+/// user table.
+///
+/// The unique constraint is on (provider, providerAccountId) — Google's stable
+/// subject id, never the email. An email can move between Google accounts and a
+/// Google account can change its email; `sub` is the only identifier Google
+/// promises is stable and unique forever.
+model OAuthAccount {
+  provider String
+
+  /// The provider's own id for this person — Google's `sub` claim.
+  providerAccountId String @map("provider_account_id")
+
+  userId String @map("user_id") @db.Uuid
+
+  /// The address the provider asserted at link time, kept for support and for
+  /// noticing later that it has drifted from ours. Never used to *find* an
+  /// account — see the unique constraint above.
+  email String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+  @@index([userId])
+  @@map("oauth_account")
+  @@schema("identity")
+}

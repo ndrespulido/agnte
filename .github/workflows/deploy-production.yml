@@ -101,6 +101,51 @@ jobs:
       - name: Deploy
         id: deploy
         run: |
+          ENV_VARS="APP_ENV=production,GIT_SHA=${GITHUB_SHA::7}"
+          SECRETS="DATABASE_URL=agnte-database-url:latest,R2_ENDPOINT=agnte-r2-endpoint:latest,R2_BUCKET=agnte-r2-bucket:latest,R2_ACCESS_KEY_ID=agnte-r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=agnte-r2-secret-access-key:latest"
+
+          # Pin the origin used in email links rather than deriving it from the
+          # request Host, which a client controls — a forged one would put an
+          # attacker's domain into a verification link carrying the victim's
+          # token. Read back from the service itself so there is no URL to keep
+          # in sync here; on the very first deploy the service does not exist
+          # yet, and the app falls back to the request origin for that one run.
+          BASE_URL=$(gcloud run services describe "${SERVICE}" \
+            --region="${{ vars.GCP_REGION }}" \
+            --format='value(status.url)' 2>/dev/null || true)
+          if [[ -n "$BASE_URL" ]]; then
+            ENV_VARS="${ENV_VARS},APP_BASE_URL=${BASE_URL}"
+          fi
+
+          # Mounted only once they exist, so deploying the code that needs them
+          # is not blocked on the secrets being created. Without them the app
+          # has no email transport: the status page says so, and registration
+          # answers 503 rather than accepting a registration it cannot confirm.
+          if gcloud secrets describe agnte-resend-api-key >/dev/null 2>&1 \
+            && gcloud secrets describe agnte-email-from >/dev/null 2>&1; then
+            SECRETS="${SECRETS},RESEND_API_KEY=agnte-resend-api-key:latest,EMAIL_FROM=agnte-email-from:latest"
+          else
+            echo "::warning::Resend is not configured; registration will answer 503. Run ./infra/set-secrets.sh"
+          fi
+
+          # Same conditional mount, same reason: this deploys green before the
+          # key exists, and the status page reports signing as not-configured
+          # rather than sign-in failing mysteriously.
+          if gcloud secrets describe agnte-jwt-secret >/dev/null 2>&1; then
+            SECRETS="${SECRETS},JWT_SECRET=agnte-jwt-secret:latest"
+          else
+            echo "::warning::No JWT signing key; sign-in will answer 503. Run ./infra/set-secrets.sh"
+          fi
+
+          # Production only. Google will not accept a wildcard redirect URI, so
+          # a preview's per-pull-request URL cannot be registered in advance —
+          # previews use the email and password path and report Google sign-in
+          # as not-configured on the status page.
+          if gcloud secrets describe agnte-google-client-id >/dev/null 2>&1 \
+            && gcloud secrets describe agnte-google-client-secret >/dev/null 2>&1; then
+            SECRETS="${SECRETS},GOOGLE_CLIENT_ID=agnte-google-client-id:latest,GOOGLE_CLIENT_SECRET=agnte-google-client-secret:latest"
+          fi
+
           FLAGS=(
             --image="${{ steps.build.outputs.image }}"
             --region="${{ vars.GCP_REGION }}"
@@ -110,8 +155,8 @@ jobs:
             --min-instances=0
             --concurrency=80
             --timeout=60s
-            --set-env-vars=APP_ENV=production,GIT_SHA=${GITHUB_SHA::7}
-            --set-secrets=DATABASE_URL=agnte-database-url:latest,R2_ENDPOINT=agnte-r2-endpoint:latest,R2_BUCKET=agnte-r2-bucket:latest,R2_ACCESS_KEY_ID=agnte-r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=agnte-r2-secret-access-key:latest
+            --set-env-vars="${ENV_VARS}"
+            --set-secrets="${SECRETS}"
           )
           if [[ "${{ steps.existing.outputs.exists }}" == "true" ]]; then
             FLAGS+=(--no-traffic --tag=candidate)

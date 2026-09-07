@@ -1,0 +1,9 @@
+{
+  "name": "agnte-backup",
+  "private": true,
+  "type": "module",
+  "description": "Nightly pg_dump to R2, and the restore rehearsal that proves it works.",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1127.0"
+  }
+}
