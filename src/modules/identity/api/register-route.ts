@@ -12,7 +12,7 @@ import {
 import { consume } from '@/shared/infra/rate-limit';
 import { register } from '../application/register';
 import { Argon2PasswordHasher } from '../infrastructure/argon2-password-hasher';
-import { CryptoVerificationTokenGenerator } from '../infrastructure/crypto-token-generator';
+import { CryptoTokenGenerator } from '../infrastructure/crypto-token-generator';
 import { TransportIdentityMailer } from '../infrastructure/mailer';
 import { PrismaPendingRegistrationRepository } from '../infrastructure/prisma-pending-registration-repository';
 import { PrismaUserRepository } from '../infrastructure/prisma-user-repository';
@@ -111,7 +111,7 @@ export async function handleRegister(request: Request): Promise<Response> {
       users: new PrismaUserRepository(),
       pending: new PrismaPendingRegistrationRepository(),
       hasher: new Argon2PasswordHasher(),
-      tokens: new CryptoVerificationTokenGenerator(),
+      tokens: new CryptoTokenGenerator(),
       mailer: new TransportIdentityMailer(transport),
       clock: systemClock,
       verificationUrl: (token) =>

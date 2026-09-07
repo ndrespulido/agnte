@@ -3,7 +3,7 @@ import { getDatabase } from '@/shared/infra/database';
 import { fixedClock } from '@/shared/kernel';
 import { Argon2PasswordHasher } from '@/modules/identity/infrastructure/argon2-password-hasher';
 import {
-  CryptoVerificationTokenGenerator,
+  CryptoTokenGenerator,
   sha256Hex,
 } from '@/modules/identity/infrastructure/crypto-token-generator';
 import {
@@ -27,7 +27,7 @@ const clock = fixedClock(NOW);
 
 const users = new PrismaUserRepository();
 const pending = new PrismaPendingRegistrationRepository();
-const tokens = new CryptoVerificationTokenGenerator();
+const tokens = new CryptoTokenGenerator();
 
 const ARGON2ID_HASH = '$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$aGFzaA';
 
@@ -254,7 +254,7 @@ describe('Argon2id hasher', () => {
 });
 
 describe('token generator', () => {
-  const generator = new CryptoVerificationTokenGenerator();
+  const generator = new CryptoTokenGenerator();
 
   it('issues a distinct 256-bit token each time', () => {
     const seen = new Set(Array.from({ length: 200 }, () => generator.issue().token));

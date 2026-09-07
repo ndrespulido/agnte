@@ -7,7 +7,7 @@ import { logout } from '../application/logout';
 import { refresh } from '../application/refresh';
 import { IdentityErrorCode } from '../domain/errors';
 import { Argon2PasswordHasher } from '../infrastructure/argon2-password-hasher';
-import { CryptoVerificationTokenGenerator } from '../infrastructure/crypto-token-generator';
+import { CryptoTokenGenerator } from '../infrastructure/crypto-token-generator';
 import {
   JwtAccessTokenIssuer,
   accessTokenSecret,
@@ -96,7 +96,7 @@ export async function handleLogin(request: Request): Promise<Response> {
     sessions: new PrismaRefreshTokenRepository(),
     hasher: new Argon2PasswordHasher(),
     accessTokens,
-    refreshTokens: new CryptoVerificationTokenGenerator(),
+    refreshTokens: new CryptoTokenGenerator(),
     clock: systemClock,
   });
 
@@ -118,7 +118,7 @@ export async function handleRefresh(request: Request): Promise<Response> {
   const result = await refresh(body.data.refreshToken, {
     sessions: new PrismaRefreshTokenRepository(),
     accessTokens,
-    refreshTokens: new CryptoVerificationTokenGenerator(),
+    refreshTokens: new CryptoTokenGenerator(),
     clock: systemClock,
   });
 
@@ -137,7 +137,7 @@ export async function handleLogout(request: Request): Promise<Response> {
 
   const result = await logout(body.data.refreshToken, {
     sessions: new PrismaRefreshTokenRepository(),
-    refreshTokens: new CryptoVerificationTokenGenerator(),
+    refreshTokens: new CryptoTokenGenerator(),
     clock: systemClock,
   });
 

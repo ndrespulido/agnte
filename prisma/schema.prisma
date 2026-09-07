@@ -108,7 +108,8 @@ model User {
   /// mismatch is a 409 rather than a silent overwrite.
   version Int @default(0)
 
-  refreshTokens RefreshToken[]
+  refreshTokens       RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
 
   @@map("user")
   @@schema("identity")
@@ -201,5 +202,47 @@ model RefreshToken {
   @@index([familyId])
   @@index([expiresAt])
   @@map("refresh_token")
+  @@schema("identity")
+}
+
+/// A single-use password reset token (architecture.md §4).
+///
+/// Separate from PendingRegistration despite the near-identical shape. They
+/// mean different things — one carries a password that does not belong to an
+/// account yet, the other authorises replacing the password on an account that
+/// exists — and they have different lifetimes, different revocation rules and
+/// different blast radii. Merging them into a "token" table with a `purpose`
+/// column would put a registration one wrong WHERE clause away from being a
+/// password reset.
+///
+/// Hashed for the same reason as every other token here: a database leak must
+/// not hand over working account-takeover links.
+model PasswordResetToken {
+  /// Hex SHA-256 of the token in the emailed link.
+  tokenHash String @id @map("token_hash")
+
+  userId String @map("user_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  /// Set when redeemed, rather than the row being deleted.
+  ///
+  /// Unlike a pending registration — which is deleted so an abandoned attempt's
+  /// password hash does not linger — this row holds no secret worth expiring
+  /// early, and keeping it lets a second click be answered with "already used"
+  /// instead of the much less helpful "invalid".
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+
+  /// Set when the password changes by any route, which §4 requires: a reset
+  /// link that outlives the password it was issued against is a way back in for
+  /// whoever requested it.
+  invalidatedAt DateTime? @map("invalidated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_token")
   @@schema("identity")
 }

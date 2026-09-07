@@ -84,6 +84,33 @@ export class PrismaUserRepository implements UserRepository {
       throw error;
     }
   }
+
+  /**
+   * Conditional on the version the caller read (architecture.md §2).
+   *
+   * Two resets in flight — two links, two tabs — would otherwise both write,
+   * and the second would silently win with a password the user may not have
+   * been the one to choose. Zero rows updated means the row moved; the caller
+   * turns that into "start again" rather than reporting a success that did not
+   * happen.
+   */
+  async updatePassword(input: {
+    userId: string;
+    passwordHash: string;
+    expectedVersion: number;
+    now: Date;
+  }): Promise<boolean> {
+    const updated = await requireDatabase().$executeRaw`
+      UPDATE identity."user"
+      SET password_hash = ${input.passwordHash},
+          updated_at = ${input.now},
+          version = version + 1
+      WHERE id = ${input.userId}::uuid
+        AND version = ${input.expectedVersion}
+    `;
+
+    return updated > 0;
+  }
 }
 
 /**

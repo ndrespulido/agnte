@@ -17,6 +17,9 @@ export const IdentityErrorCode = {
   InvalidCredentials: 'identity.invalid_credentials',
   RefreshTokenInvalid: 'identity.refresh_token_invalid',
   SessionRevoked: 'identity.session_revoked',
+  ResetTokenInvalid: 'identity.reset_token_invalid',
+  ResetTokenExpired: 'identity.reset_token_expired',
+  ResetTokenAlreadyUsed: 'identity.reset_token_already_used',
 } as const;
 
 export type IdentityErrorCode =
@@ -88,4 +91,26 @@ export const sessionRevoked = (): DomainError =>
   new DomainError(
     IdentityErrorCode.SessionRevoked,
     'This session was ended for security reasons. Sign in again.',
+  );
+
+export const resetTokenInvalid = (): DomainError =>
+  new DomainError(IdentityErrorCode.ResetTokenInvalid, 'This reset link is not valid.');
+
+export const resetTokenExpired = (): DomainError =>
+  new DomainError(
+    IdentityErrorCode.ResetTokenExpired,
+    'This reset link has expired. Request a new one.',
+  );
+
+/**
+ * Covers both "already used" and "superseded by a password change".
+ *
+ * They are the same news to the person holding the link — the password has
+ * already moved on without them — and separating them would only tell someone
+ * replaying an old link whether the account has changed since.
+ */
+export const resetTokenAlreadyUsed = (): DomainError =>
+  new DomainError(
+    IdentityErrorCode.ResetTokenAlreadyUsed,
+    'This reset link has already been used. Request a new one if you still need it.',
   );

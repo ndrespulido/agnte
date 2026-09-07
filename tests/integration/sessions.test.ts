@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { SignJWT } from 'jose';
 import { getDatabase } from '@/shared/infra/database';
 import { fixedClock, uuidv7 } from '@/shared/kernel';
-import { CryptoVerificationTokenGenerator } from '@/modules/identity/infrastructure/crypto-token-generator';
+import { CryptoTokenGenerator } from '@/modules/identity/infrastructure/crypto-token-generator';
 import {
   JwtAccessTokenIssuer,
   accessTokenSecret,
@@ -24,7 +24,7 @@ const ARGON2ID_HASH = '$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHQ$aGFzaA';
 
 const sessions = new PrismaRefreshTokenRepository();
 const users = new PrismaUserRepository();
-const tokens = new CryptoVerificationTokenGenerator();
+const tokens = new CryptoTokenGenerator();
 
 const SECRET = 'a'.repeat(32);
 

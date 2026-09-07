@@ -3,10 +3,12 @@ import { getDatabase } from '@/shared/infra/database';
 import { resetConfigForTests } from '@/shared/infra/config';
 import { resetEmailTransportForTests } from '@/shared/infra/email';
 import {
+  handleForgotPassword,
   handleLogin,
   handleLogout,
   handleRefresh,
   handleRegister,
+  handleResetPassword,
   handleVerifyEmail,
 } from '@/modules/identity';
 
@@ -67,6 +69,7 @@ describe.skipIf(!DATABASE_URL)('auth routes', () => {
       emailed.push(args.join(' '));
     });
 
+    await getDatabase()!.$executeRawUnsafe('DELETE FROM identity.password_reset_token');
     await getDatabase()!.$executeRawUnsafe('DELETE FROM identity.refresh_token');
     await getDatabase()!.$executeRawUnsafe('DELETE FROM identity.pending_registration');
     await getDatabase()!.$executeRawUnsafe('DELETE FROM identity."user"');
@@ -406,5 +409,133 @@ describe.skipIf(!DATABASE_URL)('auth routes', () => {
       password: PASSWORD,
     });
     expect(response.status).toBe(503);
+  });
+
+  // ---- password reset (task 1.5) -------------------------------------------
+
+  const resetLinkToken = (): string => {
+    const printed = emailed.at(-1) ?? '';
+    const match = printed.match(/reset-password\?token=([^\s]+)/);
+    if (!match?.[1]) throw new Error(`no reset link in:\n${printed}`);
+    return decodeURIComponent(match[1]);
+  };
+
+  const requestReset = async (email: string) => {
+    const response = await jsonPost(handleForgotPassword, '/v1/auth/forgot-password', {
+      email,
+    });
+    expect(response.status).toBe(202);
+    return resetLinkToken();
+  };
+
+  it('resets a password and signs the new one in', async () => {
+    await signUpAndIn('reset@example.com');
+    const token = await requestReset('reset@example.com');
+
+    const done = await jsonPost(handleResetPassword, '/v1/auth/reset-password', {
+      token,
+      password: 'a brand new long password',
+    });
+    expect(done.status).toBe(200);
+
+    const before = await jsonPost(handleLogin, '/v1/auth/login', {
+      email: 'reset@example.com',
+      password: PASSWORD,
+    });
+    expect(before.status).toBe(401);
+
+    const after = await jsonPost(handleLogin, '/v1/auth/login', {
+      email: 'reset@example.com',
+      password: 'a brand new long password',
+    });
+    expect(after.status).toBe(200);
+  });
+
+  it('signs every existing session out and says how many', async () => {
+    const pair = await signUpAndIn('kick@example.com');
+    const token = await requestReset('kick@example.com');
+
+    const done = await jsonPost(handleResetPassword, '/v1/auth/reset-password', {
+      token,
+      password: 'a brand new long password',
+    });
+    expect(await done.json()).toMatchObject({ status: 'reset', sessionsRevoked: 1 });
+
+    const stale = await jsonPost(handleRefresh, '/v1/auth/refresh', {
+      refreshToken: pair.refreshToken,
+    });
+    expect(stale.status).toBe(401);
+  });
+
+  it('answers 202 identically for an address with no account', async () => {
+    await signUpAndIn('known@example.com');
+
+    const known = await jsonPost(handleForgotPassword, '/v1/auth/forgot-password', {
+      email: 'known@example.com',
+    });
+    const unknown = await jsonPost(handleForgotPassword, '/v1/auth/forgot-password', {
+      email: 'nobody@example.com',
+    });
+
+    expect(known.status).toBe(unknown.status);
+    expect(await known.json()).toEqual(await unknown.json());
+    // And an email went to both, so silence is not the tell either.
+    expect(emailed.at(-1)).toContain('no account here');
+  });
+
+  it('refuses a spent reset link with 410', async () => {
+    await signUpAndIn('once@example.com');
+    const token = await requestReset('once@example.com');
+
+    await jsonPost(handleResetPassword, '/v1/auth/reset-password', {
+      token,
+      password: 'a brand new long password',
+    });
+
+    const again = await jsonPost(handleResetPassword, '/v1/auth/reset-password', {
+      token,
+      password: 'yet another long password',
+    });
+    expect(again.status).toBe(410);
+    expect(await again.json()).toMatchObject({
+      error: { code: 'identity.reset_token_already_used' },
+    });
+  });
+
+  it('refuses a reset link that never existed with 400', async () => {
+    const response = await jsonPost(handleResetPassword, '/v1/auth/reset-password', {
+      token: 'never-issued',
+      password: 'a brand new long password',
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it('does not burn the link when the new password breaks policy', async () => {
+    await signUpAndIn('typo@example.com');
+    const token = await requestReset('typo@example.com');
+
+    const rejected = await jsonPost(handleResetPassword, '/v1/auth/reset-password', {
+      token,
+      password: 'short',
+    });
+    expect(rejected.status).toBe(422);
+
+    const retried = await jsonPost(handleResetPassword, '/v1/auth/reset-password', {
+      token,
+      password: 'a brand new long password',
+    });
+    expect(retried.status).toBe(200);
+  });
+
+  it('enforces the 3/hour forgot-password limit per email (§8.6)', async () => {
+    const email = 'limited-reset@example.com';
+    const attempt = () =>
+      jsonPost(handleForgotPassword, '/v1/auth/forgot-password', { email });
+
+    for (let i = 0; i < 3; i += 1) expect((await attempt()).status).toBe(202);
+
+    const blocked = await attempt();
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get('ratelimit-limit')).toBe('3');
   });
 });

@@ -4,8 +4,10 @@ import type {
   IdentityMailer,
   IssuedToken,
   PasswordHasher,
+  PasswordResetTokenRepository,
   PendingRegistrationRepository,
   PresentTokenOutcome,
+  RedeemResetOutcome,
   RedeemOutcome,
   RefreshTokenRepository,
   UserRepository,
@@ -16,6 +18,7 @@ import type { RawPassword } from '@/modules/identity/domain/password';
 import type { User } from '@/modules/identity/domain/user';
 import type { PendingRegistration } from '@/modules/identity/domain/verification';
 import type { RefreshToken } from '@/modules/identity/domain/session';
+import type { PasswordResetToken } from '@/modules/identity/domain/password-reset';
 
 /**
  * In-memory doubles for identity's ports.
@@ -42,6 +45,61 @@ export class FakeUserRepository implements UserRepository {
     if ((await this.findByEmail(user.email)) !== null) return { kind: 'email-taken' };
     this.users.set(user.id, user);
     return { kind: 'created' };
+  }
+
+  async updatePassword(input: {
+    userId: string;
+    passwordHash: string;
+    expectedVersion: number;
+    now: Date;
+  }): Promise<boolean> {
+    const user = this.users.get(input.userId);
+    // Mirrors the real repository's conditional UPDATE, so a test can exercise
+    // the stale-write path without a database.
+    if (!user || user.version !== input.expectedVersion) return false;
+
+    this.users.set(input.userId, {
+      ...user,
+      passwordHash: input.passwordHash,
+      updatedAt: input.now,
+      version: user.version + 1,
+    });
+    return true;
+  }
+}
+
+export class FakePasswordResetTokenRepository implements PasswordResetTokenRepository {
+  readonly rows = new Map<string, PasswordResetToken>();
+
+  async issue(token: PasswordResetToken): Promise<void> {
+    this.rows.set(token.tokenHash, token);
+  }
+
+  async redeem(tokenHash: string, now: Date): Promise<RedeemResetOutcome> {
+    const token = this.rows.get(tokenHash);
+    if (!token) return { kind: 'not-found' };
+    if (token.consumedAt !== null || token.invalidatedAt !== null)
+      return { kind: 'spent' };
+
+    this.rows.set(tokenHash, { ...token, consumedAt: now });
+    if (token.expiresAt.getTime() <= now.getTime()) return { kind: 'expired' };
+
+    return { kind: 'redeemed', token };
+  }
+
+  async invalidateAllForUser(userId: string, now: Date): Promise<number> {
+    let invalidated = 0;
+    for (const [hash, token] of this.rows) {
+      if (
+        token.userId === userId &&
+        token.consumedAt === null &&
+        token.invalidatedAt === null
+      ) {
+        this.rows.set(hash, { ...token, invalidatedAt: now });
+        invalidated += 1;
+      }
+    }
+    return invalidated;
   }
 }
 
@@ -109,7 +167,7 @@ export class FakeTokenGenerator implements VerificationTokenGenerator {
 }
 
 export interface SentEmail {
-  kind: 'verification' | 'duplicate-registration';
+  kind: 'verification' | 'duplicate-registration' | 'password-reset' | 'no-such-account';
   to: string;
   url: string;
 }
@@ -130,6 +188,17 @@ export class FakeMailer implements IdentityMailer {
       to: input.to,
       url: input.signInUrl,
     });
+  }
+
+  async sendPasswordReset(input: { to: Email; resetUrl: string }): Promise<void> {
+    this.sent.push({ kind: 'password-reset', to: input.to, url: input.resetUrl });
+  }
+
+  async sendPasswordResetForUnknownAddress(input: {
+    to: Email;
+    registerUrl: string;
+  }): Promise<void> {
+    this.sent.push({ kind: 'no-such-account', to: input.to, url: input.registerUrl });
   }
 }
 

@@ -20,6 +20,36 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    # Added in task 1.5. Without a database the integration suites skip, and
+    # they are the only thing that checks the SQL, the CHECK constraints and the
+    # concurrency guarantees — the parts a typechecker cannot see and the parts
+    # most expensive to get wrong. They were passing locally and running nowhere
+    # else, which is not the same as being tested.
+    #
+    # A throwaway container rather than a Neon branch: this job runs on every
+    # push, Neon's free plan caps branches at ten, and the preview workflow
+    # already spends them one per pull request.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agnte
+        ports:
+          - 5432:5432
+        # Steps start as soon as the container does, which is well before
+        # Postgres accepts connections. Without this the first query races the
+        # server's own startup.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/agnte
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/agnte
+
     steps:
       - uses: actions/checkout@v5
 
@@ -39,8 +69,26 @@ jobs:
       - name: Format check
         run: npm run format:check
 
-      - name: Unit tests
-        run: npm test
+      - name: Migrate the test database
+        run: npx prisma migrate deploy
+
+      - name: Tests
+        run: npm test -- --reporter=default --reporter=json --outputFile=test-results.json
+
+      # The database-backed suites skip silently when DATABASE_URL is missing or
+      # wrong, which looks exactly like a green run. This turns that into a
+      # failure, so the service above cannot quietly stop being used.
+      - name: Fail if any test was skipped
+        run: |
+          SKIPPED=$(python3 -c "
+          import json
+          print(json.load(open('test-results.json'))['numPendingTests'])
+          ")
+          echo "skipped: ${SKIPPED}"
+          if [[ "${SKIPPED}" -gt 0 ]]; then
+            echo "::error::${SKIPPED} tests were skipped — the database-backed suites are not running."
+            exit 1
+          fi
 
       - name: Build
         run: npm run build

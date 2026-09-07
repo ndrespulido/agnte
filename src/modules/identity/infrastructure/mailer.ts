@@ -61,4 +61,49 @@ export class TransportIdentityMailer implements IdentityMailer {
       ].join('\n'),
     });
   }
+
+  async sendPasswordReset(input: {
+    to: Email;
+    displayName: string | null;
+    resetUrl: string;
+  }): Promise<void> {
+    await this.transport.send({
+      to: input.to,
+      subject: 'Reset your Agnte password',
+      text: [
+        greeting(input.displayName),
+        '',
+        'Open this link to choose a new password:',
+        input.resetUrl,
+        '',
+        'The link works once and expires in an hour.',
+        '',
+        // Worth saying, because it is the reassurance that stops someone
+        // panicking, and it is also true: requesting a reset changes nothing.
+        "If you didn't ask for this, ignore this email. Your password has not",
+        'changed, and this link expires on its own.',
+      ].join('\n'),
+    });
+  }
+
+  async sendPasswordResetForUnknownAddress(input: {
+    to: Email;
+    registerUrl: string;
+  }): Promise<void> {
+    await this.transport.send({
+      to: input.to,
+      subject: 'Password reset requested for Agnte',
+      text: [
+        'Hi,',
+        '',
+        'Someone asked to reset the Agnte password for this address, but there is',
+        'no account here. You may have signed up with a different address.',
+        '',
+        'To create an account:',
+        input.registerUrl,
+        '',
+        "If you didn't ask for this, nothing has happened and you can ignore this.",
+      ].join('\n'),
+    });
+  }
 }

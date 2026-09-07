@@ -9,6 +9,7 @@
 export { handleRegister } from './api/register-route';
 export { handleVerifyEmail } from './api/verify-email-route';
 export { handleLogin, handleLogout, handleRefresh } from './api/session-routes';
+export { handleForgotPassword, handleResetPassword } from './api/password-reset-routes';
 
 export { IdentityErrorCode } from './domain/errors';
 export { MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH } from './domain/password';
@@ -17,6 +18,7 @@ export type { User } from './domain/user';
 export { isVerified } from './domain/user';
 export { prunePendingRegistrations } from './infrastructure/prisma-pending-registration-repository';
 export { pruneRefreshTokens } from './infrastructure/prisma-refresh-token-repository';
+export { prunePasswordResetTokens } from './infrastructure/prisma-password-reset-token-repository';
 
 /** Access-token verification, for the route guard that lands with /v1/me (1.7). */
 export {

@@ -1,6 +1,7 @@
 import type { Email } from './email';
 import type { RawPassword } from './password';
 import type { User } from './user';
+import type { PasswordResetToken } from './password-reset';
 import type { RefreshToken } from './session';
 import type { PendingRegistration } from './verification';
 
@@ -56,6 +57,20 @@ export interface UserRepository {
   findByEmail(email: Email): Promise<User | null>;
   findById(id: string): Promise<User | null>;
   create(user: User): Promise<CreateUserOutcome>;
+
+  /**
+   * Replaces the password hash, bumping `version` and `updatedAt`.
+   *
+   * Takes the version it read and refuses a stale write (architecture.md §2),
+   * so two resets racing cannot silently overwrite each other — the loser is
+   * told to start again rather than quietly losing.
+   */
+  updatePassword(input: {
+    userId: string;
+    passwordHash: string;
+    expectedVersion: number;
+    now: Date;
+  }): Promise<boolean>;
 }
 
 /**
@@ -111,6 +126,25 @@ export interface IdentityMailer {
     to: Email;
     displayName: string | null;
     signInUrl: string;
+  }): Promise<void>;
+
+  sendPasswordReset(input: {
+    to: Email;
+    displayName: string | null;
+    resetUrl: string;
+  }): Promise<void>;
+
+  /**
+   * Sent when a reset is requested for an address with no account.
+   *
+   * The endpoint answers identically either way (§8.6), so this is what stops
+   * the *absence* of an email from being the tell. It is also the more useful
+   * message: someone who cannot sign in and gets told "there is no account
+   * here" has learned something, where silence teaches them nothing.
+   */
+  sendPasswordResetForUnknownAddress(input: {
+    to: Email;
+    registerUrl: string;
   }): Promise<void>;
 }
 
@@ -173,4 +207,34 @@ export interface RefreshTokenRepository {
 
   /** Revokes every live token for a user — "sign out everywhere". */
   revokeAllForUser(userId: string, now: Date): Promise<number>;
+}
+
+/**
+ * What presenting a reset token turned out to mean.
+ *
+ * Every failure is distinguishable here, unlike sign-in. Holding the token
+ * already proves you are the person the email reached, so telling you "expired"
+ * rather than "invalid" leaks nothing and saves you re-reading the URL.
+ */
+export type RedeemResetOutcome =
+  | { kind: 'redeemed'; token: PasswordResetToken }
+  | { kind: 'not-found' }
+  | { kind: 'expired' }
+  | { kind: 'spent' };
+
+export interface PasswordResetTokenRepository {
+  issue(token: PasswordResetToken): Promise<void>;
+
+  /** Atomically claims the token, so two clicks cannot both reset. */
+  redeem(tokenHash: string, now: Date): Promise<RedeemResetOutcome>;
+
+  /**
+   * Invalidates every live reset token for a user.
+   *
+   * Called on any password change, which §4 requires: a reset link that
+   * outlives the password it was issued against is a standing way back in for
+   * whoever requested it — including an attacker who requested one, waited for
+   * the owner to notice nothing, and kept the link.
+   */
+  invalidateAllForUser(userId: string, now: Date): Promise<number>;
 }

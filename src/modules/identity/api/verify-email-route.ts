@@ -1,7 +1,7 @@
 import { DomainError, systemClock } from '@/shared/kernel';
 import { IdentityErrorCode } from '../domain/errors';
 import { verifyEmail } from '../application/verify-email';
-import { CryptoVerificationTokenGenerator } from '../infrastructure/crypto-token-generator';
+import { CryptoTokenGenerator } from '../infrastructure/crypto-token-generator';
 import { PrismaPendingRegistrationRepository } from '../infrastructure/prisma-pending-registration-repository';
 import { PrismaUserRepository } from '../infrastructure/prisma-user-repository';
 import { jsonError } from './http';
@@ -26,7 +26,7 @@ export async function handleVerifyEmail(request: Request): Promise<Response> {
   const result = await verifyEmail(token, {
     users: new PrismaUserRepository(),
     pending: new PrismaPendingRegistrationRepository(),
-    tokens: new CryptoVerificationTokenGenerator(),
+    tokens: new CryptoTokenGenerator(),
     clock: systemClock,
   });
 
