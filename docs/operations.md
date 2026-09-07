@@ -383,6 +383,34 @@ working across a restart.
 
 ---
 
+## 2e. Local development account (task 1.7)
+
+Every protected route needs a signed-in user, and walking register → read the
+terminal → click the verification link before each session is friction that
+gets skipped. One step instead:
+
+```bash
+npm run seed
+# or
+npm run seed -- --email me@example.com --password 'something longer'
+```
+
+It creates a verified account (`dev@agnte.local` / `development password` by
+default), is idempotent so re-running is a no-op, and **refuses to run unless
+`APP_ENV=local`** — an account with a published password is exactly the kind of
+thing that quietly becomes a production account.
+
+Then:
+
+```bash
+curl -s localhost:3000/v1/auth/login -H 'content-type: application/json' \
+  -d '{"email":"dev@agnte.local","password":"development password"}'
+```
+
+and pass the `accessToken` as `Authorization: Bearer <token>` to `/v1/me`.
+
+---
+
 ## 3. Cost controls
 
 ### What actually protects the project

@@ -17,7 +17,8 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify": "npm run typecheck && npm run lint && npm run format:check && npm run test"
+    "verify": "npm run typecheck && npm run lint && npm run format:check && npm run test",
+    "seed": "tsx scripts/seed.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1127.0",
@@ -43,6 +44,7 @@
     "prettier": "^3.9.6",
     "prisma": "^7.10.0",
     "s3rver": "^3.7.1",
+    "tsx": "^4.23.13",
     "typescript": "~5.9",
     "typescript-eslint": "^8.69.0",
     "vitest": "^5.0.0"

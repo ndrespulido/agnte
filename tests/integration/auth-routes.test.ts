@@ -5,6 +5,7 @@ import { resetEmailTransportForTests } from '@/shared/infra/email';
 import {
   handleForgotPassword,
   handleLogin,
+  handleMe,
   handleLogout,
   handleRefresh,
   handleRegister,
@@ -537,5 +538,135 @@ describe.skipIf(!DATABASE_URL)('auth routes', () => {
     const blocked = await attempt();
     expect(blocked.status).toBe(429);
     expect(blocked.headers.get('ratelimit-limit')).toBe('3');
+  });
+
+  // ---- /v1/me and the route guard (task 1.7) -------------------------------
+
+  const me = (headers: Record<string, string> = {}) =>
+    handleMe(new Request('https://agnte.test/v1/me', { headers }));
+
+  const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
+
+  it('returns the signed-in user', async () => {
+    const pair = await signUpAndIn('me@example.com');
+
+    const response = await me(bearer(pair.accessToken));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      email: 'me@example.com',
+      displayName: null,
+    });
+  });
+
+  it('returns only the fields it means to', async () => {
+    // A response that starts as "the user record" grows into one, and the first
+    // field nobody meant to publish arrives without a decision being made.
+    const pair = await signUpAndIn('shape@example.com');
+
+    const body = (await (await me(bearer(pair.accessToken))).json()) as Record<
+      string,
+      unknown
+    >;
+
+    expect(Object.keys(body).sort()).toEqual([
+      'createdAt',
+      'displayName',
+      'email',
+      'emailVerifiedAt',
+      'id',
+    ]);
+    expect(JSON.stringify(body)).not.toContain('argon2');
+  });
+
+  it('refuses a request with no Authorization header', async () => {
+    const response = await me();
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get('www-authenticate')).toContain('Bearer');
+  });
+
+  it.each([
+    ['not a bearer token', { authorization: 'nonsense' }],
+    ['a different scheme', { authorization: 'Basic abc' }],
+    ['an empty bearer token', { authorization: 'Bearer ' }],
+    ['a token that is not a JWT', { authorization: 'Bearer not.a.jwt' }],
+  ])('refuses %s', async (_label, headers) => {
+    expect((await me(headers)).status).toBe(401);
+  });
+
+  it('accepts the scheme case-insensitively, per RFC 7235', async () => {
+    const pair = await signUpAndIn('case@example.com');
+
+    expect((await me({ authorization: `bearer ${pair.accessToken}` })).status).toBe(200);
+  });
+
+  it('parses the header the way RFC 7235 defines it', async () => {
+    // These distinguish a correct parse from a permissive one. Every malformed
+    // case below is rejected anyway once the token fails to verify, so only a
+    // *valid* token separated the wrong way shows the difference — which is why
+    // the accepted case uses two spaces (`1*SP` allows them) and the rejected
+    // ones use a tab and an embedded space.
+    const pair = await signUpAndIn('rfc@example.com');
+    const token = pair.accessToken;
+
+    expect((await me({ authorization: `Bearer  ${token}` })).status).toBe(200);
+    expect((await me({ authorization: `Bearer\t${token}` })).status).toBe(401);
+    expect((await me({ authorization: `Bearer ${token} extra` })).status).toBe(401);
+  });
+
+  it('refuses a refresh token presented as an access token', async () => {
+    // Different credentials for different jobs. The `typ` claim is what stops
+    // one being accepted for the other, and a refresh token is not a JWT at
+    // all — so this also covers the shape check.
+    const pair = await signUpAndIn('mixup@example.com');
+
+    expect((await me(bearer(pair.refreshToken))).status).toBe(401);
+  });
+
+  it('refuses a valid token whose account has since been deleted', async () => {
+    // The reason the guard reads the database rather than trusting the token's
+    // subject: a JWT outlives its user, and erasure (§8.7) has to take effect
+    // now, not in fifteen minutes.
+    const pair = await signUpAndIn('gone@example.com');
+    expect((await me(bearer(pair.accessToken))).status).toBe(200);
+
+    await getDatabase()!.$executeRawUnsafe(
+      `DELETE FROM identity."user" WHERE email = 'gone@example.com'`,
+    );
+
+    expect((await me(bearer(pair.accessToken))).status).toBe(401);
+  });
+
+  it('keeps working after the refresh token rotates', async () => {
+    const pair = await signUpAndIn('rotate@example.com');
+
+    const refreshed = await jsonPost(handleRefresh, '/v1/auth/refresh', {
+      refreshToken: pair.refreshToken,
+    });
+    const next = (await refreshed.json()) as { accessToken: string };
+
+    expect((await me(bearer(next.accessToken))).status).toBe(200);
+  });
+
+  it('stops working once the password is reset and sessions are revoked', async () => {
+    // Honest about the window: the *access* token stays valid until it expires,
+    // which is the trade for not hitting the database on every request. What a
+    // reset revokes is the refresh side, so the session cannot be extended.
+    const pair = await signUpAndIn('revoked@example.com');
+    const token = await requestReset('revoked@example.com');
+
+    await jsonPost(handleResetPassword, '/v1/auth/reset-password', {
+      token,
+      password: 'a brand new long password',
+    });
+
+    // Still valid — it has not expired yet.
+    expect((await me(bearer(pair.accessToken))).status).toBe(200);
+    // But the session cannot be renewed.
+    const renew = await jsonPost(handleRefresh, '/v1/auth/refresh', {
+      refreshToken: pair.refreshToken,
+    });
+    expect(renew.status).toBe(401);
   });
 });

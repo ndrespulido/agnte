@@ -10,6 +10,11 @@ export { handleRegister } from './api/register-route';
 export { handleVerifyEmail } from './api/verify-email-route';
 export { handleLogin, handleLogout, handleRefresh } from './api/session-routes';
 export { handleForgotPassword, handleResetPassword } from './api/password-reset-routes';
+export { handleMe } from './api/me-route';
+
+/** The route guard, for protected routes in other modules (verse, media, ...). */
+export { authenticate } from './api/authenticate';
+export type { Authenticated } from './api/authenticate';
 
 export { IdentityErrorCode } from './domain/errors';
 export { MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH } from './domain/password';
