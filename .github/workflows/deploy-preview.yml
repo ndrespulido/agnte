@@ -1,0 +1,166 @@
+name: Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# One preview per pull request, and a superseded push is cancelled rather than
+# left to race the newer one to the same tagged revision.
+concurrency:
+  group: preview-${{ github.event.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write # to comment the preview URL
+
+env:
+  SERVICE: agnte-preview
+
+jobs:
+  preview:
+    # The repository is public. A pull request from a fork must never reach the
+    # deployment credentials, and Dependabot does not need an environment.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
+
+      # Creates pr-<n>, or reuses it on a subsequent push so the database this
+      # pull request has been building against is not discarded. Both connection
+      # URIs are masked before they are emitted.
+      - name: Neon branch
+        id: neon
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+        run: node infra/neon-branch.mjs create --pr "${{ github.event.number }}"
+
+      - name: Run migrations
+        env:
+          DIRECT_URL: ${{ steps.neon.outputs.direct_url }}
+        run: npx prisma migrate deploy
+
+      - name: Build and push
+        id: build
+        run: |
+          IMAGE="${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/agnte/${SERVICE}:pr-${{ github.event.number }}-${GITHUB_SHA::7}"
+          docker build --build-arg GIT_SHA="${GITHUB_SHA::7}" -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      # Cloud Run rejects --no-traffic on a service's first revision, so the
+      # very first preview deploy on a fresh service takes traffic and every
+      # later one is tagged-only.
+      - name: Does the preview service exist?
+        id: existing
+        run: |
+          if gcloud run services describe "${SERVICE}" --region="${{ vars.GCP_REGION }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A separate service from production, deliberately. max-instances is a
+      # service-level cap, so previews sharing production's would let a preview
+      # starve it (architecture.md §3.1).
+      #
+      # Previews are publicly reachable with no access gate — a deliberate
+      # choice while they hold only synthetic data. Revisit before real data
+      # reaches one.
+      - name: Deploy
+        id: deploy
+        run: |
+          TAG="pr-${{ github.event.number }}"
+          FLAGS=(
+            --image="${{ steps.build.outputs.image }}"
+            --region="${{ vars.GCP_REGION }}"
+            --service-account="${{ vars.GCP_RUNTIME_SA }}"
+            --allow-unauthenticated
+            --max-instances=2
+            --min-instances=0
+            --concurrency=80
+            --timeout=60s
+            --tag="${TAG}"
+            --set-env-vars=APP_ENV=preview,GIT_SHA=${GITHUB_SHA::7},PREVIEW_LABEL=${TAG},NEON_BRANCH=${{ steps.neon.outputs.branch_name }},R2_PREFIX=${TAG}/
+            --set-secrets=R2_ENDPOINT=agnte-r2-endpoint:latest,R2_BUCKET=agnte-r2-bucket:latest,R2_ACCESS_KEY_ID=agnte-r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=agnte-r2-secret-access-key:latest
+          )
+          if [[ "${{ steps.existing.outputs.exists }}" == "true" ]]; then
+            FLAGS+=(--no-traffic)
+          fi
+
+          # The preview database differs per pull request, so it is passed
+          # directly rather than mounted from Secret Manager.
+          gcloud run deploy "${SERVICE}" "${FLAGS[@]}" \
+            --update-env-vars="DATABASE_URL=${{ steps.neon.outputs.database_url }}"
+
+          URL=$(gcloud run services describe "${SERVICE}" \
+            --region="${{ vars.GCP_REGION }}" \
+            --format="value(status.traffic.filter(tag=${TAG}).extract(url))" | tr -d "[]'")
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test
+        run: |
+          URL="${{ steps.deploy.outputs.url }}"
+          for attempt in $(seq 1 10); do
+            BODY=$(curl -fsS --max-time 20 "${URL}/v1/health" 2>/dev/null) && break
+            echo "attempt ${attempt} failed; cold start can take a moment"
+            sleep 6
+          done
+          echo "$BODY"
+          echo "$BODY" | grep -q '"status":"ok"' \
+            || { echo "::error::Health check did not report ok"; exit 1; }
+          echo "$BODY" | grep -q '"name":"database","status":"ok"' \
+            || { echo "::error::Database check is not ok"; exit 1; }
+          echo "$BODY" | grep -q '"name":"object-storage","status":"ok"' \
+            || { echo "::error::Object storage check is not ok"; exit 1; }
+
+      # Edits one comment rather than adding another on every push, so the pull
+      # request keeps a single live status instead of a growing list.
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- agnte-preview -->';
+            const body = [
+              marker,
+              `### Preview for \`${context.sha.slice(0, 7)}\``,
+              '',
+              `**${{ steps.deploy.outputs.url }}**`,
+              '',
+              `Neon branch \`${{ steps.neon.outputs.branch_name }}\`, R2 prefix \`pr-${context.issue.number}/\`.`,
+              'Torn down when this pull request closes.',
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              ...context.repo, issue_number: context.issue.number, per_page: 100,
+            });
+            const existing = comments.find((c) => c.body?.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({ ...context.repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ ...context.repo, issue_number: context.issue.number, body });
+            }

@@ -1,0 +1,56 @@
+name: Teardown preview
+
+on:
+  pull_request:
+    types: [closed]
+
+concurrency:
+  group: preview-${{ github.event.number }}
+  cancel-in-progress: false # never interrupt a teardown midway
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  SERVICE: agnte-preview
+
+jobs:
+  teardown:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      # Each step continues on error: a half-finished teardown is worse than a
+      # noisy one, and the nightly sweep is the backstop for whatever is left.
+      - name: Remove the Cloud Run tag
+        continue-on-error: true
+        run: |
+          gcloud run services update-traffic "${SERVICE}" \
+            --region="${{ vars.GCP_REGION }}" \
+            --remove-tags="pr-${{ github.event.number }}"
+
+      - name: Delete the Neon branch
+        continue-on-error: true
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+        run: node infra/neon-branch.mjs delete --pr "${{ github.event.number }}"
