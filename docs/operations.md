@@ -328,6 +328,24 @@ error naming the missing role.
 
 ### Confirming real alerts reach the topic
 
+Cloud Billing publishes budget notifications **periodically**, not only when a
+threshold is crossed, so the real path proves itself within an hour of wiring
+without any budget being exceeded. Look for lines like:
+
+```
+kill-switch: no action — 0% of budget (0 of 30 EUR)
+```
+
+That is the strongest confirmation available: Cloud Billing → Pub/Sub →
+Eventarc → function, including Cloud Billing's own publish permission, which
+the rehearsal cannot exercise because it publishes to the topic directly.
+
+```bash
+gcloud functions logs read agnte-kill-switch --region=europe-west3   --project=agnte-prod --limit=20
+```
+
+### If those lines never appear
+
 The rehearsal publishes to the topic directly, so it proves the function, the
 trigger and the IAM — but not that *Cloud Billing itself* can publish. Those are
 separate paths, and only the second one carries a real budget alert.

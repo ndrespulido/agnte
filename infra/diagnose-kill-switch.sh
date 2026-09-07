@@ -21,13 +21,12 @@ say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 note() { printf '    %s\n' "$*"; }
 
 say "Function"
+# yaml rather than a value() projection with concatenation: gcloud's projection
+# language does not support string concatenation, and the earlier attempt failed
+# to parse rather than reporting anything.
 gcloud functions describe "${FUNCTION}" --region="${REGION}" --project="${PROJECT_ID}" \
-  --format='value[separator="
-"](
-  "runs as:        " + serviceConfig.serviceAccountEmail,
-  "ARMED:          " + serviceConfig.environmentVariables.ARMED,
-  "state:          " + state
-)' 2>&1 | sed 's/^/    /'
+  --format='yaml(state, serviceConfig.serviceAccountEmail, serviceConfig.environmentVariables.ARMED)' \
+  2>&1 | sed 's/^/    /'
 
 say "Eventarc trigger (the identity that invokes the function)"
 TRIGGER_SA="$(gcloud eventarc triggers list --location="${REGION}" --project="${PROJECT_ID}" \
