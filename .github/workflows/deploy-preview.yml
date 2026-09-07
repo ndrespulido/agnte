@@ -93,8 +93,36 @@ jobs:
       # reaches one.
       - name: Deploy
         id: deploy
+        env:
+          SHORT_SHA: ${{ github.sha }}
+          BRANCH_NAME: ${{ steps.neon.outputs.branch_name }}
+          DATABASE_URL: ${{ steps.neon.outputs.database_url }}
         run: |
           TAG="pr-${{ github.event.number }}"
+
+          # A file rather than --set-env-vars, for two reasons. gcloud allows
+          # only one of the env-var flags, and the preview database differs per
+          # pull request so it cannot be mounted from Secret Manager alongside
+          # static values. And a connection string may contain the comma that
+          # --set-env-vars uses as its delimiter.
+          #
+          # Written by python with json.dumps: a JSON string is a valid YAML
+          # scalar, so any character in the value survives without hand-rolled
+          # quoting.
+          TAG="${TAG}" python3 - > /tmp/preview-env.yaml <<'PY'
+          import json, os
+          values = {
+              "APP_ENV": "preview",
+              "GIT_SHA": os.environ["SHORT_SHA"][:7],
+              "PREVIEW_LABEL": os.environ["TAG"],
+              "NEON_BRANCH": os.environ["BRANCH_NAME"],
+              "R2_PREFIX": os.environ["TAG"] + "/",
+              "DATABASE_URL": os.environ["DATABASE_URL"],
+          }
+          for key, value in values.items():
+              print(f"{key}: {json.dumps(value)}")
+          PY
+
           FLAGS=(
             --image="${{ steps.build.outputs.image }}"
             --region="${{ vars.GCP_REGION }}"
@@ -105,17 +133,14 @@ jobs:
             --concurrency=80
             --timeout=60s
             --tag="${TAG}"
-            --set-env-vars=APP_ENV=preview,GIT_SHA=${GITHUB_SHA::7},PREVIEW_LABEL=${TAG},NEON_BRANCH=${{ steps.neon.outputs.branch_name }},R2_PREFIX=${TAG}/
+            --env-vars-file=/tmp/preview-env.yaml
             --set-secrets=R2_ENDPOINT=agnte-r2-endpoint:latest,R2_BUCKET=agnte-r2-bucket:latest,R2_ACCESS_KEY_ID=agnte-r2-access-key-id:latest,R2_SECRET_ACCESS_KEY=agnte-r2-secret-access-key:latest
           )
           if [[ "${{ steps.existing.outputs.exists }}" == "true" ]]; then
             FLAGS+=(--no-traffic)
           fi
 
-          # The preview database differs per pull request, so it is passed
-          # directly rather than mounted from Secret Manager.
-          gcloud run deploy "${SERVICE}" "${FLAGS[@]}" \
-            --update-env-vars="DATABASE_URL=${{ steps.neon.outputs.database_url }}"
+          gcloud run deploy "${SERVICE}" "${FLAGS[@]}"
 
           URL=$(gcloud run services describe "${SERVICE}" \
             --region="${{ vars.GCP_REGION }}" \
