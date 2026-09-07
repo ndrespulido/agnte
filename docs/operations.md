@@ -469,9 +469,29 @@ so previews sharing production's would let a preview starve it (§3.1).
 Production keeps 3, previews get 2 between them.
 
 **One bucket, prefixes per pull request.** Buckets are a limited manual
-resource; `R2_PREFIX=pr-<n>/` is free. **Add a lifecycle rule** on the bucket in
-the Cloudflare dashboard expiring objects under `pr-` after ~14 days — that part
-is not automated.
+resource; `R2_PREFIX=pr-<n>/` is free.
+
+Expiring those objects is **not automated** — add it once, in the Cloudflare
+dashboard under R2 → `agnte-media` → Settings → Object lifecycle rules:
+
+| Field | Value |
+|---|---|
+| Rule name | `expire-preview-objects` |
+| Apply to | objects with a specific prefix |
+| Prefix | `pr-` |
+| Action | delete uploaded objects |
+| Days after upload | `14` |
+
+`pr-` with no trailing slash, so it matches every `pr-<n>/...` key. Production
+writes its health probe to `_healthcheck/probe` at the bucket root, because
+`R2_PREFIX` is unset there — outside the prefix, so the rule cannot touch it.
+Previews write `pr-<n>/_healthcheck/probe`, inside it. 14 days matches the
+Artifact Registry rule for preview images so both age out together.
+
+Worth adding at the same time: a second rule, **abort incomplete multipart
+uploads after 7 days**, applied to all objects. Nothing uses multipart yet, but
+Phase 4's media uploads will, and an abandoned browser upload otherwise leaves
+billable fragments with no object to show for them.
 
 **The nightly sweep is not tidiness.** Neon's free plan caps branch count, so a
 teardown that silently does not run eventually breaks the pipeline. Teardown on
