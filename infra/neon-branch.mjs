@@ -158,7 +158,20 @@ const { pathToFileURL } = await import('node:url');
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isMain) {
-  if (!KEY || !PROJECT) fail('NEON_API_KEY and NEON_PROJECT_ID must be set');
+  // Naming the one that is missing, and where it lives. The first real run of
+  // the preview workflow failed here with the secret set and the variable not,
+  // and a message listing both does not tell you which half to go and fix.
+  const missing = [];
+  if (!KEY)
+    missing.push(
+      'NEON_API_KEY (Settings -> Secrets and variables -> Actions -> Secrets)',
+    );
+  if (!PROJECT) {
+    missing.push(
+      'NEON_PROJECT_ID (same page, Variables tab; the id is in Neon project settings)',
+    );
+  }
+  if (missing.length > 0) fail(`not configured:\n  - ${missing.join('\n  - ')}`);
 
   const pr = flag('pr');
   if (command === 'create') {
