@@ -117,9 +117,18 @@ Cloudflare R2 next. From the R2 dashboard:
     (an EU-jurisdiction bucket has .eu. before r2, and that URL is the one to
     use — the jurisdiction is part of the endpoint, not a separate setting)
 
-Press Enter at the endpoint prompt to skip R2 for now.
+Press Enter at the endpoint prompt to keep whatever is already stored.
 
 EXPLAIN
+
+# Show what is already there, so a re-run does not mean re-entering credentials
+# that are working. This is the common case: the database or Resend needs
+# changing and R2 does not.
+if gcloud secrets versions access latest --secret=agnte-r2-endpoint \
+     --project="${PROJECT_ID}" >/dev/null 2>&1; then
+  note "Already stored: $(gcloud secrets versions access latest --secret=agnte-r2-endpoint --project="${PROJECT_ID}" 2>/dev/null)"
+  note "Press Enter to keep it."
+fi
 
 read -rp "  R2 S3 API endpoint: " R2_ENDPOINT
 
@@ -149,9 +158,28 @@ if [[ -n "${R2_ENDPOINT}" ]]; then
   # mistyped bucket name. Seconds here against a failed deploy later.
   say "Checking the R2 credentials"
   if command -v node >/dev/null && [[ -d node_modules/@aws-sdk ]]; then
-    R2_ENDPOINT="${R2_ENDPOINT}" R2_BUCKET="${R2_BUCKET}" \
-    R2_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID}" R2_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY}" \
-      node "$(dirname "$0")/verify-r2.mjs" || exit 1
+    # A failure here used to abort the whole script, which discarded the
+    # database URL, the Resend key and everything else already typed — for a
+    # mistake in one of four values, on a re-run where R2 was probably fine
+    # already. Now it offers to leave R2 alone and carry on, so one wrong paste
+    # costs one section rather than the entire run.
+    if ! R2_ENDPOINT="${R2_ENDPOINT}" R2_BUCKET="${R2_BUCKET}" \
+      R2_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID}" R2_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY}" \
+      node "$(dirname "$0")/verify-r2.mjs"; then
+      echo
+      echo "  Those R2 credentials were rejected, so they will not be stored."
+      echo "  Most often that is the Access Key ID and Secret: the prompts are"
+      echo "  hidden, and R2 shows the secret only once when the token is made."
+      echo
+      read -rp "  Continue without changing R2? [Y/n] " R2_CONTINUE
+      if [[ "${R2_CONTINUE}" =~ ^[Nn] ]]; then
+        exit 1
+      fi
+      # Cleared, so the store and grant steps below skip R2 entirely and leave
+      # whatever is already in Secret Manager untouched.
+      R2_ENDPOINT=""
+      note "Leaving the stored R2 configuration as it is."
+    fi
   else
     note "Skipped: needs node and \`npm install\` in this repository."
     note "The deploy's smoke test will catch a bad configuration instead."
