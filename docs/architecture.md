@@ -52,6 +52,24 @@ Convention alone always erodes. Two enforcement layers, both checkable in CI:
 only on its own schema. No cross-schema foreign keys, no cross-schema joins.
 Cross-module reads go through the owning module's public API.
 
+> **Decided in Phase 1: schemas now, roles later.** The six schemas exist and
+> the ESLint boundary rule is enforced in CI, but every module shares one
+> database role. Prisma has a single connection string, so a role per module
+> means a connection pool per module — multiplying Neon connections against a
+> free-tier cap, for a single deployable where the boundary is already enforced
+> at build time. Schemas are the half that is expensive to retrofit and they
+> are in place; roles become worth their cost when the monolith actually
+> splits, and adding them then is a grant and a connection string per module,
+> not a redesign. The cost accepted meanwhile: a compromised module could read
+> another's tables at runtime.
+
+> **Added in Phase 1: a `platform` schema.** Idempotency keys (§6), rate-limit
+> windows (§8.6) and later the event bus dead-letter table are infrastructure,
+> not domain, and belong to no module — `media` and `privacy` need rate
+> limiting as much as `identity` does. Putting them in a module's schema would
+> create exactly the cross-module dependency this section exists to prevent.
+> They live in a seventh schema owned by `shared/infra`.
+
 This is what makes "split into services later" a mechanical exercise rather
 than a rewrite — the seams are real even though the deployment is single.
 
@@ -71,6 +89,13 @@ user.erasure_requested  → each module purges its own data
 Swapping this for Pub/Sub later is an adapter change behind the same interface.
 Handlers must be idempotent from day one — that discipline is what makes the
 swap safe, and it costs nothing to adopt now.
+
+> **Deferred to Phase 2.** In Phase 1 nothing subscribes: `identity` would
+> publish into a void. Building publish/subscribe, idempotency, retry and
+> dead-lettering with no consumer means designing against imagined
+> requirements, and the first real subscriber is what will show whether the
+> interface is right. `verse` in Phase 2 provides one. The discipline above
+> still holds from the moment the bus exists.
 
 ### 1.3 Background work on a scale-to-zero platform
 
@@ -455,8 +480,16 @@ Each phase ends deployable and checkable from your phone.
 5. **Offline write queue.**
 6. **`insights`** — dashboards, deep-time catalogue.
 7. **`notifications`** — scheduler, Web Push, recurrence.
-8. **`privacy`** — export + erasure. Backups + restore rehearsal.
+8. **`privacy`** — export + erasure.
 9. **v1 data migration.**
+
+> **Backups moved to Phase 1.** They were listed here with `privacy`, but real
+> accounts with real password hashes exist from the moment registration ships,
+> and §8.8 already calls Neon's free-tier recovery window insufficient on its
+> own. Waiting until Phase 8 means carrying eight phases of data on a recovery
+> story the document itself rejects. The nightly dump to R2 lands as Phase 1's
+> last task; the monthly restore rehearsal stays with `privacy`, where there is
+> enough data for a row-count check to mean something.
 
 ---
 
