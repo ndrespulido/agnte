@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { getDatabase, MODULE_SCHEMAS } from './database';
+import { getDatabase, MIGRATED_SCHEMAS } from './database';
 import { getObjectStorage } from './object-storage';
 
 /**
@@ -39,18 +39,21 @@ const checks: Check[] = [
       const db = getDatabase();
       if (!db) return { status: 'not-configured', detail: 'DATABASE_URL is not set' };
 
-      // Asserts the migration ran, not merely that a connection opened. A
+      // Asserts the migrations ran, not merely that a connection opened. A
       // reachable but unmigrated database is the failure this is here to catch.
+      //
+      // Every migrated schema, not just the module ones: the deploy smoke test
+      // gates on this check, so anything it does not look at can ship green.
       const rows = await db.$queryRaw<{ schema_name: string }[]>`
         SELECT schema_name
         FROM information_schema.schemata
-        WHERE schema_name = ANY(${[...MODULE_SCHEMAS]})
+        WHERE schema_name = ANY(${[...MIGRATED_SCHEMAS]})
       `;
 
       const found = rows.length;
-      const total = MODULE_SCHEMAS.length;
+      const total = MIGRATED_SCHEMAS.length;
       if (found < total) {
-        const missing = MODULE_SCHEMAS.filter(
+        const missing = MIGRATED_SCHEMAS.filter(
           (schema) => !rows.some((row) => row.schema_name === schema),
         );
         return {
@@ -59,7 +62,7 @@ const checks: Check[] = [
         };
       }
 
-      return { status: 'ok' as const, detail: `${found}/${total} module schemas` };
+      return { status: 'ok' as const, detail: `${found}/${total} schemas` };
     },
   },
   {

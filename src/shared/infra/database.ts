@@ -2,9 +2,11 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 
 /**
- * The six module schemas from docs/architecture.md §1.1. Kept here so the
- * health check can assert the migration actually ran, rather than only that a
- * connection can be opened.
+ * The six module schemas from docs/architecture.md §1.1. Deliberately *not*
+ * the full list of schemas: this is the set that maps one-to-one onto modules,
+ * which is what the boundary rule and the later per-schema database roles are
+ * defined against. `platform` is infrastructure and belongs to no module, so
+ * folding it in here would blur exactly the distinction the rule rests on.
  */
 export const MODULE_SCHEMAS = [
   'identity',
@@ -14,6 +16,20 @@ export const MODULE_SCHEMAS = [
   'notifications',
   'privacy',
 ] as const;
+
+/**
+ * Cross-cutting infrastructure that belongs to no module: idempotency keys and
+ * rate-limit windows (architecture.md §1.2, §8.6, §8.7).
+ */
+export const PLATFORM_SCHEMA = 'platform' as const;
+
+/**
+ * Every schema the migrations create. This is what the health check asserts
+ * against, rather than MODULE_SCHEMAS: a check that knows only about the
+ * module schemas reports a green database when a later migration silently
+ * failed to apply, which is precisely the failure it exists to catch.
+ */
+export const MIGRATED_SCHEMAS = [...MODULE_SCHEMAS, PLATFORM_SCHEMA] as const;
 
 /**
  * Next reloads modules in development, which would otherwise open a new pool on
