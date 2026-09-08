@@ -15,7 +15,23 @@ import type { AccessTokenIssuer } from '../domain/ports';
 const ALGORITHM = 'HS256';
 
 const ISSUER = 'agnte';
-const AUDIENCE = 'agnte-api';
+
+/**
+ * The audience is scoped to the environment.
+ *
+ * Preview and production were mounting the same signing secret, so a token
+ * minted on any preview verified against production — and preview databases
+ * are branched from production, so signing in on a preview was enough to get a
+ * production token. Separating the secrets is the primary fix; this is the
+ * belt to that pair of braces, and it is the half that holds even if a secret
+ * is ever shared again by accident.
+ *
+ * Production keeps the bare `agnte-api`, so tokens already in the wild stay
+ * valid. Only the environments whose tokens should never have been portable
+ * change.
+ */
+export const audienceFor = (appEnv: string): string =>
+  appEnv === 'production' ? 'agnte-api' : `agnte-api-${appEnv}`;
 
 /**
  * Marks what the token is for.
@@ -29,9 +45,17 @@ const TOKEN_TYPE = 'access';
 
 export class JwtAccessTokenIssuer implements AccessTokenIssuer {
   private readonly key: Uint8Array;
+  private readonly audience: string;
 
-  constructor(secret: string) {
+  /**
+   * `appEnv` is required rather than defaulted. A default would be the
+   * production audience, and the one environment that must not accidentally
+   * mint production-valid tokens is the one a developer is most likely to
+   * construct this in without thinking.
+   */
+  constructor(secret: string, appEnv: string) {
     this.key = new TextEncoder().encode(secret);
+    this.audience = audienceFor(appEnv);
   }
 
   async issue(userId: string): Promise<string> {
@@ -42,7 +66,7 @@ export class JwtAccessTokenIssuer implements AccessTokenIssuer {
         .setProtectedHeader({ alg: ALGORITHM })
         .setSubject(userId)
         .setIssuer(ISSUER)
-        .setAudience(AUDIENCE)
+        .setAudience(this.audience)
         .setIssuedAt(Math.floor(now / 1000))
         .setExpirationTime(Math.floor((now + ACCESS_TOKEN_TTL_MS) / 1000))
         // A unique id per token, so a future deny-list can name one without
@@ -67,7 +91,7 @@ export class JwtAccessTokenIssuer implements AccessTokenIssuer {
         // claims — the "alg: none" and HMAC-vs-RSA confusion families of bug.
         algorithms: [ALGORITHM],
         issuer: ISSUER,
-        audience: AUDIENCE,
+        audience: this.audience,
       });
 
       if (payload.typ !== TOKEN_TYPE) return null;

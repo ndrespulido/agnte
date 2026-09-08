@@ -229,6 +229,63 @@ new one deploys. Expand and contract: add a column in one release, backfill,
 and only remove the old one in a later release. Rolling back a Cloud Run
 revision does not roll back a migration.
 
+### Previews are branched from `preview-base`, never from production
+
+**Run this once before the next preview deploy, or previews will fail.**
+
+In GitHub: Actions → **Create the preview base branch** → Run workflow.
+
+It runs there rather than locally because `NEON_API_KEY` is a GitHub secret,
+which is write-only — you cannot read it back to put on a local command line,
+and copying it out to a terminal would be a credential handled for no reason.
+The workflow is idempotent: a second run reports the branch already exists and
+changes nothing.
+
+The same thing locally, if you ever do have the key to hand:
+
+```bash
+NEON_API_KEY=... NEON_PROJECT_ID=... node infra/neon-branch.mjs ensure-base
+```
+
+`NEON_PROJECT_ID` is in Neon's project settings, and is already stored as a
+GitHub Actions *variable* (readable, unlike the secret). A new `NEON_API_KEY`,
+if one is ever needed, comes from Neon → Account settings → API keys — creating
+one does not invalidate the existing key.
+
+Neon has no "empty branch": every branch is copy-on-write from a parent, and
+omitting `parent_id` does not mean "start empty" — it means *the project's
+default branch*, which is production. `neon-branch.mjs` used to omit it, so
+every preview URL was backed by a copy of live accounts, on a service that is
+publicly reachable with no access gate.
+
+`ensure-base` creates `preview-base` from the default branch once and then
+truncates every table in every module schema, leaving the schema and the
+migration history and none of the rows. Previews are cut from that.
+
+`create` now resolves the parent explicitly and **fails when `preview-base` is
+missing**, rather than falling back. A preview with no data is an
+inconvenience; a preview with production's data is an incident.
+
+Any preview branch created before this change still contains that copy. Delete
+those branches in the Neon console, or close their pull requests and let
+teardown do it.
+
+### Previews sign with their own key
+
+`agnte-jwt-secret-preview`, created by `set-secrets.sh` alongside the
+production key. Previews used to mount `agnte-jwt-secret` — the same key
+production signs with — which meant a token minted on a public preview URL was
+accepted by production.
+
+The preview workflow does **not** fall back to the production key when the
+preview one is missing: it deploys with signing unconfigured, the status page
+says so, and sign-in returns 503. That is the intended failure.
+
+The access token audience is also scoped per environment
+(`agnte-api-preview` versus `agnte-api`), so tokens are not interchangeable
+even if the two secrets were ever pointed at the same value again. Production
+keeps the bare `agnte-api`, so tokens already issued stay valid.
+
 ### Free plan limits that shape the pipeline
 
 - **10 branches per project.** Branch-per-PR runs into this, so teardown on PR

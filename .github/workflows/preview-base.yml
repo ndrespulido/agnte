@@ -1,0 +1,39 @@
+name: Create the preview base branch
+
+# Run once, by hand, before previews can be created.
+#
+# `ensure-base` needs NEON_API_KEY, which GitHub stores write-only — you cannot
+# read it back out to run the command locally, and pasting it into a terminal
+# would be a credential handled for no reason. So the command runs here, where
+# the key already lives.
+#
+# Idempotent: a second run reports that the branch exists and changes nothing.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ensure-base:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # `ensure-base` connects to the new branch with `pg` to empty it, so the
+      # dependencies have to be installed. The other Neon commands are pure API
+      # calls and do not.
+      - run: npm ci
+
+      - name: Ensure preview-base exists and is empty
+        env:
+          NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+          NEON_PROJECT_ID: ${{ vars.NEON_PROJECT_ID }}
+        run: node infra/neon-branch.mjs ensure-base

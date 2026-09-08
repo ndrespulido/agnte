@@ -16,7 +16,7 @@ export default async function StatusPage() {
   const checks = await runChecks();
 
   return (
-    <main>
+    <main className="status">
       <h1>Agnte</h1>
       <p className="lede">
         Deployment status. No application features yet — this page exists to prove the

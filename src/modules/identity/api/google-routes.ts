@@ -37,7 +37,7 @@ function googleContext(request: Request) {
       clientSecret: config.GOOGLE_CLIENT_SECRET,
     }),
     state: new JwtOAuthStateSigner(secret),
-    accessTokens: new JwtAccessTokenIssuer(secret),
+    accessTokens: new JwtAccessTokenIssuer(secret, config.APP_ENV),
     // Must match byte for byte what was sent to the authorization endpoint and
     // what is registered with Google — the token exchange checks it.
     redirectUri: `${baseUrl(request, config.APP_BASE_URL)}/v1/auth/google/callback`,

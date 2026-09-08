@@ -4,6 +4,7 @@ import { getDatabase } from '@/shared/infra/database';
 import { fixedClock, uuidv7 } from '@/shared/kernel';
 import { CryptoTokenGenerator } from '@/modules/identity/infrastructure/crypto-token-generator';
 import {
+  audienceFor,
   JwtAccessTokenIssuer,
   accessTokenSecret,
   resetDevelopmentSecretForTests,
@@ -29,7 +30,7 @@ const tokens = new CryptoTokenGenerator();
 const SECRET = 'a'.repeat(32);
 
 describe('JwtAccessTokenIssuer', () => {
-  const issuer = new JwtAccessTokenIssuer(SECRET);
+  const issuer = new JwtAccessTokenIssuer(SECRET, 'local');
 
   it('round-trips the subject', async () => {
     const userId = uuidv7();
@@ -37,7 +38,7 @@ describe('JwtAccessTokenIssuer', () => {
   });
 
   it('rejects a token signed with a different key', async () => {
-    const other = new JwtAccessTokenIssuer('b'.repeat(32));
+    const other = new JwtAccessTokenIssuer('b'.repeat(32), 'local');
     expect(await issuer.verify(await other.issue(uuidv7()))).toBeNull();
   });
 
@@ -295,5 +296,43 @@ describe.skipIf(!DATABASE_URL)('refresh tokens against real Postgres', () => {
       'SELECT count(*) AS n FROM identity.refresh_token',
     );
     expect(Number(rows[0]!.n)).toBe(0);
+  });
+});
+
+/**
+ * Tokens must not be portable between environments.
+ *
+ * Preview and production were mounting the same signing secret, and preview
+ * databases are branched from production — so signing in on a publicly
+ * reachable preview URL yielded a token that production would accept. The
+ * secrets are separated now; this is the part of the fix that holds even if
+ * they are ever shared again by accident.
+ */
+describe('the access token audience', () => {
+  it('is the bare production audience only in production', () => {
+    expect(audienceFor('production')).toBe('agnte-api');
+    expect(audienceFor('preview')).toBe('agnte-api-preview');
+    expect(audienceFor('local')).toBe('agnte-api-local');
+  });
+
+  it('refuses a preview token in production, even with the same key', () => {
+    const secret = 'x'.repeat(48);
+    const preview = new JwtAccessTokenIssuer(secret, 'preview');
+    const production = new JwtAccessTokenIssuer(secret, 'production');
+
+    return preview.issue('01a081a7-bf4f-72e8-b77c-d8821d48f573').then(async (token) => {
+      // The same key verifies the signature; the audience is what refuses it.
+      expect(await preview.verify(token)).not.toBe(null);
+      expect(await production.verify(token)).toBe(null);
+    });
+  });
+
+  it('refuses a production token in preview', async () => {
+    const secret = 'x'.repeat(48);
+    const preview = new JwtAccessTokenIssuer(secret, 'preview');
+    const production = new JwtAccessTokenIssuer(secret, 'production');
+
+    const token = await production.issue('01a081a7-bf4f-72e8-b77c-d8821d48f573');
+    expect(await preview.verify(token)).toBe(null);
   });
 });

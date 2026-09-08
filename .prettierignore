@@ -7,3 +7,8 @@ package-lock.json
 # large diffs that hide the actual edit.
 *.md
 docs/
+
+# Generated from src/shared/design/tokens.ts by `npm run tokens`. Formatting a
+# generated file is churn nobody reads, and it would fight the drift test,
+# which compares the file byte for byte against the generator's output.
+src/app/tokens.css

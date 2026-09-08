@@ -325,6 +325,26 @@ else
   note "Generated a new 32-byte key."
 fi
 
+# A separate key for previews.
+#
+# Previews used to mount the production key. Since previews are publicly
+# reachable with no access gate, and their databases were branched from
+# production, signing in on a preview URL produced a token production would
+# accept. Two keys is the fix; the token audience is also scoped per
+# environment, so the two would not be interchangeable even if these were ever
+# pointed at the same secret again.
+#
+# Rotating this one signs nobody real out, because nothing real ever lives in a
+# preview — but it is still left alone on re-runs, for the same reason as
+# above: a surprise rotation should never be a side effect.
+if gcloud secrets describe agnte-jwt-secret-preview --project="${PROJECT_ID}" >/dev/null 2>&1; then
+  note "agnte-jwt-secret-preview already exists; leaving it alone."
+  JWT_SECRET_PREVIEW=""
+else
+  JWT_SECRET_PREVIEW="$(openssl rand -hex 32)"
+  note "Generated a separate 32-byte key for preview environments."
+fi
+
 # ----------------------------------------------------------------------------
 # Google OAuth (architecture.md §4)
 #
@@ -379,6 +399,10 @@ if [[ -n "${R2_ENDPOINT}" ]]; then
   store agnte-r2-secret-access-key "${R2_SECRET_ACCESS_KEY}"
 fi
 
+if [[ -n "${JWT_SECRET_PREVIEW}" ]]; then
+  store agnte-jwt-secret-preview "${JWT_SECRET_PREVIEW}"
+fi
+
 if [[ -n "${JWT_SECRET}" ]]; then
   store agnte-jwt-secret "${JWT_SECRET}"
 fi
@@ -425,11 +449,13 @@ fi
 
 # Unconditional: the secret exists by now either way — this run created it, or
 # an earlier one did — and the binding is idempotent.
-gcloud secrets add-iam-policy-binding agnte-jwt-secret \
-  --member="serviceAccount:${RUNTIME_SA}" \
-  --role=roles/secretmanager.secretAccessor \
-  --project="${PROJECT_ID}" --quiet >/dev/null
-note "runtime  -> agnte-jwt-secret"
+for jwt_secret in agnte-jwt-secret agnte-jwt-secret-preview; do
+  gcloud secrets add-iam-policy-binding "${jwt_secret}" \
+    --member="serviceAccount:${RUNTIME_SA}" \
+    --role=roles/secretmanager.secretAccessor \
+    --project="${PROJECT_ID}" --quiet >/dev/null
+  note "runtime  -> ${jwt_secret}"
+done
 
 # ----------------------------------------------------------------------------
 # The deployer needs to *see* these, not read them.
@@ -447,7 +473,7 @@ note "runtime  -> agnte-jwt-secret"
 # never reads a value — Cloud Run resolves them as the runtime account at start
 # up. Knowing the secret exists is the whole requirement.
 # ----------------------------------------------------------------------------
-for secret in agnte-jwt-secret agnte-resend-api-key agnte-email-from \
+for secret in agnte-jwt-secret agnte-jwt-secret-preview agnte-resend-api-key agnte-email-from \
               agnte-google-client-id agnte-google-client-secret; do
   if gcloud secrets describe "${secret}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
     gcloud secrets add-iam-policy-binding "${secret}" \
@@ -516,6 +542,7 @@ if [[ -n "${R2_ENDPOINT}" ]]; then
 fi
 
 verify agnte-jwt-secret "${RUNTIME_SA}" "runtime"
+verify agnte-jwt-secret-preview "${RUNTIME_SA}" "runtime"
 
 if [[ -n "${RESEND_API_KEY}" ]]; then
   for secret in agnte-resend-api-key agnte-email-from; do

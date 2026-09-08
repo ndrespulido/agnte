@@ -65,7 +65,12 @@ beforeAll(async () => {
 afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
 
 beforeEach(() => {
-  branches = [{ id: 'br-main', name: 'main' }];
+  // `main` is the project's default branch — the one holding production data.
+  // `preview-base` is the empty branch previews are actually cut from.
+  branches = [
+    { id: 'br-main', name: 'main' },
+    { id: 'br-base', name: 'preview-base' },
+  ];
   requests = [];
 });
 
@@ -81,6 +86,45 @@ const cli = (...args: string[]) =>
   });
 
 describe('create', () => {
+  /**
+   * The important one.
+   *
+   * Neon has no empty branch, and omitting `parent_id` is not a neutral
+   * default — it means "the project's default branch", which is production. So
+   * every preview URL, which is publicly reachable with no access gate, used to
+   * be backed by a copy of live accounts.
+   */
+  it('branches from preview-base, never from the default branch', async () => {
+    await cli('create', '--pr', '12');
+
+    const created = requests.find(
+      (r) => r.method === 'POST' && r.url.endsWith('/branches'),
+    );
+    const body = created?.body as { branch?: { parent_id?: string } } | undefined;
+
+    expect(body?.branch?.parent_id).toBe('br-base');
+    expect(body?.branch?.parent_id).not.toBe('br-main');
+  });
+
+  it('refuses to create a preview when preview-base is missing', async () => {
+    // Fails rather than falling back. A preview with no data is an
+    // inconvenience; a preview with production's data is an incident.
+    branches = [{ id: 'br-main', name: 'main' }];
+
+    await expect(cli('create', '--pr', '12')).rejects.toThrow();
+    expect(branches.map((b) => b.name)).not.toContain('pr-12');
+  });
+
+  it('says how to fix a missing preview-base', async () => {
+    branches = [{ id: 'br-main', name: 'main' }];
+
+    const failure = await cli('create', '--pr', '12').catch((error: unknown) => error);
+    const stderr = (failure as { stderr?: string }).stderr ?? '';
+
+    expect(stderr).toContain('preview-base');
+    expect(stderr).toContain('ensure-base');
+  });
+
   it('creates a branch named after the pull request', async () => {
     const { stdout } = await cli('create', '--pr', '12');
     expect(branches.map((b) => b.name)).toContain('pr-12');
@@ -121,7 +165,7 @@ describe('delete', () => {
     await cli('create', '--pr', '12');
     await cli('create', '--pr', '13');
     await cli('delete', '--pr', '12');
-    expect(branches.map((b) => b.name)).toEqual(['main', 'pr-13']);
+    expect(branches.map((b) => b.name)).toEqual(['main', 'preview-base', 'pr-13']);
   });
 
   it('succeeds when the branch is already gone, so teardown can re-run', async () => {

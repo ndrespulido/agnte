@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Agnte">
+  <rect width="512" height="512" rx="112" fill="#faf9f6"/>
+  <!-- The timeline: a hairline running the height of the tile. -->
+  <rect x="252" y="96" width="8" height="320" rx="4" fill="#1c1c1e" opacity="0.16"/>
+  <!-- Today: the one marked point, in the accent. -->
+  <circle cx="256" cy="256" r="34" fill="#8a5a2b"/>
+  <!-- Two entries either side, as the ticks a paper agenda would have. -->
+  <rect x="140" y="176" width="88" height="8" rx="4" fill="#1c1c1e" opacity="0.32"/>
+  <rect x="284" y="336" width="88" height="8" rx="4" fill="#1c1c1e" opacity="0.32"/>
+</svg>
