@@ -231,11 +231,26 @@ revision does not roll back a migration.
 
 ### Previews are branched from `preview-base`, never from production
 
-**Run this once before the next preview deploy, or previews will fail:**
+**Run this once before the next preview deploy, or previews will fail.**
+
+In GitHub: Actions → **Create the preview base branch** → Run workflow.
+
+It runs there rather than locally because `NEON_API_KEY` is a GitHub secret,
+which is write-only — you cannot read it back to put on a local command line,
+and copying it out to a terminal would be a credential handled for no reason.
+The workflow is idempotent: a second run reports the branch already exists and
+changes nothing.
+
+The same thing locally, if you ever do have the key to hand:
 
 ```bash
 NEON_API_KEY=... NEON_PROJECT_ID=... node infra/neon-branch.mjs ensure-base
 ```
+
+`NEON_PROJECT_ID` is in Neon's project settings, and is already stored as a
+GitHub Actions *variable* (readable, unlike the secret). A new `NEON_API_KEY`,
+if one is ever needed, comes from Neon → Account settings → API keys — creating
+one does not invalidate the existing key.
 
 Neon has no "empty branch": every branch is copy-on-write from a parent, and
 omitting `parent_id` does not mean "start empty" — it means *the project's
