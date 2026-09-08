@@ -111,9 +111,11 @@ describe.skipIf(!DATABASE_URL)('verse repositories against real Postgres', () =>
       const tag = newTag(owner(), 'movies');
       await tags.create(tag);
 
-      expect(await tags.update({ ...tag, name: 'films' }, 0)).toBe(true);
+      expect(await tags.update({ ...tag, name: 'films' }, 0)).toEqual({
+        kind: 'updated',
+      });
       // The row is at version 1 now; a writer still holding 0 must lose.
-      expect(await tags.update({ ...tag, name: 'cinema' }, 0)).toBe(false);
+      expect(await tags.update({ ...tag, name: 'cinema' }, 0)).toEqual({ kind: 'stale' });
 
       expect((await tags.findById(tag.id))?.name).toBe('films');
       expect((await tags.findById(tag.id))?.version).toBe(1);
