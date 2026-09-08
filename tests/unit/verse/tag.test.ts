@@ -12,7 +12,9 @@ import {
   suggestedProperties,
 } from '@/modules/verse';
 import { createTag } from '@/modules/verse/domain/tag';
-import { fixedClock } from '../../support/verse-fakes';
+import { fixedClock } from '@/shared/kernel';
+
+const AT = new Date('2026-01-01T00:00:00.000Z');
 
 describe('parseTagName', () => {
   it('accepts a tag written the way the UI shows it', () => {
@@ -133,12 +135,12 @@ describe('verticals', () => {
 
 describe('createTag', () => {
   it('defaults to private, never to something more permissive', () => {
-    const tag = createTag({ ownerId: 'u1', name: 'medical', clock: fixedClock() });
+    const tag = createTag({ ownerId: 'u1', name: 'medical', clock: fixedClock(AT) });
     expect(tag.visibility).toBe('private');
   });
 
   it('starts at version 0 with matching timestamps', () => {
-    const clock = fixedClock();
+    const clock = fixedClock(AT);
     const tag = createTag({ ownerId: 'u1', name: 'movies', clock });
     expect(tag.version).toBe(0);
     expect(tag.createdAt).toEqual(tag.updatedAt);
@@ -146,8 +148,8 @@ describe('createTag', () => {
   });
 
   it('mints a time-sortable id', () => {
-    const a = createTag({ ownerId: 'u1', name: 'a', clock: fixedClock() });
-    const b = createTag({ ownerId: 'u1', name: 'b', clock: fixedClock() });
+    const a = createTag({ ownerId: 'u1', name: 'a', clock: fixedClock(AT) });
+    const b = createTag({ ownerId: 'u1', name: 'b', clock: fixedClock(AT) });
     expect(a.id < b.id).toBe(true);
   });
 });

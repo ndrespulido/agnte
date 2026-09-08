@@ -14,15 +14,16 @@ import {
 } from '@/modules/verse';
 import { applyChanges, createVerse } from '@/modules/verse/domain/verse';
 import { VerseErrorCode } from '@/modules/verse';
-import { fixedClock, tickingClock } from '../../support/verse-fakes';
-import { unwrap } from '@/shared/kernel';
+import { fixedClock, unwrap } from '@/shared/kernel';
+
+const AT = new Date('2026-01-01T00:00:00.000Z');
 
 const base = (overrides: Record<string, unknown> = {}) =>
   unwrap(
     createVerse({
       ownerId: 'u1',
       tagIds: ['t1'],
-      clock: fixedClock(),
+      clock: fixedClock(AT),
       ...overrides,
     }),
   );
@@ -44,7 +45,7 @@ describe('createVerse', () => {
   });
 
   it('refuses a verse with no tags', () => {
-    const result = createVerse({ ownerId: 'u1', tagIds: [], clock: fixedClock() });
+    const result = createVerse({ ownerId: 'u1', tagIds: [], clock: fixedClock(AT) });
     expect(result.ok).toBe(false);
     expect(!result.ok && result.error.code).toBe(VerseErrorCode.NoTags);
   });
@@ -262,7 +263,7 @@ describe('parseProperties', () => {
 describe('applyChanges', () => {
   it('bumps the version and moves updatedAt, leaving createdAt alone', () => {
     const verse = base();
-    const clock = tickingClock(new Date('2026-02-01T00:00:00Z'));
+    const clock = fixedClock(new Date('2026-02-01T00:00:00Z'));
     const changed = unwrap(applyChanges(verse, { xp: 'good' }, clock));
 
     expect(changed.version).toBe(verse.version + 1);
@@ -272,22 +273,22 @@ describe('applyChanges', () => {
 
   it('does not mutate the verse it was given', () => {
     const verse = base({ xp: 'before' });
-    unwrap(applyChanges(verse, { xp: 'after' }, fixedClock()));
+    unwrap(applyChanges(verse, { xp: 'after' }, fixedClock(AT)));
     expect(verse.xp).toBe('before');
   });
 
   it('distinguishes "leave alone" from "clear"', () => {
     const verse = base({ rating: 8, xp: 'note' });
 
-    const untouched = unwrap(applyChanges(verse, { xp: 'other' }, fixedClock()));
+    const untouched = unwrap(applyChanges(verse, { xp: 'other' }, fixedClock(AT)));
     expect(untouched.rating).toBe(8);
 
-    const cleared = unwrap(applyChanges(verse, { rating: null }, fixedClock()));
+    const cleared = unwrap(applyChanges(verse, { rating: null }, fixedClock(AT)));
     expect(cleared.rating).toBe(null);
   });
 
   it('refuses to leave a verse with no tags', () => {
-    const result = applyChanges(base(), { tagIds: [] }, fixedClock());
+    const result = applyChanges(base(), { tagIds: [] }, fixedClock(AT));
     expect(!result.ok && result.error.code).toBe(VerseErrorCode.NoTags);
   });
 
@@ -299,7 +300,7 @@ describe('applyChanges', () => {
       applyChanges(
         verse,
         { placement: { kind: 'deep-time', years: -66e6 } },
-        fixedClock(),
+        fixedClock(AT),
       ),
     );
 

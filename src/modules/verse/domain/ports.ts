@@ -100,14 +100,29 @@ export interface VerseRepository {
   update(verse: Verse, expectedVersion: number): Promise<boolean>;
   delete(id: string, expectedVersion: number): Promise<boolean>;
 
-  timeline(query: TimelineQuery): Promise<Page<Verse>>;
-  search(query: SearchQuery): Promise<Page<SearchHit>>;
+  /**
+   * Timeline and search are declared on their own interfaces below rather than
+   * here. Both arrive in later tasks (2.5, 2.7), and a method on this port that
+   * every adapter had to stub in the meantime would be a landmine: a stub that
+   * returns an empty page is indistinguishable from a timeline with nothing on
+   * it.
+   */
 
   /** Every tag on a verse, for resolving inherited visibility. */
   tagsOf(verseId: string): Promise<Tag[]>;
 
   /** Tags for many verses at once, keyed by verse id — the timeline's N+1 guard. */
   tagsOfMany(verseIds: readonly string[]): Promise<Map<string, Tag[]>>;
+}
+
+/** Reading the timeline (2.5). */
+export interface TimelineRepository {
+  timeline(query: TimelineQuery): Promise<Page<Verse>>;
+}
+
+/** Full-text search (2.7). */
+export interface SearchRepository {
+  search(query: SearchQuery): Promise<Page<SearchHit>>;
 }
 
 /**
