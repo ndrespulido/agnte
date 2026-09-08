@@ -14,6 +14,7 @@ export const VerseErrorCode = {
   TagNotFound: 'verse.tag_not_found',
   TagAlreadyExists: 'verse.tag_already_exists',
   VerseNotFound: 'verse.not_found',
+  VisibilityInvalid: 'verse.visibility_invalid',
   RatingOutOfRange: 'verse.rating_out_of_range',
   TimeConflict: 'verse.time_conflict',
   EventRangeInverted: 'verse.event_range_inverted',
@@ -54,6 +55,12 @@ export const tagAlreadyExists = (name: string): DomainError =>
   new DomainError(VerseErrorCode.TagAlreadyExists, `You already have a tag .${name}.`, {
     details: { name },
   });
+
+export const visibilityInvalid = (): DomainError =>
+  new DomainError(
+    VerseErrorCode.VisibilityInvalid,
+    "Visibility must be 'private', 'shared' or 'public'.",
+  );
 
 export const verseNotFound = (): DomainError =>
   new DomainError(VerseErrorCode.VerseNotFound, 'That verse does not exist.');

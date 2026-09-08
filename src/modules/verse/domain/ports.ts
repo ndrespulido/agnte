@@ -30,16 +30,26 @@ export interface TagRepository {
   create(tag: Tag): Promise<CreateTagOutcome>;
 
   /**
-   * @returns false when `expectedVersion` no longer matches, so the caller can
-   *          answer 409 with server state (architecture.md §2).
+   * An outcome rather than a boolean, for the same reason `create` has one: a
+   * rename can lose to the version check *or* to either unique index, and those
+   * are three different things to tell the user. Classifying a driver error is
+   * the adapter's job — an application layer doing it would be reaching through
+   * the port at the database underneath.
    */
-  update(tag: Tag, expectedVersion: number): Promise<boolean>;
+  update(tag: Tag, expectedVersion: number): Promise<UpdateTagOutcome>;
 
   delete(id: string, expectedVersion: number): Promise<boolean>;
 }
 
 export type CreateTagOutcome =
   { kind: 'created' } | { kind: 'name-taken' } | { kind: 'shortcut-taken' };
+
+export type UpdateTagOutcome =
+  | { kind: 'updated' }
+  /** The version moved: someone else wrote first (architecture.md §2). */
+  | { kind: 'stale' }
+  | { kind: 'name-taken' }
+  | { kind: 'shortcut-taken' };
 
 /**
  * A page of results plus the cursor to continue from.
@@ -110,6 +120,17 @@ export interface VerseRepository {
 
   /** Every tag on a verse, for resolving inherited visibility. */
   tagsOf(verseId: string): Promise<Tag[]>;
+
+  /**
+   * How many verses would be left with no tags if this tag were deleted.
+   *
+   * The counterpart to the missing CHECK: "a verse has at least one tag" cannot
+   * be a database constraint, and `ON DELETE CASCADE` on the join table is
+   * perfectly happy to strip a verse's last tag. So the application asks first.
+   * A count rather than a boolean because the answer is worth telling the user —
+   * "3 verses have only this tag" is actionable where "cannot delete" is not.
+   */
+  countVersesOnlyTaggedWith(tagId: string): Promise<number>;
 
   /** Tags for many verses at once, keyed by verse id — the timeline's N+1 guard. */
   tagsOfMany(verseIds: readonly string[]): Promise<Map<string, Tag[]>>;

@@ -12,6 +12,13 @@
  */
 
 export {
+  handleCreateTag,
+  handleDeleteTag,
+  handleListTags,
+  handleUpdateTag,
+} from './api/tag-routes';
+
+export {
   DEFAULT_VISIBILITY,
   VISIBILITY_ORDER,
   atLeast,

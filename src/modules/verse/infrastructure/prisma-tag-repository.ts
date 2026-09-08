@@ -1,6 +1,6 @@
 import { getDatabase } from '@/shared/infra/database';
 import { constraintName, isUniqueViolation } from '@/shared/infra/postgres-errors';
-import type { CreateTagOutcome, TagRepository } from '../domain/ports';
+import type { CreateTagOutcome, TagRepository, UpdateTagOutcome } from '../domain/ports';
 import type { Tag, Vertical } from '../domain/tag';
 import type { Visibility } from '../domain/visibility';
 
@@ -149,20 +149,31 @@ export class PrismaTagRepository implements TagRepository {
     }
   }
 
-  async update(tag: Tag, expectedVersion: number): Promise<boolean> {
-    const updated = await requireDatabase().$executeRaw`
-      UPDATE verse.tag
-      SET name = ${tag.name},
-          display_name = ${tag.displayName},
-          visibility = ${tag.visibility},
-          shortcut = ${tag.shortcut},
-          vertical = ${tag.vertical},
-          updated_at = ${tag.updatedAt},
-          version = version + 1
-      WHERE id = ${tag.id}::uuid
-        AND version = ${expectedVersion}
-    `;
-    return updated > 0;
+  async update(tag: Tag, expectedVersion: number): Promise<UpdateTagOutcome> {
+    let updated: number;
+    try {
+      updated = await requireDatabase().$executeRaw`
+        UPDATE verse.tag
+        SET name = ${tag.name},
+            display_name = ${tag.displayName},
+            visibility = ${tag.visibility},
+            shortcut = ${tag.shortcut},
+            vertical = ${tag.vertical},
+            updated_at = ${tag.updatedAt},
+            version = version + 1
+        WHERE id = ${tag.id}::uuid
+          AND version = ${expectedVersion}
+      `;
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+
+      const constraint = constraintName(error) ?? '';
+      if (constraint.includes('shortcut')) return { kind: 'shortcut-taken' };
+      if (constraint.includes('name')) return { kind: 'name-taken' };
+      throw error;
+    }
+
+    return updated > 0 ? { kind: 'updated' } : { kind: 'stale' };
   }
 
   /**

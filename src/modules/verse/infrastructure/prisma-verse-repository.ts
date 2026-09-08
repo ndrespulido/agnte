@@ -194,6 +194,28 @@ export class PrismaVerseRepository implements VerseRepository {
   }
 
   /**
+   * Verses whose *only* tag is this one.
+   *
+   * `HAVING count(*) = 1` on the join rows for the verse, restricted to verses
+   * carrying this tag. Counting the tag's own verses and subtracting would be
+   * wrong: a verse with three tags including this one survives the delete.
+   */
+  async countVersesOnlyTaggedWith(tagId: string): Promise<number> {
+    const rows = await requireDatabase().$queryRaw<{ count: bigint }[]>`
+      SELECT count(*)::bigint AS count FROM (
+        SELECT vt.verse_id
+        FROM verse.verse_tag vt
+        WHERE vt.verse_id IN (
+          SELECT verse_id FROM verse.verse_tag WHERE tag_id = ${tagId}::uuid
+        )
+        GROUP BY vt.verse_id
+        HAVING count(*) = 1
+      ) AS orphaned
+    `;
+    return Number(rows[0]?.count ?? 0);
+  }
+
+  /**
    * The N+1 guard for read paths.
    *
    * A timeline page resolves visibility for every verse on it, and visibility
