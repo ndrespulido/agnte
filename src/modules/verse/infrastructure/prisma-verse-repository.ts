@@ -13,6 +13,14 @@ import type { Tag, Vertical } from '../domain/tag';
 import type { Verse } from '../domain/verse';
 import type { Visibility } from '../domain/visibility';
 
+/**
+ * Columns are listed explicitly everywhere in this file rather than `SELECT *`.
+ *
+ * Not style: adding the `search_vector` column broke every read at once, because
+ * the driver cannot deserialize a tsvector and `SELECT *` had been quietly
+ * promising to return whatever the table happened to hold. A column list is a
+ * contract between the query and `VerseRow`.
+ */
 interface VerseRow {
   id: string;
   owner_id: string;
@@ -96,7 +104,10 @@ export class PrismaVerseRepository
     const db = requireDatabase();
 
     const rows = await db.$queryRaw<VerseRow[]>`
-      SELECT * FROM verse.verse WHERE id = ${id}::uuid LIMIT 1
+      SELECT id, owner_id, event_start, event_end, deep_time_years, location,
+             rating, xp, properties, visibility, media_ids, timeline_years,
+             created_at, updated_at, version
+      FROM verse.verse WHERE id = ${id}::uuid LIMIT 1
     `;
     const row = rows[0];
     if (!row) return null;
@@ -255,7 +266,10 @@ export class PrismaVerseRepository
     const rows =
       query.direction === 'past'
         ? await requireDatabase().$queryRaw<VerseRow[]>`
-            SELECT v.* FROM verse.verse v
+            SELECT v.id, v.owner_id, v.event_start, v.event_end, v.deep_time_years, v.location,
+                   v.rating, v.xp, v.properties, v.visibility, v.media_ids,
+                   v.timeline_years, v.created_at, v.updated_at, v.version
+            FROM verse.verse v
             WHERE v.owner_id = ${query.ownerId}::uuid
               AND (
                 v.timeline_years < ${after}
@@ -274,7 +288,10 @@ export class PrismaVerseRepository
             LIMIT ${limit}
           `
         : await requireDatabase().$queryRaw<VerseRow[]>`
-            SELECT v.* FROM verse.verse v
+            SELECT v.id, v.owner_id, v.event_start, v.event_end, v.deep_time_years, v.location,
+                   v.rating, v.xp, v.properties, v.visibility, v.media_ids,
+                   v.timeline_years, v.created_at, v.updated_at, v.version
+            FROM verse.verse v
             WHERE v.owner_id = ${query.ownerId}::uuid
               AND (
                 v.timeline_years > ${after}
@@ -341,7 +358,10 @@ export class PrismaVerseRepository
 
     const rows = await requireDatabase().$queryRaw<(VerseRow & { rank: number })[]>`
       WITH matched AS (
-        SELECT v.*, ts_rank_cd(v.search_vector, q.query) AS rank
+        SELECT v.id, v.owner_id, v.event_start, v.event_end, v.deep_time_years, v.location,
+                   v.rating, v.xp, v.properties, v.visibility, v.media_ids,
+                   v.timeline_years, v.created_at, v.updated_at, v.version,
+               ts_rank_cd(v.search_vector, q.query) AS rank
         FROM verse.verse v,
              websearch_to_tsquery('simple', ${query.text}) AS q(query)
         WHERE v.owner_id = ${query.ownerId}::uuid
@@ -363,7 +383,7 @@ export class PrismaVerseRepository
           AND (${query.hasMedia ?? null}::boolean IS NULL
                OR (cardinality(v.media_ids) > 0) = ${query.hasMedia ?? null})
       )
-      SELECT * FROM matched
+      SELECT * FROM matched  -- the CTE already lists its columns
       WHERE ${afterRank}::double precision IS NULL
          OR rank < ${afterRank}
          OR (rank = ${afterRank} AND id < ${afterId}::uuid)

@@ -425,6 +425,32 @@ describe.skipIf(!DATABASE_URL)('timeline', () => {
       const { body } = await timeline(mine.token, '?anchor=2026-01-01T00:00:00Z');
       expect(body.verses.map((v) => v.xp)).toEqual(['mine']);
     });
+
+    it("excludes another user's PUBLIC verse too", async () => {
+      // The discriminating case, same as in search: a private verse is dropped
+      // by the visibility resolver whether or not the query scopes by owner, so
+      // the test above cannot tell whether the owner filter exists. A public
+      // verse can only be kept out by the scoping.
+      const mine = await signUp('n2@example.com');
+      const theirs = await signUp('o2@example.com');
+
+      const myTag = await makeTag(mine.token, 'mine');
+      const theirTag = await makeTag(theirs.token, 'blog', 'public');
+
+      await makeVerse(mine.token, {
+        tagIds: [myTag.id],
+        eventStart: '2024-01-01T00:00:00Z',
+        xp: 'mine',
+      });
+      await makeVerse(theirs.token, {
+        tagIds: [theirTag.id],
+        eventStart: '2024-01-01T00:00:00Z',
+        xp: 'their public post',
+      });
+
+      const { body } = await timeline(mine.token, '?anchor=2026-01-01T00:00:00Z');
+      expect(body.verses.map((v) => v.xp)).toEqual(['mine']);
+    });
   });
 });
 
