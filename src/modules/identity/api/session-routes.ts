@@ -31,7 +31,7 @@ const noStore = { 'cache-control': 'no-store' } as const;
 function issuer(): JwtAccessTokenIssuer | undefined {
   const config = loadConfig();
   const secret = accessTokenSecret(config.JWT_SECRET, config.APP_ENV === 'local');
-  return secret ? new JwtAccessTokenIssuer(secret) : undefined;
+  return secret ? new JwtAccessTokenIssuer(secret, config.APP_ENV) : undefined;
 }
 
 const signingUnavailable = (): Response =>

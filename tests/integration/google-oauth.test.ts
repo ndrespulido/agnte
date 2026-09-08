@@ -273,7 +273,7 @@ describe('JwtOAuthStateSigner', () => {
     const { JwtAccessTokenIssuer } =
       await import('@/modules/identity/infrastructure/jwt-access-token-issuer');
     const secret = 'a'.repeat(32);
-    const access = new JwtAccessTokenIssuer(secret);
+    const access = new JwtAccessTokenIssuer(secret, 'local');
     const state = new JwtOAuthStateSigner(secret);
 
     expect(await state.verify(await access.issue('some-user-id'))).toBe(false);

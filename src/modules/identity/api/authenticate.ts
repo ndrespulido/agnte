@@ -69,7 +69,7 @@ export async function authenticate(request: Request): Promise<Authenticated> {
     };
   }
 
-  const userId = await new JwtAccessTokenIssuer(secret).verify(match[1]);
+  const userId = await new JwtAccessTokenIssuer(secret, config.APP_ENV).verify(match[1]);
   if (!userId) return { ok: false, response: unauthorized('That token is not valid.') };
 
   const user = await new PrismaUserRepository().findById(userId);

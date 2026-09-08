@@ -150,11 +150,23 @@ jobs:
             SECRETS="${SECRETS},RESEND_API_KEY=agnte-resend-api-key:latest,EMAIL_FROM=agnte-email-from:latest"
           fi
 
-          # Same conditional mount, same reason: this deploys green before the
-          # key exists, and the status page reports signing as not-configured
-          # rather than sign-in failing mysteriously.
-          if gcloud secrets describe agnte-jwt-secret >/dev/null 2>&1; then
-            SECRETS="${SECRETS},JWT_SECRET=agnte-jwt-secret:latest"
+          # Previews get their OWN signing key, never production's.
+          #
+          # They used to mount agnte-jwt-secret — the same secret production
+          # signs with. Combined with previews being publicly reachable and
+          # (until this change) branched from the production database, signing
+          # in on a preview URL produced a token production would accept.
+          #
+          # Deliberately NOT falling back to the production secret when this one
+          # is missing: a preview whose sign-in returns 503 is a nuisance the
+          # status page explains, while a preview minting production-valid
+          # tokens is the thing this exists to prevent.
+          if gcloud secrets describe agnte-jwt-secret-preview >/dev/null 2>&1; then
+            SECRETS="${SECRETS},JWT_SECRET=agnte-jwt-secret-preview:latest"
+          else
+            echo "::warning::agnte-jwt-secret-preview is not set — sign-in will" \
+              "report as not-configured on this preview. Create it with" \
+              "./infra/set-secrets.sh. Production's key is never used here."
           fi
 
           FLAGS=(
