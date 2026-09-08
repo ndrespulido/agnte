@@ -18,6 +18,7 @@ export const VerseErrorCode = {
   RatingOutOfRange: 'verse.rating_out_of_range',
   TimeConflict: 'verse.time_conflict',
   EventRangeInverted: 'verse.event_range_inverted',
+  DateInvalid: 'verse.date_invalid',
   DeepTimeOutOfRange: 'verse.deep_time_out_of_range',
   PropertyKeyInvalid: 'verse.property_key_invalid',
   PropertyValueTooLong: 'verse.property_value_too_long',
@@ -83,6 +84,16 @@ export const eventRangeInverted = (): DomainError =>
     VerseErrorCode.EventRangeInverted,
     'The end of an event cannot come before its start.',
   );
+
+/**
+ * An unparseable date is refused rather than becoming an Invalid Date, which
+ * would reach the database as NULL and quietly place the verse nowhere — the
+ * user's typo would look like a deliberate "no date".
+ */
+export const dateInvalid = (field: string): DomainError =>
+  new DomainError(VerseErrorCode.DateInvalid, `${field} is not a valid date.`, {
+    details: { field },
+  });
 
 export const deepTimeOutOfRange = (min: number, max: number): DomainError =>
   new DomainError(

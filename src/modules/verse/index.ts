@@ -12,6 +12,13 @@
  */
 
 export {
+  handleCreateVerse,
+  handleDeleteVerse,
+  handleGetVerse,
+  handleUpdateVerse,
+} from './api/verse-routes';
+
+export {
   handleCreateTag,
   handleDeleteTag,
   handleListTags,
