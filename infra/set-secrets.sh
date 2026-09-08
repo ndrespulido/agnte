@@ -117,9 +117,18 @@ Cloudflare R2 next. From the R2 dashboard:
     (an EU-jurisdiction bucket has .eu. before r2, and that URL is the one to
     use — the jurisdiction is part of the endpoint, not a separate setting)
 
-Press Enter at the endpoint prompt to skip R2 for now.
+Press Enter at the endpoint prompt to keep whatever is already stored.
 
 EXPLAIN
+
+# Show what is already there, so a re-run does not mean re-entering credentials
+# that are working. This is the common case: the database or Resend needs
+# changing and R2 does not.
+if gcloud secrets versions access latest --secret=agnte-r2-endpoint \
+     --project="${PROJECT_ID}" >/dev/null 2>&1; then
+  note "Already stored: $(gcloud secrets versions access latest --secret=agnte-r2-endpoint --project="${PROJECT_ID}" 2>/dev/null)"
+  note "Press Enter to keep it."
+fi
 
 read -rp "  R2 S3 API endpoint: " R2_ENDPOINT
 
@@ -149,9 +158,28 @@ if [[ -n "${R2_ENDPOINT}" ]]; then
   # mistyped bucket name. Seconds here against a failed deploy later.
   say "Checking the R2 credentials"
   if command -v node >/dev/null && [[ -d node_modules/@aws-sdk ]]; then
-    R2_ENDPOINT="${R2_ENDPOINT}" R2_BUCKET="${R2_BUCKET}" \
-    R2_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID}" R2_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY}" \
-      node "$(dirname "$0")/verify-r2.mjs" || exit 1
+    # A failure here used to abort the whole script, which discarded the
+    # database URL, the Resend key and everything else already typed — for a
+    # mistake in one of four values, on a re-run where R2 was probably fine
+    # already. Now it offers to leave R2 alone and carry on, so one wrong paste
+    # costs one section rather than the entire run.
+    if ! R2_ENDPOINT="${R2_ENDPOINT}" R2_BUCKET="${R2_BUCKET}" \
+      R2_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID}" R2_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY}" \
+      node "$(dirname "$0")/verify-r2.mjs"; then
+      echo
+      echo "  Those R2 credentials were rejected, so they will not be stored."
+      echo "  Most often that is the Access Key ID and Secret: the prompts are"
+      echo "  hidden, and R2 shows the secret only once when the token is made."
+      echo
+      read -rp "  Continue without changing R2? [Y/n] " R2_CONTINUE
+      if [[ "${R2_CONTINUE}" =~ ^[Nn] ]]; then
+        exit 1
+      fi
+      # Cleared, so the store and grant steps below skip R2 entirely and leave
+      # whatever is already in Secret Manager untouched.
+      R2_ENDPOINT=""
+      note "Leaving the stored R2 configuration as it is."
+    fi
   else
     note "Skipped: needs node and \`npm install\` in this repository."
     note "The deploy's smoke test will catch a bad configuration instead."
@@ -206,16 +234,74 @@ if [[ -n "${RESEND_API_KEY}" ]]; then
   # Prove the key works before storing it, the same way the R2 credentials are
   # proved. A 401 here is seconds; the same 401 discovered at registration is a
   # person waiting for an email that will never arrive.
+  # Two separate questions, and checking only the first is what let a broken
+  # configuration reach production: is the key valid, and can it send from this
+  # address? A valid key returns 200 here no matter what the From address is, so
+  # "Resend accepted the key" was true and useless.
   say "Checking the Resend key"
-  RESEND_STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+  RESEND_BODY=$(mktemp)
+  RESEND_STATUS=$(curl -s -o "${RESEND_BODY}" -w '%{http_code}' \
     -H "Authorization: Bearer ${RESEND_API_KEY}" \
     https://api.resend.com/domains || echo "000")
+
   case "${RESEND_STATUS}" in
     2*) note "Resend accepted the key." ;;
-    401|403) echo "  Resend rejected that key (HTTP ${RESEND_STATUS})."; exit 1 ;;
+    401|403) rm -f "${RESEND_BODY}"; echo "  Resend rejected that key (HTTP ${RESEND_STATUS})."; exit 1 ;;
     000) note "Could not reach Resend; storing the key unverified." ;;
     *)  note "Resend answered HTTP ${RESEND_STATUS}; storing the key unverified." ;;
   esac
+
+  # Now the question that actually matters. The domain in EMAIL_FROM has to be
+  # one Resend will send from: a domain verified on this account, or
+  # resend.dev, which Resend pre-verifies for exactly this purpose.
+  #
+  # You cannot send from an address you merely *receive* at — a personal
+  # gmail.com address is the common mistake, and Resend answers it with a 403
+  # that surfaces as a 500 at registration, long after this script said fine.
+  if [[ "${RESEND_STATUS}" == 2* ]]; then
+    FROM_DOMAIN="${EMAIL_FROM##*@}"
+    FROM_DOMAIN="${FROM_DOMAIN%>}"
+
+    if [[ "${FROM_DOMAIN}" == "resend.dev" ]]; then
+      note "Sending from resend.dev, which Resend pre-verifies."
+      note "It delivers only to the address that owns this Resend account."
+    elif VERIFIED=$(python3 -c "
+import json, sys
+try:
+    data = json.load(open('${RESEND_BODY}'))
+except Exception:
+    sys.exit(2)
+rows = data.get('data') if isinstance(data, dict) else data
+print(' '.join(d.get('name','') for d in (rows or []) if d.get('status') == 'verified'))
+" 2>/dev/null); then
+      if [[ " ${VERIFIED} " == *" ${FROM_DOMAIN} "* ]]; then
+        note "${FROM_DOMAIN} is verified on this Resend account."
+      else
+        echo
+        echo "  Resend cannot send from \"${FROM_DOMAIN}\"."
+        echo "  It is not a verified domain on this account, and it is not resend.dev."
+        echo
+        echo "  A From address is a *sender*, not a recipient — it has to be a domain"
+        echo "  you control and have verified in Resend. Receiving mail at an address,"
+        echo "  or forwarding it, does not let you send as it."
+        echo
+        [[ -n "${VERIFIED// /}" ]] \
+          && echo "  Verified on this account: ${VERIFIED}" \
+          || echo "  No domains are verified on this account yet."
+        echo
+        echo "  Use onboarding@resend.dev to get working now — it needs no DNS and"
+        echo "  delivers to the address that owns this Resend account."
+        echo
+        read -rp "  Continue and store it anyway? [y/N] " FROM_ANYWAY
+        [[ "${FROM_ANYWAY}" =~ ^[Yy] ]] || { rm -f "${RESEND_BODY}"; exit 1; }
+        note "Storing it. Registration will answer 500 until that domain verifies."
+      fi
+    else
+      note "Could not read the domain list; storing the From address unchecked."
+    fi
+  fi
+
+  rm -f "${RESEND_BODY}"
 fi
 
 # ----------------------------------------------------------------------------
@@ -344,6 +430,33 @@ gcloud secrets add-iam-policy-binding agnte-jwt-secret \
   --role=roles/secretmanager.secretAccessor \
   --project="${PROJECT_ID}" --quiet >/dev/null
 note "runtime  -> agnte-jwt-secret"
+
+# ----------------------------------------------------------------------------
+# The deployer needs to *see* these, not read them.
+#
+# Both deploy workflows mount JWT, Resend and Google only once each secret
+# exists, so that the code needing them can ship before they do. That check is
+# `gcloud secrets describe`, and it runs as the deployer — which until now was
+# granted nothing on them. The describe failed with PERMISSION_DENIED, the
+# workflow read that as "not created yet", and skipped mounting a secret that
+# was sitting right there. The status page then said not-configured, which is
+# exactly what it says when the secret really is missing: the two failures were
+# indistinguishable.
+#
+# `viewer`, not `secretAccessor`: the deploy passes secrets by reference and
+# never reads a value — Cloud Run resolves them as the runtime account at start
+# up. Knowing the secret exists is the whole requirement.
+# ----------------------------------------------------------------------------
+for secret in agnte-jwt-secret agnte-resend-api-key agnte-email-from \
+              agnte-google-client-id agnte-google-client-secret; do
+  if gcloud secrets describe "${secret}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    gcloud secrets add-iam-policy-binding "${secret}" \
+      --member="serviceAccount:${DEPLOYER_SA}" \
+      --role=roles/secretmanager.viewer \
+      --project="${PROJECT_ID}" --quiet >/dev/null
+    note "deployer -> ${secret} (viewer, so the workflow can see it exists)"
+  fi
+done
 
 if [[ -n "${RESEND_API_KEY}" ]]; then
   for secret in agnte-resend-api-key agnte-email-from; do
