@@ -1,6 +1,6 @@
 import { type Clock, type DomainError, type Result, err, ok } from '@/shared/kernel';
 import { parseShortcut, parseTagName, type Tag } from '../domain/tag';
-import type { TagRepository, VerseRepository } from '../domain/ports';
+import type { SearchRepository, TagRepository, VerseRepository } from '../domain/ports';
 import {
   tagAlreadyExists,
   tagNotFound,
@@ -15,6 +15,7 @@ import { VerseErrorCode } from '../domain/errors';
 export interface TagDeps {
   tags: TagRepository;
   verses: VerseRepository;
+  search: SearchRepository;
   clock: Clock;
 }
 
@@ -41,7 +42,7 @@ export interface UpdateTagInput {
  */
 export async function updateTag(
   input: UpdateTagInput,
-  deps: Pick<TagDeps, 'tags' | 'clock'>,
+  deps: Pick<TagDeps, 'tags' | 'clock' | 'search'>,
 ): Promise<Result<Tag, DomainError>> {
   const existing = await deps.tags.findById(input.tagId);
   if (!existing || existing.ownerId !== input.ownerId) return err(tagNotFound());
@@ -94,6 +95,13 @@ export async function updateTag(
     const current = await deps.tags.findById(input.tagId);
     return err(versionConflict(input.expectedVersion, current?.version ?? -1));
   }
+
+  // The search vector denormalises tag names (§8.2), so a rename leaves every
+  // verse carrying this tag findable under a name that no longer exists until
+  // they are rewritten. Only on an actual rename — the other fields are not in
+  // the vector, and rewriting every verse on a visibility change would be work
+  // for nothing.
+  if (name !== existing.name) await deps.search.refreshSearchForTag(input.tagId);
 
   return ok(updated);
 }

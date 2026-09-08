@@ -160,7 +160,11 @@ export async function handleUpdateTag(
 
   const result = await updateTag(
     { ownerId: auth.userId, tagId, ...parsed.data },
-    { tags: new PrismaTagRepository(), clock: systemClock },
+    {
+      tags: new PrismaTagRepository(),
+      search: new PrismaVerseRepository(),
+      clock: systemClock,
+    },
   );
 
   if (!result.ok) {

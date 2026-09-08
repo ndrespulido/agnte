@@ -144,6 +144,17 @@ export interface TimelineRepository {
 /** Full-text search (2.7). */
 export interface SearchRepository {
   search(query: SearchQuery): Promise<Page<SearchHit>>;
+
+  /**
+   * Rewrites the search vectors of every verse carrying a tag.
+   *
+   * The vector denormalises tag names (§8.2), so renaming a tag has to rewrite
+   * its verses or they stay findable under a name that no longer exists. On the
+   * port rather than hidden in the adapter because the *tag* use case has to
+   * call it — a denormalisation nobody is obliged to maintain is a bug waiting
+   * for the first rename.
+   */
+  refreshSearchForTag(tagId: string): Promise<void>;
 }
 
 /**

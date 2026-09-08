@@ -339,6 +339,11 @@ model Tag {
   @@unique([ownerId, name])
   @@unique([ownerId, shortcut])
   @@index([ownerId])
+  /// Trigram index for fuzzy tag and shortcut matching (§8.2): typing "barclona"
+  /// should still find `.barcelona-trip`. Declared here with its operator class
+  /// rather than left to raw SQL, so `migrate diff` does not propose dropping
+  /// an index it cannot see.
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin)
   @@map("tag")
   @@schema("verse")
 }
@@ -407,6 +412,21 @@ model Verse {
   /// anyway, and the order is the order the user attached them in.
   mediaIds String[] @map("media_ids") @db.Uuid
 
+  /// Full-text index content (§8.2): `xp` weighted highest, then property
+  /// values, then the names of the tags the verse carries.
+  ///
+  /// A real tsvector column rather than a Postgres GENERATED one, and declared
+  /// here rather than left to raw SQL, for the reason 2.2 learned the hard way:
+  /// anything the Prisma schema does not know about is something the next
+  /// `migrate diff` proposes dropping. `Unsupported` means the typed client
+  /// cannot read or write it, which is fine — every write in this module is raw
+  /// SQL, and that is where the vector is built.
+  ///
+  /// Tag names are in it, which means renaming a tag has to rewrite its verses'
+  /// vectors. `refreshSearchForTag` does that, and there is a test that a
+  /// renamed tag is findable under its new name and not its old one.
+  searchVector Unsupported("tsvector")? @map("search_vector")
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -421,6 +441,7 @@ model Verse {
   /// keyset pagination stable when two verses land on the same year.
   @@index([ownerId, timelineYears, id])
   @@index([ownerId, createdAt, id])
+  @@index([searchVector], type: Gin)
   @@map("verse")
   @@schema("verse")
 }

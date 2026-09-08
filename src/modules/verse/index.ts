@@ -11,6 +11,8 @@
  * which is the single failure this module exists to prevent.
  */
 
+export { handleSearch } from './api/search-routes';
+
 export {
   handleListTagShares,
   handleRevokeTagShare,

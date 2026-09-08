@@ -1,6 +1,9 @@
 import { getDatabase } from '@/shared/infra/database';
 import type {
   Page,
+  SearchHit,
+  SearchQuery,
+  SearchRepository,
   TimelineQuery,
   TimelineRepository,
   VerseRepository,
@@ -86,7 +89,9 @@ const requireDatabase = () => {
   return db;
 };
 
-export class PrismaVerseRepository implements VerseRepository, TimelineRepository {
+export class PrismaVerseRepository
+  implements VerseRepository, TimelineRepository, SearchRepository
+{
   async findById(id: string): Promise<Verse | null> {
     const db = requireDatabase();
 
@@ -144,6 +149,10 @@ export class PrismaVerseRepository implements VerseRepository, TimelineRepositor
       `;
 
       await insertTags(tx, verse.id, verse.tagIds);
+
+      // After the tag rows, because the vector includes tag names. Same
+      // transaction, so a verse is never briefly present but unfindable.
+      await refreshSearch(tx, verse.id);
     });
   }
 
@@ -179,6 +188,7 @@ export class PrismaVerseRepository implements VerseRepository, TimelineRepositor
 
       await tx.$executeRaw`DELETE FROM verse.verse_tag WHERE verse_id = ${verse.id}::uuid`;
       await insertTags(tx, verse.id, verse.tagIds);
+      await refreshSearch(tx, verse.id);
 
       return true;
     });
@@ -298,6 +308,104 @@ export class PrismaVerseRepository implements VerseRepository, TimelineRepositor
     };
   }
 
+  /**
+   * Full-text search (§8.2), with the filters composing.
+   *
+   * Ranked by `ts_rank_cd` over the weighted vector, so `xp` beats a property
+   * value beats a tag name. Paged by `(rank, id)` rather than the timeline's
+   * `(position, id)`: search results are ordered by relevance, and reusing the
+   * timeline cursor here would page through a different order than the one the
+   * rows came back in.
+   *
+   * The query text goes through `websearch_to_tsquery`, which accepts what a
+   * person actually types — quoted phrases, `or`, a leading `-` to exclude —
+   * and, crucially, never throws on malformed input. `to_tsquery` raises a
+   * syntax error on a bare `&`, which would turn a typo into a 500.
+   *
+   * Ownership is a WHERE clause and is not the access decision: the application
+   * layer resolves visibility over what comes back, the same as the timeline. A
+   * repository filtering by visibility would be a second implementation of the
+   * rule, and §8.2 names search as the single most likely place for exactly
+   * that bug.
+   */
+  async search(query: SearchQuery): Promise<Page<SearchHit>> {
+    const limit = query.limit + 1;
+
+    const cursor = query.cursor ? decodeCursor(query.cursor) : null;
+    // For search the cursor's "years" slot carries the rank of the last row.
+    const afterRank = cursor?.ok ? cursor.value.years : null;
+    const afterId = cursor?.ok ? cursor.value.id : null;
+
+    const tagFilter = query.tagIds && query.tagIds.length > 0 ? [...query.tagIds] : null;
+    const requireAll = query.matchAllTags === true && tagFilter !== null;
+
+    const rows = await requireDatabase().$queryRaw<(VerseRow & { rank: number })[]>`
+      WITH matched AS (
+        SELECT v.*, ts_rank_cd(v.search_vector, q.query) AS rank
+        FROM verse.verse v,
+             websearch_to_tsquery('simple', ${query.text}) AS q(query)
+        WHERE v.owner_id = ${query.ownerId}::uuid
+          AND v.search_vector @@ q.query
+          AND (${tagFilter}::uuid[] IS NULL OR EXISTS (
+            SELECT 1 FROM verse.verse_tag vt
+            WHERE vt.verse_id = v.id AND vt.tag_id = ANY(${tagFilter}::uuid[])
+          ))
+          AND (NOT ${requireAll} OR (
+            SELECT count(DISTINCT vt.tag_id) FROM verse.verse_tag vt
+            WHERE vt.verse_id = v.id AND vt.tag_id = ANY(${tagFilter}::uuid[])
+          ) = ${tagFilter === null ? 0 : tagFilter.length})
+          AND (${query.ratingAtLeast ?? null}::double precision IS NULL
+               OR v.rating >= ${query.ratingAtLeast ?? null})
+          AND (${query.from ?? null}::timestamptz IS NULL
+               OR coalesce(v.event_start, v.created_at) >= ${query.from ?? null})
+          AND (${query.to ?? null}::timestamptz IS NULL
+               OR coalesce(v.event_start, v.created_at) <= ${query.to ?? null})
+          AND (${query.hasMedia ?? null}::boolean IS NULL
+               OR (cardinality(v.media_ids) > 0) = ${query.hasMedia ?? null})
+      )
+      SELECT * FROM matched
+      WHERE ${afterRank}::double precision IS NULL
+         OR rank < ${afterRank}
+         OR (rank = ${afterRank} AND id < ${afterId}::uuid)
+      ORDER BY rank DESC, id DESC
+      LIMIT ${limit}
+    `;
+
+    const hasMore = rows.length > query.limit;
+    const page = hasMore ? rows.slice(0, query.limit) : rows;
+
+    const tagsByVerse = await this.tagIdsOfMany(page.map((r) => r.id));
+
+    const last = page.at(-1);
+    const nextCursor =
+      hasMore && last ? encodeCursor({ years: last.rank, id: last.id }) : null;
+
+    return {
+      items: page.map((row) => ({
+        verse: toVerse(row, tagsByVerse.get(row.id) ?? []),
+        rank: row.rank,
+      })),
+      nextCursor,
+    };
+  }
+
+  /**
+   * Rewrites the search vectors of every verse carrying a tag.
+   *
+   * Renaming `.movies` to `.films` has to make its verses findable under the
+   * new name and not the old one. The vector holds tag names because §8.2 asks
+   * for them, and that denormalisation is only correct if something maintains
+   * it — this is that something.
+   */
+  async refreshSearchForTag(tagId: string): Promise<void> {
+    const db = requireDatabase();
+    const rows = await db.$queryRaw<{ verse_id: string }[]>`
+      SELECT verse_id FROM verse.verse_tag WHERE tag_id = ${tagId}::uuid
+    `;
+
+    for (const row of rows) await refreshSearch(db, row.verse_id);
+  }
+
   /** Tag ids only, for building a page of verses without loading whole tags. */
   private async tagIdsOfMany(
     verseIds: readonly string[],
@@ -380,6 +488,56 @@ export class PrismaVerseRepository implements VerseRepository, TimelineRepositor
 
     return out;
   }
+}
+
+/**
+ * Rebuilds one verse's search vector from the row and its tags.
+ *
+ * Written here rather than as a Postgres GENERATED column because a generated
+ * column may only reference its own row, and the tag names it needs live in
+ * another table. That is the whole reason renaming a tag has to rewrite its
+ * verses (`refreshSearchForTag`).
+ *
+ * Weights, highest first: `xp` is what the person actually wrote, then the
+ * property values, then the tag names — so a note *about* Barcelona ranks above
+ * one merely tagged `.barcelona-trip`.
+ *
+ * Hyphens become spaces so `.barcelona-trip` is two searchable words. Without
+ * it the only query that ever matches the tag is the tag's exact full name,
+ * which is the one query a user would have used the tag filter for instead.
+ */
+async function refreshSearch(
+  tx: { $executeRaw: (q: TemplateStringsArray, ...v: unknown[]) => Promise<number> },
+  verseId: string,
+): Promise<void> {
+  await tx.$executeRaw`
+    UPDATE verse.verse v
+    SET search_vector =
+      setweight(to_tsvector('simple', coalesce(v.xp, '')), 'A') ||
+      setweight(
+        to_tsvector(
+          'simple',
+          coalesce((SELECT string_agg(value, ' ') FROM jsonb_each_text(v.properties)), '')
+        ),
+        'B'
+      ) ||
+      setweight(
+        to_tsvector(
+          'simple',
+          coalesce(
+            (
+              SELECT string_agg(replace(t.name, '-', ' '), ' ')
+              FROM verse.verse_tag vt
+              JOIN verse.tag t ON t.id = vt.tag_id
+              WHERE vt.verse_id = v.id
+            ),
+            ''
+          )
+        ),
+        'C'
+      )
+    WHERE v.id = ${verseId}::uuid
+  `;
 }
 
 /**
