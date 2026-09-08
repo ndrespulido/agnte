@@ -21,7 +21,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: 'Agnte',
     short_name: 'Agnte',
     description: 'A timeline for your life.',
-    start_url: '/timeline',
+    start_url: '/',
     scope: '/',
     display: 'standalone',
     orientation: 'portrait',

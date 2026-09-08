@@ -183,6 +183,26 @@ async function ensureBase() {
   const { direct } = await connectionUris(branchId);
   if (!direct) fail('Neon did not return a direct connection URI for the base branch');
 
+  // Prove the URI is not production's before running a TRUNCATE down it.
+  //
+  // The rest of this function empties every table it can reach. It reaches
+  // whatever `connection_uri?branch_id=...` returned, and this script has never
+  // run against real Neon — so "the API honoured branch_id" is an assumption,
+  // and the cost of it being wrong is the production database. Comparing
+  // against the default branch's own URI turns that assumption into a check.
+  const defaultBranch = (await listBranches()).find((branch) => branch.default);
+  if (defaultBranch) {
+    const { direct: defaultDirect } = await connectionUris(defaultBranch.id);
+    if (defaultDirect && hostOf(defaultDirect) === hostOf(direct)) {
+      fail(
+        'refusing to truncate: the connection URI for the new branch is the ' +
+          "same host as the default branch's. Neon did not give a separate " +
+          'endpoint, and emptying it would empty production. Delete the ' +
+          `${PARENT_BRANCH} branch and investigate before retrying.`,
+      );
+    }
+  }
+
   const { Client } = await import('pg');
   const client = new Client({ connectionString: direct });
   await client.connect();
@@ -208,6 +228,21 @@ async function ensureBase() {
   }
 
   console.error(`neon-branch: ${PARENT_BRANCH} is empty and ready`);
+}
+
+/**
+ * The host of a Postgres URI, or null when it cannot be parsed.
+ *
+ * Compared rather than the whole URI because Neon rotates the password in the
+ * string: two URIs for the same endpoint can differ in every character after
+ * the host and still point at the same database.
+ */
+export function hostOf(uri) {
+  try {
+    return new URL(uri).host;
+  } catch {
+    return null;
+  }
 }
 
 /** Deleting an absent branch is success: teardown must be safe to re-run. */
