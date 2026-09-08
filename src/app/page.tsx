@@ -1,68 +1,26 @@
-import { loadConfig } from '@/shared/infra/config';
-import { runChecks } from '@/shared/infra/checks';
+import { App } from './_client/App';
 
-// The whole point of this page is live runtime state, so it must be rendered
-// per request rather than baked into the build.
-export const dynamic = 'force-dynamic';
-
-const ENVIRONMENT_LABEL: Record<string, string> = {
-  local: 'Local development',
-  preview: 'Preview',
-  production: 'Production',
+export const metadata = {
+  title: 'Agnte',
 };
 
-export default async function StatusPage() {
-  const config = loadConfig();
-  const checks = await runChecks();
+/**
+ * Dynamic because of the nonce.
+ *
+ * The CSP in `src/proxy.ts` mints a fresh nonce per request and Next injects it
+ * during server rendering. A statically generated page is built before any
+ * request exists, so it has no nonce to carry — its scripts would be blocked by
+ * the very policy that is meant to protect it.
+ */
+export const dynamic = 'force-dynamic';
 
-  return (
-    <main className="status">
-      <h1>Agnte</h1>
-      <p className="lede">
-        Deployment status. No application features yet — this page exists to prove the
-        path from a commit to a URL you can open.
-      </p>
-
-      <h2>Build</h2>
-      <dl>
-        <div className="row">
-          <dt>Environment</dt>
-          <dd>{ENVIRONMENT_LABEL[config.APP_ENV] ?? config.APP_ENV}</dd>
-        </div>
-        {config.PREVIEW_LABEL ? (
-          <div className="row">
-            <dt>Preview</dt>
-            <dd>{config.PREVIEW_LABEL}</dd>
-          </div>
-        ) : null}
-        <div className="row">
-          <dt>Commit</dt>
-          <dd>{config.GIT_SHA}</dd>
-        </div>
-        <div className="row">
-          <dt>Neon branch</dt>
-          <dd>{config.NEON_BRANCH ?? '—'}</dd>
-        </div>
-        <div className="row">
-          <dt>Server time</dt>
-          <dd>{new Date().toISOString()}</dd>
-        </div>
-      </dl>
-
-      <h2>Dependencies</h2>
-      <div>
-        {checks.map((check) => (
-          <div className="check" key={check.name}>
-            <span className="dot" data-status={check.status} aria-hidden="true" />
-            <span className="check-name">{check.name}</span>
-            <span className="check-detail">{check.detail}</span>
-          </div>
-        ))}
-      </div>
-
-      <footer>
-        Machine-readable at <a href="/v1/health">/v1/health</a>.
-      </footer>
-    </main>
-  );
+/**
+ * The app.
+ *
+ * A thin server component around a client one: everything here needs
+ * localStorage and IntersectionObserver, so there is nothing to render on the
+ * server that would not immediately be replaced.
+ */
+export default function HomePage() {
+  return <App />;
 }

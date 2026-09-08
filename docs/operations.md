@@ -130,6 +130,39 @@ ability to deploy revisions of itself; keep them distinct.
 
 ---
 
+## 1c. What is served where
+
+| Path | |
+|---|---|
+| `/` | The app |
+| `/status` | Deployment status — the six dependency checks |
+| `/timeline` | Permanent redirect to `/` |
+| `/v1/*` | The API |
+
+The status page was at `/` from Phase 0 until the app existed, which meant the
+first thing anyone opening the deployed URL saw was a health report. `/status`
+is where someone would look for it, and the root belongs to the app.
+
+`/v1/health` is unchanged and is what the deploy smoke test polls.
+
+### Security headers
+
+`src/proxy.ts` sets a nonce-based Content-Security-Policy plus
+`Referrer-Policy`, `X-Content-Type-Options` and `Permissions-Policy`. It is
+`proxy.ts` rather than `middleware.ts` because the file convention was renamed
+in Next 16; the old name is deprecated.
+
+The CSP has no `'unsafe-inline'` on `script-src`, deliberately. The web client
+keeps its refresh token in localStorage, so the app's real defence against
+session theft is not having XSS — and `'unsafe-inline'` permits exactly the
+injected script that would read the token. The cost is that every page must be
+dynamically rendered, since a nonce is minted per request and a statically
+generated page is built before any request exists. Both current pages are
+dynamic anyway. **A future page cannot be statically cached without revisiting
+this.**
+
+---
+
 ## 2. Neon (task 0.4)
 
 Console setup, three steps:
