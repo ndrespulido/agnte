@@ -1,5 +1,11 @@
 import { getDatabase } from '@/shared/infra/database';
-import type { VerseRepository } from '../domain/ports';
+import type {
+  Page,
+  TimelineQuery,
+  TimelineRepository,
+  VerseRepository,
+} from '../domain/ports';
+import { decodeCursor, encodeCursor, timelineYears } from '../domain/timeline';
 import type { Tag, Vertical } from '../domain/tag';
 import type { Verse } from '../domain/verse';
 import type { Visibility } from '../domain/visibility';
@@ -19,6 +25,7 @@ interface VerseRow {
   created_at: Date;
   updated_at: Date;
   version: number;
+  timeline_years: number;
 }
 
 interface TagRow {
@@ -79,7 +86,7 @@ const requireDatabase = () => {
   return db;
 };
 
-export class PrismaVerseRepository implements VerseRepository {
+export class PrismaVerseRepository implements VerseRepository, TimelineRepository {
   async findById(id: string): Promise<Verse | null> {
     const db = requireDatabase();
 
@@ -115,7 +122,8 @@ export class PrismaVerseRepository implements VerseRepository {
       await tx.$executeRaw`
         INSERT INTO verse.verse
           (id, owner_id, event_start, event_end, deep_time_years, location,
-           rating, xp, properties, visibility, media_ids, created_at, updated_at, version)
+           rating, xp, properties, visibility, media_ids, timeline_years,
+           created_at, updated_at, version)
         VALUES (
           ${verse.id}::uuid,
           ${verse.ownerId}::uuid,
@@ -128,6 +136,7 @@ export class PrismaVerseRepository implements VerseRepository {
           ${JSON.stringify(verse.properties)}::jsonb,
           ${verse.visibility},
           ${[...verse.mediaIds]}::uuid[],
+          ${timelineYears(verse)},
           ${verse.createdAt},
           ${verse.updatedAt},
           ${verse.version}
@@ -159,6 +168,7 @@ export class PrismaVerseRepository implements VerseRepository {
             properties = ${JSON.stringify(verse.properties)}::jsonb,
             visibility = ${verse.visibility},
             media_ids = ${[...verse.mediaIds]}::uuid[],
+            timeline_years = ${timelineYears(verse)},
             updated_at = ${verse.updatedAt},
             version = version + 1
         WHERE id = ${verse.id}::uuid
@@ -181,6 +191,135 @@ export class PrismaVerseRepository implements VerseRepository {
       WHERE id = ${id}::uuid AND version = ${expectedVersion}
     `;
     return deleted > 0;
+  }
+
+  /**
+   * A page of the timeline, walked from an anchor in one direction.
+   *
+   * Keyset pagination, not OFFSET. The timeline is written to while it is being
+   * read, and an offset shifts under the reader — page two then repeats a row
+   * page one already showed. `(timeline_years, id)` is the key, and both halves
+   * are needed: two verses can share a position exactly, and a cursor on
+   * position alone would skip or repeat at that boundary.
+   *
+   * The two directions are deliberately not folded into one query with a
+   * flipped comparison operator built by string concatenation. Prisma's tagged
+   * template is what parameterises the values; assembling the operator into the
+   * SQL text is how a query stops being a template and starts being string
+   * building, and this file should never grow that habit.
+   *
+   * Ownership is a WHERE clause here, but it is not the access decision — the
+   * application layer resolves visibility over what comes back (read-verse.ts).
+   * A repository that filtered by visibility would be a second implementation
+   * of the rule, which is the thing this module forbids.
+   */
+  async timeline(query: TimelineQuery): Promise<Page<Verse>> {
+    const anchor = timelineYears({
+      deepTimeYears: null,
+      eventStart: query.anchor,
+      createdAt: query.anchor,
+    });
+
+    let after = anchor;
+    let afterId: string | null = null;
+
+    if (query.cursor) {
+      const cursor = decodeCursor(query.cursor);
+      // An unreadable cursor is treated as "start from the anchor" rather than
+      // throwing: the caller is paging, and a hard failure mid-scroll is worse
+      // than a page that starts over. The API validates the cursor separately
+      // and can answer 400 before reaching here.
+      if (cursor.ok) {
+        after = cursor.value.years;
+        afterId = cursor.value.id;
+      }
+    }
+
+    // One extra row, to learn whether there is a next page without a second
+    // query. A count would be a second scan; a short page would be ambiguous.
+    const limit = query.limit + 1;
+
+    const tagFilter = query.tagIds && query.tagIds.length > 0 ? [...query.tagIds] : null;
+    const requireAll = query.matchAllTags === true && tagFilter !== null;
+
+    const rows =
+      query.direction === 'past'
+        ? await requireDatabase().$queryRaw<VerseRow[]>`
+            SELECT v.* FROM verse.verse v
+            WHERE v.owner_id = ${query.ownerId}::uuid
+              AND (
+                v.timeline_years < ${after}
+                OR (v.timeline_years = ${after} AND ${afterId}::uuid IS NOT NULL
+                    AND v.id < ${afterId}::uuid)
+              )
+              AND (${tagFilter}::uuid[] IS NULL OR EXISTS (
+                SELECT 1 FROM verse.verse_tag vt
+                WHERE vt.verse_id = v.id AND vt.tag_id = ANY(${tagFilter}::uuid[])
+              ))
+              AND (NOT ${requireAll} OR (
+                SELECT count(DISTINCT vt.tag_id) FROM verse.verse_tag vt
+                WHERE vt.verse_id = v.id AND vt.tag_id = ANY(${tagFilter}::uuid[])
+              ) = ${tagFilter === null ? 0 : tagFilter.length})
+            ORDER BY v.timeline_years DESC, v.id DESC
+            LIMIT ${limit}
+          `
+        : await requireDatabase().$queryRaw<VerseRow[]>`
+            SELECT v.* FROM verse.verse v
+            WHERE v.owner_id = ${query.ownerId}::uuid
+              AND (
+                v.timeline_years > ${after}
+                OR (v.timeline_years = ${after} AND ${afterId}::uuid IS NOT NULL
+                    AND v.id > ${afterId}::uuid)
+              )
+              AND (${tagFilter}::uuid[] IS NULL OR EXISTS (
+                SELECT 1 FROM verse.verse_tag vt
+                WHERE vt.verse_id = v.id AND vt.tag_id = ANY(${tagFilter}::uuid[])
+              ))
+              AND (NOT ${requireAll} OR (
+                SELECT count(DISTINCT vt.tag_id) FROM verse.verse_tag vt
+                WHERE vt.verse_id = v.id AND vt.tag_id = ANY(${tagFilter}::uuid[])
+              ) = ${tagFilter === null ? 0 : tagFilter.length})
+            ORDER BY v.timeline_years ASC, v.id ASC
+            LIMIT ${limit}
+          `;
+
+    const hasMore = rows.length > query.limit;
+    const page = hasMore ? rows.slice(0, query.limit) : rows;
+
+    const tagsByVerse = await this.tagIdsOfMany(page.map((r) => r.id));
+
+    const last = page.at(-1);
+    const nextCursor =
+      hasMore && last ? encodeCursor({ years: last.timeline_years, id: last.id }) : null;
+
+    return {
+      items: page.map((row) => toVerse(row, tagsByVerse.get(row.id) ?? [])),
+      nextCursor,
+    };
+  }
+
+  /** Tag ids only, for building a page of verses without loading whole tags. */
+  private async tagIdsOfMany(
+    verseIds: readonly string[],
+  ): Promise<Map<string, string[]>> {
+    const out = new Map<string, string[]>();
+    if (verseIds.length === 0) return out;
+
+    const rows = await requireDatabase().$queryRaw<
+      { verse_id: string; tag_id: string }[]
+    >`
+      SELECT verse_id, tag_id FROM verse.verse_tag
+      WHERE verse_id = ANY(${[...verseIds]}::uuid[])
+      ORDER BY position, tag_id
+    `;
+
+    for (const row of rows) {
+      const list = out.get(row.verse_id);
+      if (list) list.push(row.tag_id);
+      else out.set(row.verse_id, [row.tag_id]);
+    }
+
+    return out;
   }
 
   async tagsOf(verseId: string): Promise<Tag[]> {

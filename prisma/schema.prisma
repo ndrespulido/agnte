@@ -383,6 +383,25 @@ model Verse {
   /// Verse public after its tag was made private.
   visibility String?
 
+  /// Where this verse sits on the timeline, in years from 2000-01-01.
+  ///
+  /// One scale for both representations, so a page can span a booked flight and
+  /// the Chicxulub impact without the query knowing which is which: it is
+  /// `deepTimeYears` when that is set, otherwise the event date, otherwise when
+  /// the verse was written. Ordering on `event_start` alone cannot work —
+  /// deep-time rows have none, and no timestamp column could hold them anyway.
+  ///
+  /// Maintained by the repository on every write rather than being a Postgres
+  /// GENERATED column. Prisma cannot model a generated column, and a column the
+  /// schema does not know about is exactly the `migrate diff` landmine that
+  /// nearly dropped `oauth_account_one_per_provider_idx` in 2.2.
+  ///
+  /// Deep time is "years before present" while this is "years from 2000", and
+  /// the two are reconciled by ignoring the difference: at the magnitudes deep
+  /// time is used for — -13.8e9 has three significant figures — a couple of
+  /// decades is far below the precision of the data.
+  timelineYears Float @map("timeline_years")
+
   /// Ids owned by the `media` module. An array rather than a join table
   /// because there is no foreign key to be had across a schema boundary
   /// anyway, and the order is the order the user attached them in.
@@ -398,8 +417,9 @@ model Verse {
 
   /// The timeline reads by event time within an owner; the id tiebreak is what
   /// makes cursor pagination stable when two verses share a timestamp.
-  @@index([ownerId, eventStart, id])
-  @@index([ownerId, deepTimeYears, id])
+  /// The timeline's index: one scale, and `id` as the tiebreak that makes
+  /// keyset pagination stable when two verses land on the same year.
+  @@index([ownerId, timelineYears, id])
   @@index([ownerId, createdAt, id])
   @@map("verse")
   @@schema("verse")

@@ -12,6 +12,7 @@
  */
 
 export {
+  handleTimeline,
   handleCreateVerse,
   handleDeleteVerse,
   handleGetVerse,

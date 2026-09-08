@@ -13,6 +13,11 @@ import {
   updateVerseFor,
 } from '../application/write-verse';
 import { visible } from '../application/read-verse';
+import {
+  DEFAULT_TIMELINE_LIMIT,
+  MAX_TIMELINE_LIMIT,
+  timelinePage,
+} from '../application/timeline';
 import { VerseErrorCode } from '../domain/errors';
 import type { VisibleVerse } from '../domain/ports';
 import { format } from '../domain/tag';
@@ -153,6 +158,91 @@ export async function handleCreateVerse(request: Request): Promise<Response> {
         body: verseBody(seen.value),
         headers: rateLimitHeaders(decision),
       };
+    },
+  );
+}
+
+/**
+ * The timeline.
+ *
+ * `anchor` defaults to now and `direction` to past, because that is what
+ * opening the app means: today, scrolling backwards. A client wanting the
+ * future half asks for it explicitly, and one wanting both asks twice — a
+ * single response containing both directions would have two cursors and no
+ * obvious order, which is a worse shape than two requests.
+ */
+export async function handleTimeline(request: Request): Promise<Response> {
+  const auth = await authenticate(request);
+  if (!auth.ok) return auth.response;
+
+  const decision = await consume('authenticated', { user: auth.userId });
+  if (!decision.allowed) return tooManyRequests(decision);
+
+  const params = new URL(request.url).searchParams;
+
+  const anchorRaw = params.get('anchor');
+  const anchor = anchorRaw === null ? new Date() : new Date(anchorRaw);
+  if (Number.isNaN(anchor.getTime())) {
+    return jsonError(
+      new DomainError('invalid_query', 'anchor must be an ISO 8601 date.'),
+      400,
+      rateLimitHeaders(decision),
+    );
+  }
+
+  const directionRaw = params.get('direction') ?? 'past';
+  if (directionRaw !== 'past' && directionRaw !== 'future') {
+    return jsonError(
+      new DomainError('invalid_query', "direction must be 'past' or 'future'."),
+      400,
+      rateLimitHeaders(decision),
+    );
+  }
+
+  const limitRaw = params.get('limit');
+  const limit = limitRaw === null ? DEFAULT_TIMELINE_LIMIT : Number(limitRaw);
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_TIMELINE_LIMIT) {
+    return jsonError(
+      new DomainError(
+        'invalid_query',
+        `limit must be between 1 and ${MAX_TIMELINE_LIMIT}.`,
+      ),
+      400,
+      rateLimitHeaders(decision),
+    );
+  }
+
+  // Repeated ?tag= rather than a comma-separated list: a tag id cannot contain
+  // a comma today, but a delimiter is a decision that has to hold forever and
+  // repeated parameters cost nothing.
+  const tagIds = params.getAll('tag');
+
+  const result = await timelinePage(
+    {
+      ownerId: auth.userId,
+      viewerId: auth.userId,
+      anchor,
+      direction: directionRaw,
+      limit,
+      cursor: params.get('cursor'),
+      ...(tagIds.length > 0 ? { tagIds } : {}),
+      matchAllTags: params.get('match') === 'all',
+    },
+    { verses: new PrismaVerseRepository(), shares: new PrismaShareRepository() },
+  );
+
+  if (!result.ok) {
+    return jsonError(result.error, 400, rateLimitHeaders(decision));
+  }
+
+  return Response.json(
+    {
+      verses: result.value.items.map(verseBody),
+      nextCursor: result.value.nextCursor,
+    },
+    {
+      status: 200,
+      headers: { 'cache-control': 'no-store', ...rateLimitHeaders(decision) },
     },
   );
 }

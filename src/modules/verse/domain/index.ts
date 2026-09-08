@@ -10,5 +10,6 @@ export * from './deep-time';
 export * from './errors';
 export * from './ports';
 export * from './tag';
+export * from './timeline';
 export * from './verse';
 export * from './visibility';
