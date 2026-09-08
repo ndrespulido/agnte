@@ -67,7 +67,7 @@ export const light: Palette = {
   accent: '#8a5a2b',
   accentText: '#71481f',
   glass: 'rgba(250, 249, 246, 0.82)',
-  glassEdge: 'rgba(28, 28, 30, 0.10)',
+  glassEdge: 'rgba(28, 28, 30, 0.1)',
   metalTop: '#e8e8e6',
   metalBottom: '#b9b9b6',
   metalEdgeLight: 'rgba(255, 255, 255, 0.85)',
