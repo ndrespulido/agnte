@@ -373,6 +373,33 @@ gcloud secrets add-iam-policy-binding agnte-jwt-secret \
   --project="${PROJECT_ID}" --quiet >/dev/null
 note "runtime  -> agnte-jwt-secret"
 
+# ----------------------------------------------------------------------------
+# The deployer needs to *see* these, not read them.
+#
+# Both deploy workflows mount JWT, Resend and Google only once each secret
+# exists, so that the code needing them can ship before they do. That check is
+# `gcloud secrets describe`, and it runs as the deployer — which until now was
+# granted nothing on them. The describe failed with PERMISSION_DENIED, the
+# workflow read that as "not created yet", and skipped mounting a secret that
+# was sitting right there. The status page then said not-configured, which is
+# exactly what it says when the secret really is missing: the two failures were
+# indistinguishable.
+#
+# `viewer`, not `secretAccessor`: the deploy passes secrets by reference and
+# never reads a value — Cloud Run resolves them as the runtime account at start
+# up. Knowing the secret exists is the whole requirement.
+# ----------------------------------------------------------------------------
+for secret in agnte-jwt-secret agnte-resend-api-key agnte-email-from \
+              agnte-google-client-id agnte-google-client-secret; do
+  if gcloud secrets describe "${secret}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    gcloud secrets add-iam-policy-binding "${secret}" \
+      --member="serviceAccount:${DEPLOYER_SA}" \
+      --role=roles/secretmanager.viewer \
+      --project="${PROJECT_ID}" --quiet >/dev/null
+    note "deployer -> ${secret} (viewer, so the workflow can see it exists)"
+  fi
+done
+
 if [[ -n "${RESEND_API_KEY}" ]]; then
   for secret in agnte-resend-api-key agnte-email-from; do
     gcloud secrets add-iam-policy-binding "${secret}" \
