@@ -60,15 +60,21 @@ export async function shareTagWith(
   const permission = checkPermission(input.permission);
   if (!permission.ok) return permission;
 
-  // Sharing with yourself is refused rather than being a no-op: it is always a
-  // mistake, and a silent success would leave the user believing they had
-  // shared with someone else.
-  if (input.granteeId === input.ownerId) {
-    return err(shareInvalid('you already have access to your own tag'));
-  }
-
+  // Ownership first. Answering anything about a tag before confirming the
+  // caller may touch it tells a stranger which ids are real — and it answered
+  // the wrong error, too: a stranger sharing someone else's tag with themselves
+  // got "you already have access to your own tag", which is not true and not
+  // the point.
   const tag = await deps.tags.findById(input.tagId);
   if (!tag || tag.ownerId !== input.ownerId) return err(tagNotFound());
+
+  // Sharing with yourself is refused rather than being a no-op: it is always a
+  // mistake, and a silent success would leave the user believing they had
+  // shared with someone else. Compared against the tag's owner, not the caller,
+  // so the two can never disagree.
+  if (input.granteeId === tag.ownerId) {
+    return err(shareInvalid('you already have access to your own tag'));
+  }
 
   const share: TagShare = {
     tagId: input.tagId,
@@ -93,12 +99,12 @@ export async function shareVerseWith(
   const permission = checkPermission(input.permission);
   if (!permission.ok) return permission;
 
-  if (input.granteeId === input.ownerId) {
-    return err(shareInvalid('you already have access to your own verse'));
-  }
-
   const verse = await deps.verses.findById(input.verseId);
   if (!verse || verse.ownerId !== input.ownerId) return err(forbidden());
+
+  if (input.granteeId === verse.ownerId) {
+    return err(shareInvalid('you already have access to your own verse'));
+  }
 
   const share: VerseShare = {
     verseId: input.verseId,
