@@ -59,7 +59,7 @@ export interface Palette {
 
 export const light: Palette = {
   paper: '#faf9f6',
-  paperRaised: '#ffffff',
+  paperRaised: '#fffefb',
   ink: '#1c1c1e',
   inkSoft: '#5c5c62',
   inkFaint: '#8a8a90',
@@ -138,11 +138,19 @@ export const radius = {
 export const fontFamily = {
   body: "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', sans-serif",
   /**
-   * The date. Condensed grotesque where the platform has one, falling back to
-   * the typewriter end of the same idea.
+   * The date, which carries the character of the whole screen (CLAUDE.md).
+   *
+   * Condensed grotesque where the platform has one — which in practice means
+   * Windows and some Android builds — and the *typewriter* end of the same idea
+   * everywhere else. The fallback deliberately is not `ui-sans-serif`: on iOS
+   * and macOS none of the condensed faces exist, so a sans fallback made the
+   * date render as ordinary body text at a larger size, which is exactly the
+   * thing the design says it must not be. CLAUDE.md offers condensed grotesque
+   * *or* typewriter, and the typewriter option is the one that resolves
+   * everywhere without a webfont.
    */
   display:
-    "'Haettenschweiler', 'Arial Narrow', 'Roboto Condensed', ui-sans-serif, system-ui, sans-serif",
+    "'Haettenschweiler', 'Arial Narrow', 'Roboto Condensed', ui-monospace, 'SF Mono', Menlo, monospace",
   mono: "ui-monospace, 'SF Mono', 'Cascadia Mono', 'Roboto Mono', monospace",
 } as const;
 

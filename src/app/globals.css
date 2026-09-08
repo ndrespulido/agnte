@@ -42,7 +42,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-main {
+/* Scoped for the same reason as the rules below: every page owns its layout. */
+.status {
   max-width: 34rem;
   margin: 0 auto;
   padding: 2.5rem 1.25rem 4rem;
@@ -61,7 +62,17 @@ h1 {
   font-size: 0.9375rem;
 }
 
-h2 {
+/*
+ * The status page only.
+ *
+ * These were bare element selectors — h2, dl, dt, dd — which was harmless while
+ * the status page was the only page. The moment the app shipped they reached
+ * into it: section dates rendered UPPERCASE and property values came out
+ * right-aligned in a monospace face, neither of which anything asked for.
+ * Scoped now; a global element selector is a landmine as soon as a second page
+ * exists.
+ */
+.status h2 {
   font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -70,12 +81,12 @@ h2 {
   margin: 2rem 0 0.5rem;
 }
 
-dl {
+.status dl {
   margin: 0;
   border-top: 0.5px solid var(--rule);
 }
 
-.row {
+.status .row {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
@@ -84,13 +95,13 @@ dl {
   border-bottom: 0.5px solid var(--rule);
 }
 
-dt {
+.status dt {
   color: var(--ink-soft);
   font-size: 0.875rem;
   flex: none;
 }
 
-dd {
+.status dd {
   margin: 0;
   /* Flex items default to min-width:auto, which lets a long value (an ISO
      timestamp, a commit SHA) push the row wider than a phone viewport.
@@ -151,4 +162,358 @@ footer {
 
 a {
   color: inherit;
+}
+
+/* ---------------------------------------------------------------------------
+ * The app: glass date header, timeline, quick-add.
+ *
+ * Every value here comes from a token. A colour or a size written literally
+ * below is a bug — it is a value the React Native client will not have.
+ * ------------------------------------------------------------------------- */
+
+.app-main {
+  max-width: 34rem;
+  margin: 0 auto;
+  /* Clears the sticky header, and leaves room at the bottom for the add button
+     so the last verse is never underneath it. */
+  padding: calc(var(--space-xxxl) + var(--space-xl)) var(--space-lg)
+    calc(var(--size-add-button) + var(--space-xxl));
+}
+
+/*
+ * The sticky date header: a paper planner's tab.
+ *
+ * `position: fixed` rather than `sticky` because it sits above the whole
+ * scroll rather than within a section, and the date inside it is swapped by
+ * script as sections pass under it.
+ */
+.date-header {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: var(--z-sticky-header);
+
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-md);
+
+  padding: var(--space-md) var(--space-lg);
+
+  background: var(--color-glass);
+  /* The blur is the effect; the translucent base is what keeps the text
+     readable over it. Neither works alone. */
+  backdrop-filter: blur(var(--blur-glass));
+  -webkit-backdrop-filter: blur(var(--blur-glass));
+  border-bottom: var(--hairline) solid var(--color-glass-edge);
+}
+
+.date-label {
+  margin: 0;
+  font-family: var(--font-display);
+  /* Larger than feels comfortable, per the design direction — the date is the
+     anchor of the whole screen. */
+  font-size: var(--text-date);
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--tracking-display);
+  line-height: var(--leading-tight);
+  /* Tabular figures so the date does not shift width while scrolling. */
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hairline rules rather than boxes, throughout. */
+.timeline section + section {
+  border-top: var(--hairline) solid var(--color-rule);
+  margin-top: var(--space-xl);
+  padding-top: var(--space-lg);
+}
+
+.section-date {
+  margin: 0 0 var(--space-md);
+  font-family: var(--font-display);
+  font-size: var(--text-large);
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--tracking-display);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-soft);
+}
+
+.verses {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.verse {
+  display: grid;
+  grid-template-columns: 3.25rem 1fr;
+  gap: var(--space-md);
+}
+
+.verse-time {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-small);
+  color: var(--color-ink-faint);
+  padding-top: 0.15em;
+}
+
+/* A verse with no time still aligns with the ones that have one. */
+.verse-body {
+  grid-column: 2;
+  min-width: 0;
+}
+
+.verse-xp {
+  margin: 0 0 var(--space-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.verse-meta {
+  margin: 0 0 var(--space-xs);
+  font-size: var(--text-small);
+  color: var(--color-ink-soft);
+}
+
+.verse-properties {
+  margin: 0 0 var(--space-xs);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-xxs) var(--space-sm);
+  font-size: var(--text-small);
+}
+
+.verse-properties > div {
+  display: contents;
+}
+
+.verse-properties dt {
+  color: var(--color-ink-faint);
+}
+
+.verse-properties dd {
+  margin: 0;
+}
+
+.verse-tags {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  font-size: var(--text-small);
+}
+
+.tag {
+  color: var(--color-accent-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.rating,
+.visibility {
+  color: var(--color-ink-faint);
+}
+
+/*
+ * The add button: "metallic paper".
+ *
+ * A soft vertical silver-to-pewter gradient, a 1px lighter top edge and darker
+ * bottom edge, and a very soft shadow. The edges are inset box-shadows rather
+ * than borders so they sit inside the radius; a border would draw all four
+ * sides and read as an outline.
+ *
+ * No gloss and no bevel: no second highlight, no inner glow, nothing that
+ * suggests a curved surface.
+ */
+.add-button {
+  position: fixed;
+  right: var(--space-xl);
+  bottom: var(--space-xl);
+  z-index: var(--z-add-button);
+
+  width: var(--size-add-button);
+  height: var(--size-add-button);
+  border-radius: var(--radius-pill);
+  border: none;
+
+  background: linear-gradient(
+    to bottom,
+    var(--color-metal-top),
+    var(--color-metal-bottom)
+  );
+  box-shadow:
+    inset 0 1px 0 var(--color-metal-edge-light),
+    inset 0 -1px 0 var(--color-metal-edge-dark),
+    var(--shadow-button);
+
+  color: var(--color-ink);
+  font-size: var(--text-date);
+  line-height: 1;
+  cursor: pointer;
+
+  transition: transform var(--motion-fast) var(--motion-ease-out);
+}
+
+.add-button:active {
+  /* Barely there. A button that visibly sinks is a button pretending to be
+     hardware. */
+  transform: scale(0.97);
+}
+
+/* Sheets, forms and notices. */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-sheet);
+  background: rgb(0 0 0 / 28%);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.sheet {
+  width: min(34rem, 100%);
+  max-height: 88vh;
+  overflow-y: auto;
+
+  background: var(--color-paper-raised);
+  border-top-left-radius: var(--radius-lg);
+  border-top-right-radius: var(--radius-lg);
+  border-top: var(--hairline) solid var(--color-rule);
+
+  padding: var(--space-xl) var(--space-lg)
+    calc(var(--space-xl) + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  border: none;
+  margin: 0;
+  padding: 0;
+  font-size: var(--text-small);
+  color: var(--color-ink-soft);
+}
+
+.field input,
+.field textarea {
+  font: inherit;
+  font-size: var(--text-body);
+  color: var(--color-ink);
+  background: var(--color-paper);
+  border: var(--hairline) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+  /* 16px prevents iOS zooming the whole page on focus. */
+  min-height: var(--size-min-tap-target);
+}
+
+.tag-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.tag-picker .tag {
+  background: none;
+  border: var(--hairline) solid var(--color-rule);
+  border-radius: var(--radius-pill);
+  padding: var(--space-xs) var(--space-md);
+  min-height: var(--size-min-tap-target);
+  cursor: pointer;
+  font: inherit;
+  color: var(--color-accent-text);
+}
+
+.tag-picker .tag.chosen {
+  border-color: var(--color-accent-text);
+  background: var(--color-paper);
+}
+
+.sheet-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-md);
+}
+
+button.primary {
+  font: inherit;
+  min-height: var(--size-min-tap-target);
+  padding: var(--space-sm) var(--space-xl);
+  border-radius: var(--radius-pill);
+  border: none;
+  background: linear-gradient(
+    to bottom,
+    var(--color-metal-top),
+    var(--color-metal-bottom)
+  );
+  box-shadow:
+    inset 0 1px 0 var(--color-metal-edge-light),
+    inset 0 -1px 0 var(--color-metal-edge-dark),
+    var(--shadow-raised);
+  color: var(--color-ink);
+  cursor: pointer;
+}
+
+button.quiet {
+  font: inherit;
+  min-height: var(--size-min-tap-target);
+  padding: var(--space-sm) var(--space-md);
+  background: none;
+  border: none;
+  color: var(--color-ink-soft);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.sign-out {
+  font-size: var(--text-small);
+  padding: 0;
+  min-height: 0;
+}
+
+.notice {
+  color: var(--color-ink-soft);
+  font-size: var(--text-small);
+  margin: var(--space-xl) 0;
+  text-align: center;
+}
+
+.notice.error {
+  color: var(--color-failed);
+  text-align: left;
+}
+
+.notice.end {
+  color: var(--color-ink-faint);
+}
+
+.auth {
+  max-width: 22rem;
+  margin: 0 auto;
+  padding: var(--space-xxxl) var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.auth h1 {
+  font-family: var(--font-display);
+  font-size: var(--text-date-large);
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--tracking-display);
+  margin: 0;
+}
+
+.auth form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
 }

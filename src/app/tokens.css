@@ -13,7 +13,7 @@
   color-scheme: light dark;
 
   --color-paper: #faf9f6;
-  --color-paper-raised: #ffffff;
+  --color-paper-raised: #fffefb;
   --color-ink: #1c1c1e;
   --color-ink-soft: #5c5c62;
   --color-ink-faint: #8a8a90;
@@ -48,7 +48,7 @@
   --radius-pill: 999px;
 
   --font-body: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', sans-serif;
-  --font-display: 'Haettenschweiler', 'Arial Narrow', 'Roboto Condensed', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Haettenschweiler', 'Arial Narrow', 'Roboto Condensed', ui-monospace, 'SF Mono', Menlo, monospace;
   --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'Roboto Mono', monospace;
   --text-micro: 11px;
   --text-small: 13px;

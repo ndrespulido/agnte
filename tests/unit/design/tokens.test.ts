@@ -124,7 +124,11 @@ describe.each([
   });
 
   it('does not use pure white or pure black — it is meant to be paper', () => {
-    expect(palette.paper.toLowerCase()).not.toBe('#ffffff');
+    // Every surface, not just the page. The sheet was #ffffff and this test
+    // did not notice, because it only looked at `paper`.
+    for (const surface of [palette.paper, palette.paperRaised]) {
+      expect(surface.toLowerCase()).not.toBe('#ffffff');
+    }
     expect(palette.ink.toLowerCase()).not.toBe('#000000');
   });
 });
