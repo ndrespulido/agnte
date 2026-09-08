@@ -187,7 +187,13 @@ export async function handleDeleteTag(
   const decision = await consume('authenticated', { user: auth.userId });
   if (!decision.allowed) return tooManyRequests(decision);
 
-  const version = Number(new URL(request.url).searchParams.get('expectedVersion'));
+  // Read as a string first, and reject a missing one before converting.
+  // `Number(null)` is 0, and 0 is a perfectly valid version — so converting
+  // first would turn "I forgot to send it" into "I read version 0", which
+  // silently succeeds against any freshly created tag. Optimistic concurrency
+  // you can forget to opt into is not concurrency control.
+  const raw = new URL(request.url).searchParams.get('expectedVersion');
+  const version = raw === null || raw.trim() === '' ? Number.NaN : Number(raw);
   if (!Number.isInteger(version) || version < 0) {
     return jsonError(
       new DomainError(
