@@ -1,30 +1,26 @@
 /*
- * Phase 0 styling only — enough to make the status page legible on a phone.
- * The design system (tokens.ts, glass, sticky date header) lands in Phase 3;
- * this borrows the palette from CLAUDE.md so the first deployed page already
- * looks like the project rather than like a default template.
+ * Page styles. The palette, spacing, type and motion live in tokens.css, which
+ * is generated from src/shared/design/tokens.ts — nothing below may hard-code a
+ * colour or a size that a token already names.
+ *
+ * Phase 0's hand-written palette used to sit here. It is gone: it was a second
+ * copy of the same values, and a second copy of a palette diverges.
  */
+@import './tokens.css';
 
+/*
+ * Phase 0 named its variables without the --color- prefix the generator uses.
+ * Aliased rather than renamed throughout, so the status page keeps working
+ * while the Phase 3 views are built against the generated names directly.
+ */
 :root {
-  --paper: #faf9f6;
-  --ink: #1c1c1e;
-  --ink-soft: #6b6b70;
-  --rule: rgba(28, 28, 30, 0.14);
-  --ok: #2f6f4f;
-  --pending: #8a6d3b;
-  --failed: #9b2c2c;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper: #141416;
-    --ink: #ececee;
-    --ink-soft: #9a9aa0;
-    --rule: rgba(236, 236, 238, 0.16);
-    --ok: #7fbf9a;
-    --pending: #d9b370;
-    --failed: #e08585;
-  }
+  --paper: var(--color-paper);
+  --ink: var(--color-ink);
+  --ink-soft: var(--color-ink-soft);
+  --rule: var(--color-rule);
+  --ok: var(--color-ok);
+  --pending: var(--color-pending);
+  --failed: var(--color-failed);
 }
 
 * {

@@ -281,7 +281,221 @@ model OAuthAccount {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([provider, providerAccountId])
+  /// Declared here as well as in the migration that created it. Without this,
+  /// every `prisma migrate diff` proposes dropping it — the schema is the
+  /// authority for what should exist, and an index only SQL knows about looks
+  /// to the diff like one that should not be there. `map` pins the name so the
+  /// declaration and the existing index are the same object.
+  @@unique([userId, provider], map: "oauth_account_one_per_provider_idx")
   @@index([userId])
   @@map("oauth_account")
   @@schema("identity")
+}
+
+/// A tag: the single grouping primitive (CLAUDE.md).
+///
+/// `ownerId` points at identity.user.id and is deliberately *not* a Prisma
+/// relation. Cross-schema foreign keys are what a later split into services
+/// would have to unpick (§1.1), so ownership is carried as a plain id and the
+/// join never happens in SQL.
+model Tag {
+  /// Client-generated UUIDv7 (§2).
+  id String @id @db.Uuid
+
+  ownerId String @map("owner_id") @db.Uuid
+
+  /// Stored without the leading dot — that is presentation. Normalised
+  /// (trimmed, lowercased) before it gets here; the migration adds a CHECK on
+  /// the shape so a write path that forgets fails loudly rather than creating
+  /// a second `.Barcelona` alongside `.barcelona`.
+  name String
+
+  /// What the user typed, when it differs from the normalised name. Null when
+  /// there is nothing to remember.
+  displayName String? @map("display_name")
+
+  /// private | shared | public. A string with a CHECK rather than an enum, so
+  /// the constraint sits next to the others in the migration.
+  visibility String @default("private")
+
+  /// Unique per user, so `.m` means one thing everywhere (CLAUDE.md). Null for
+  /// a tag with none, including a vertical whose default letter was taken.
+  shortcut String?
+
+  /// flight | hotel | restaurant | concert | movie, or null for an ordinary
+  /// tag. Only ever selects a set of *suggested* properties — never required
+  /// ones.
+  vertical String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  /// Optimistic concurrency (§2).
+  version Int @default(0)
+
+  verses VerseTag[]
+  shares TagShare[]
+
+  @@unique([ownerId, name])
+  @@unique([ownerId, shortcut])
+  @@index([ownerId])
+  /// Trigram index for fuzzy tag and shortcut matching (§8.2): typing "barclona"
+  /// should still find `.barcelona-trip`. Declared here with its operator class
+  /// rather than left to raw SQL, so `migrate diff` does not propose dropping
+  /// an index it cannot see.
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin)
+  @@map("tag")
+  @@schema("verse")
+}
+
+/// The atomic unit (CLAUDE.md).
+///
+/// Almost every column is nullable on purpose: a Verse may be nothing but media,
+/// a tag and a location. That is a design rule, so the schema must not quietly
+/// require more than the domain does.
+model Verse {
+  id String @id @db.Uuid
+
+  ownerId String @map("owner_id") @db.Uuid
+
+  /// When it happened, freely past or future. Null for a Verse with no moment.
+  eventStart DateTime? @map("event_start") @db.Timestamptz(3)
+
+  /// Set only for a range. The migration enforces that it needs a start and
+  /// cannot precede one.
+  eventEnd DateTime? @map("event_end") @db.Timestamptz(3)
+
+  /// Negative = years before present. Mutually exclusive with the event
+  /// columns, enforced by a CHECK: neither Date nor timestamptz reaches 66
+  /// million years ago, so this is a float rather than a timestamp (CLAUDE.md).
+  deepTimeYears Float? @map("deep_time_years")
+
+  location String?
+
+  /// 0-10, fractional allowed. Range enforced in the migration.
+  rating Float?
+
+  /// The free-text note.
+  xp String?
+
+  /// Schema-free key/value (jsonb). Values are text; the domain stringifies
+  /// numbers and booleans and refuses objects, so this never holds a nested
+  /// blob that search would index as braces.
+  properties Json @default("{}")
+
+  /// Null means "inherit from my tags", which is the common case. Resolving it
+  /// at write time would freeze today's tag visibility into the row, leaving a
+  /// Verse public after its tag was made private.
+  visibility String?
+
+  /// Where this verse sits on the timeline, in years from 2000-01-01.
+  ///
+  /// One scale for both representations, so a page can span a booked flight and
+  /// the Chicxulub impact without the query knowing which is which: it is
+  /// `deepTimeYears` when that is set, otherwise the event date, otherwise when
+  /// the verse was written. Ordering on `event_start` alone cannot work —
+  /// deep-time rows have none, and no timestamp column could hold them anyway.
+  ///
+  /// Maintained by the repository on every write rather than being a Postgres
+  /// GENERATED column. Prisma cannot model a generated column, and a column the
+  /// schema does not know about is exactly the `migrate diff` landmine that
+  /// nearly dropped `oauth_account_one_per_provider_idx` in 2.2.
+  ///
+  /// Deep time is "years before present" while this is "years from 2000", and
+  /// the two are reconciled by ignoring the difference: at the magnitudes deep
+  /// time is used for — -13.8e9 has three significant figures — a couple of
+  /// decades is far below the precision of the data.
+  timelineYears Float @map("timeline_years")
+
+  /// Ids owned by the `media` module. An array rather than a join table
+  /// because there is no foreign key to be had across a schema boundary
+  /// anyway, and the order is the order the user attached them in.
+  mediaIds String[] @map("media_ids") @db.Uuid
+
+  /// Full-text index content (§8.2): `xp` weighted highest, then property
+  /// values, then the names of the tags the verse carries.
+  ///
+  /// A real tsvector column rather than a Postgres GENERATED one, and declared
+  /// here rather than left to raw SQL, for the reason 2.2 learned the hard way:
+  /// anything the Prisma schema does not know about is something the next
+  /// `migrate diff` proposes dropping. `Unsupported` means the typed client
+  /// cannot read or write it, which is fine — every write in this module is raw
+  /// SQL, and that is where the vector is built.
+  ///
+  /// Tag names are in it, which means renaming a tag has to rewrite its verses'
+  /// vectors. `refreshSearchForTag` does that, and there is a test that a
+  /// renamed tag is findable under its new name and not its old one.
+  searchVector Unsupported("tsvector")? @map("search_vector")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  version Int @default(0)
+
+  tags   VerseTag[]
+  shares VerseShare[]
+
+  /// The timeline reads by event time within an owner; the id tiebreak is what
+  /// makes cursor pagination stable when two verses share a timestamp.
+  /// The timeline's index: one scale, and `id` as the tiebreak that makes
+  /// keyset pagination stable when two verses land on the same year.
+  @@index([ownerId, timelineYears, id])
+  @@index([ownerId, createdAt, id])
+  @@index([searchVector], type: Gin)
+  @@map("verse")
+  @@schema("verse")
+}
+
+/// Which verses carry which tags. Both sides live in the `verse` schema, so
+/// unlike ownership these really are foreign keys.
+model VerseTag {
+  verseId String @map("verse_id") @db.Uuid
+  tagId   String @map("tag_id") @db.Uuid
+
+  /// The order the user added them in, which is the order they read best in.
+  position Int @default(0)
+
+  verse Verse @relation(fields: [verseId], references: [id], onDelete: Cascade)
+  tag   Tag   @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([verseId, tagId])
+  @@index([tagId])
+  @@map("verse_tag")
+  @@schema("verse")
+}
+
+/// A tag shared with another person.
+///
+/// `permission` already accepts `contribute` even though nothing honours it
+/// (CLAUDE.md open decision 1). Modelling it now means settling that question
+/// later is a behaviour change rather than a migration.
+model TagShare {
+  tagId      String @map("tag_id") @db.Uuid
+  granteeId  String @map("grantee_id") @db.Uuid
+  permission String @default("read")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  tag Tag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([tagId, granteeId])
+  @@index([granteeId])
+  @@map("tag_share")
+  @@schema("verse")
+}
+
+/// A single verse shared with another person, independent of its tags.
+model VerseShare {
+  verseId    String @map("verse_id") @db.Uuid
+  granteeId  String @map("grantee_id") @db.Uuid
+  permission String @default("read")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  verse Verse @relation(fields: [verseId], references: [id], onDelete: Cascade)
+
+  @@id([verseId, granteeId])
+  @@index([granteeId])
+  @@map("verse_share")
+  @@schema("verse")
 }
