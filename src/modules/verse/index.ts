@@ -12,6 +12,14 @@
  */
 
 export {
+  handleListTagShares,
+  handleRevokeTagShare,
+  handleRevokeVerseShare,
+  handleShareTag,
+  handleShareVerse,
+} from './api/share-routes';
+
+export {
   handleTimeline,
   handleCreateVerse,
   handleDeleteVerse,
