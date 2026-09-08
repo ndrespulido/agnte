@@ -669,4 +669,48 @@ describe.skipIf(!DATABASE_URL)('auth routes', () => {
     });
     expect(renew.status).toBe(401);
   });
+
+  it('answers 502 and names the failure when the email cannot be sent', async () => {
+    // This reached production as a bare 500: indistinguishable from a crash,
+    // with the actual reason — Resend refusing a From address on a domain the
+    // account cannot send from — only in the container logs. A registering user
+    // saw a blank failure and no way to tell a misconfiguration from a bug.
+    process.env.RESEND_API_KEY = 're_test_key';
+    process.env.EMAIL_FROM = 'nobody@unverified.example';
+    resetConfigForTests();
+    resetEmailTransportForTests();
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('{"message":"The unverified.example domain is not verified"}', {
+        status: 403,
+      }),
+    );
+
+    const response = await register({ email: 'blocked@example.com', password: PASSWORD });
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ error: { code: 'email_send_failed' } });
+  });
+
+  it('does not leak the provider’s message to the caller', async () => {
+    // The provider's text is written for us, not for whoever is signing up, and
+    // it can name internal configuration.
+    process.env.RESEND_API_KEY = 're_test_key';
+    process.env.EMAIL_FROM = 'nobody@unverified.example';
+    resetConfigForTests();
+    resetEmailTransportForTests();
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('{"message":"The unverified.example domain is not verified"}', {
+        status: 403,
+      }),
+    );
+
+    const body = await (
+      await register({ email: 'quiet@example.com', password: PASSWORD })
+    ).text();
+
+    expect(body).not.toContain('unverified.example');
+    expect(body).not.toContain('not verified');
+  });
 });

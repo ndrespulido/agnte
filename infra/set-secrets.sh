@@ -234,16 +234,74 @@ if [[ -n "${RESEND_API_KEY}" ]]; then
   # Prove the key works before storing it, the same way the R2 credentials are
   # proved. A 401 here is seconds; the same 401 discovered at registration is a
   # person waiting for an email that will never arrive.
+  # Two separate questions, and checking only the first is what let a broken
+  # configuration reach production: is the key valid, and can it send from this
+  # address? A valid key returns 200 here no matter what the From address is, so
+  # "Resend accepted the key" was true and useless.
   say "Checking the Resend key"
-  RESEND_STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+  RESEND_BODY=$(mktemp)
+  RESEND_STATUS=$(curl -s -o "${RESEND_BODY}" -w '%{http_code}' \
     -H "Authorization: Bearer ${RESEND_API_KEY}" \
     https://api.resend.com/domains || echo "000")
+
   case "${RESEND_STATUS}" in
     2*) note "Resend accepted the key." ;;
-    401|403) echo "  Resend rejected that key (HTTP ${RESEND_STATUS})."; exit 1 ;;
+    401|403) rm -f "${RESEND_BODY}"; echo "  Resend rejected that key (HTTP ${RESEND_STATUS})."; exit 1 ;;
     000) note "Could not reach Resend; storing the key unverified." ;;
     *)  note "Resend answered HTTP ${RESEND_STATUS}; storing the key unverified." ;;
   esac
+
+  # Now the question that actually matters. The domain in EMAIL_FROM has to be
+  # one Resend will send from: a domain verified on this account, or
+  # resend.dev, which Resend pre-verifies for exactly this purpose.
+  #
+  # You cannot send from an address you merely *receive* at — a personal
+  # gmail.com address is the common mistake, and Resend answers it with a 403
+  # that surfaces as a 500 at registration, long after this script said fine.
+  if [[ "${RESEND_STATUS}" == 2* ]]; then
+    FROM_DOMAIN="${EMAIL_FROM##*@}"
+    FROM_DOMAIN="${FROM_DOMAIN%>}"
+
+    if [[ "${FROM_DOMAIN}" == "resend.dev" ]]; then
+      note "Sending from resend.dev, which Resend pre-verifies."
+      note "It delivers only to the address that owns this Resend account."
+    elif VERIFIED=$(python3 -c "
+import json, sys
+try:
+    data = json.load(open('${RESEND_BODY}'))
+except Exception:
+    sys.exit(2)
+rows = data.get('data') if isinstance(data, dict) else data
+print(' '.join(d.get('name','') for d in (rows or []) if d.get('status') == 'verified'))
+" 2>/dev/null); then
+      if [[ " ${VERIFIED} " == *" ${FROM_DOMAIN} "* ]]; then
+        note "${FROM_DOMAIN} is verified on this Resend account."
+      else
+        echo
+        echo "  Resend cannot send from \"${FROM_DOMAIN}\"."
+        echo "  It is not a verified domain on this account, and it is not resend.dev."
+        echo
+        echo "  A From address is a *sender*, not a recipient — it has to be a domain"
+        echo "  you control and have verified in Resend. Receiving mail at an address,"
+        echo "  or forwarding it, does not let you send as it."
+        echo
+        [[ -n "${VERIFIED// /}" ]] \
+          && echo "  Verified on this account: ${VERIFIED}" \
+          || echo "  No domains are verified on this account yet."
+        echo
+        echo "  Use onboarding@resend.dev to get working now — it needs no DNS and"
+        echo "  delivers to the address that owns this Resend account."
+        echo
+        read -rp "  Continue and store it anyway? [y/N] " FROM_ANYWAY
+        [[ "${FROM_ANYWAY}" =~ ^[Yy] ]] || { rm -f "${RESEND_BODY}"; exit 1; }
+        note "Storing it. Registration will answer 500 until that domain verifies."
+      fi
+    else
+      note "Could not read the domain list; storing the From address unchecked."
+    fi
+  fi
+
+  rm -f "${RESEND_BODY}"
 fi
 
 # ----------------------------------------------------------------------------

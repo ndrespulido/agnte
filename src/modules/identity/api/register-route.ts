@@ -143,6 +143,29 @@ export async function handleRegister(request: Request): Promise<Response> {
     // retry should be allowed to do it rather than be told "in progress"
     // forever.
     if (idempotencyKey) await release(scope, idempotencyKey);
+
+    // Name the dependency that broke.
+    //
+    // This was a bare 500, which is indistinguishable from any other crash —
+    // and the reason (Resend's own message, e.g. a From address on a domain
+    // this account cannot send from) existed only in the container logs.
+    // Someone registering saw a blank failure and had no way to tell a
+    // misconfiguration from a bug.
+    //
+    // 502, because the failure is upstream rather than in the request. The
+    // provider's text is deliberately not echoed: it is written for us, not
+    // for whoever is signing up, and it can name internal configuration.
+    if (error instanceof Error && error.message.startsWith('Resend rejected')) {
+      return jsonError(
+        new DomainError(
+          'email_send_failed',
+          'We could not send the verification email. This is our problem, not yours — try again shortly.',
+        ),
+        502,
+        rateLimitHeaders(decision),
+      );
+    }
+
     throw error;
   }
 }
