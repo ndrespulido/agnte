@@ -59,8 +59,14 @@ const Fields = {
 
 const CreateBody = z.object({
   ...Fields,
-  /** At least one tag: a Verse without one has nothing to inherit from. */
-  tagIds: z.array(z.uuid()).min(1),
+  /**
+   * Deliberately not `.min(1)` here, even though a Verse needs at least one tag.
+   * Letting the schema reject an empty array would answer a bare 400
+   * `invalid_body`, while the same mistake on update reaches the domain and
+   * answers 422 `verse.no_tags`. One mistake, two answers, and the less useful
+   * one on the path people hit first. The domain says it, once, for both.
+   */
+  tagIds: z.array(z.uuid()),
   id: z.uuid().optional(),
 });
 
@@ -80,6 +86,10 @@ const statusFor = (code: string): number => {
       return 404;
     case VerseErrorCode.VersionConflict:
       return 409;
+    // 422 rather than 400: the request is well-formed JSON, it just asks for a
+    // Verse that cannot exist.
+    case VerseErrorCode.NoTags:
+      return 422;
     default:
       return 422;
   }
