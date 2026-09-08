@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 // @ts-expect-error -- plain ESM script, no types
-import { findOrphans } from '../../infra/neon-branch.mjs';
+import { findOrphans, hostOf } from '../../infra/neon-branch.mjs';
 
 const run = promisify(execFile);
 
@@ -227,5 +227,31 @@ describe('failure handling', () => {
       const text = String((error as { stderr?: string }).stderr ?? error);
       expect(text).not.toContain('super-secret-key');
     }
+  });
+});
+
+describe('hostOf', () => {
+  /**
+   * The guard that stops `ensure-base` truncating production compares hosts,
+   * not whole URIs — Neon rotates the password in a connection string, so two
+   * URIs for the same endpoint differ in almost every character after the host.
+   */
+  it('ignores credentials, which differ between two URIs for the same endpoint', () => {
+    expect(hostOf('postgresql://u:one@ep-x.eu-central-1.aws.neon.tech/neondb')).toBe(
+      hostOf('postgresql://u:two@ep-x.eu-central-1.aws.neon.tech/neondb'),
+    );
+  });
+
+  it('separates the pooled endpoint from the direct one', () => {
+    expect(hostOf('postgresql://u:p@ep-x-pooler.eu.aws.neon.tech/neondb')).not.toBe(
+      hostOf('postgresql://u:p@ep-x.eu.aws.neon.tech/neondb'),
+    );
+  });
+
+  it('is null rather than throwing on something unparseable', () => {
+    // A null must not compare equal to a real host, or the guard would decide
+    // two branches match and refuse a legitimate run — or worse, fail open.
+    expect(hostOf('not a uri')).toBe(null);
+    expect(hostOf('')).toBe(null);
   });
 });
