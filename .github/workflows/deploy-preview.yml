@@ -236,6 +236,21 @@ jobs:
           echo "$BODY" | grep -q '"name":"object-storage","status":"ok"' \
             || { echo "::error::Object storage check is not ok"; exit 1; }
 
+          # Health does not import the application modules, so it answered ok
+          # for a revision whose every real route was throwing at import time
+          # — a missing protobuf file in the standalone output took down
+          # /v1/timeline, /v1/tags, /v1/verses, /v1/search and /v1/media while
+          # this step reported success and promoted the revision to live.
+          #
+          # So probe a route that actually loads that graph. Unauthenticated,
+          # it must answer 401: auth rejects the request before doing any work.
+          # A 500 means the module never loaded at all, which is exactly the
+          # failure that shipped.
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${URL}/v1/timeline")
+          echo "unauthenticated /v1/timeline -> ${STATUS}"
+          [ "$STATUS" = "401" ] \
+            || { echo "::error::/v1/timeline answered ${STATUS}, expected 401 — the app modules did not load"; exit 1; }
+
       # Edits one comment rather than adding another on every push, so the pull
       # request keeps a single live status instead of a growing list.
       - uses: actions/github-script@v7
