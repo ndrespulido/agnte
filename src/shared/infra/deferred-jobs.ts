@@ -1,4 +1,3 @@
-import { CloudTasksClient } from '@google-cloud/tasks';
 import { loadConfig } from './config';
 
 /**
@@ -87,6 +86,43 @@ export class CloudTasksJobs implements DeferredJobs {
   }
 }
 
+/**
+ * The real client, loaded only when a task is actually created.
+ *
+ * `@google-cloud/tasks` is not imported at the top of this file, and that is
+ * load-bearing rather than tidiness. This module is reached from the media
+ * module, which is reached from the timeline, the tag list, search and every
+ * verse route — so an eager import puts a heavyweight optional SDK on the
+ * critical path of the entire app. It has already broken that path twice: the
+ * bundler could not follow its dynamic requires (fixed with
+ * `serverExternalPackages`), and then the standalone output shipped without
+ * its protobuf files, so requiring it threw and every one of those routes
+ * answered 500 in production while working perfectly in development.
+ *
+ * Both were fixed properly — see next.config.ts — but the shape that let a
+ * queue nobody had configured yet take down the timeline is the actual
+ * defect, and this is that fix. Nothing loads unless something enqueues.
+ *
+ * `queuePath` builds the resource name itself rather than asking the SDK: it
+ * is a documented, stable format, and needing the module to format a string
+ * would defeat the point of not loading it.
+ */
+export class LazyCloudTasksClient implements TaskCreator {
+  private client: TaskCreator | undefined;
+
+  queuePath(project: string, location: string, queue: string): string {
+    return `projects/${project}/locations/${location}/queues/${queue}`;
+  }
+
+  async createTask(request: Parameters<TaskCreator['createTask']>[0]): Promise<unknown> {
+    if (!this.client) {
+      const { CloudTasksClient } = await import('@google-cloud/tasks');
+      this.client = new CloudTasksClient() as unknown as TaskCreator;
+    }
+    return this.client.createTask(request);
+  }
+}
+
 let cached: DeferredJobs | undefined;
 let cachedFor: string | undefined;
 
@@ -124,7 +160,7 @@ export function getDeferredJobs(): DeferredJobs | undefined {
     config.INTERNAL_TASKS_SECRET
   ) {
     jobs = new CloudTasksJobs(
-      new CloudTasksClient(),
+      new LazyCloudTasksClient(),
       config.GCP_PROJECT_ID,
       config.GCP_REGION,
       config.CLOUD_TASKS_QUEUE,

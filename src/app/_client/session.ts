@@ -225,6 +225,45 @@ export async function register(email: string, password: string): Promise<void> {
   throw new Error(body?.error?.message ?? 'Could not register.');
 }
 
+/**
+ * Finishes a Google sign-in, if this load is the redirect back from one.
+ *
+ * The callback sends the browser to `/#code=…` carrying a single-use handoff
+ * code rather than the tokens themselves (see the identity module's
+ * `domain/oauth-handoff.ts`). This trades it for a real session.
+ *
+ * The fragment is cleared with `replaceState` before the exchange even
+ * happens, so a spent code does not sit in the address bar or in a history
+ * entry — and so a reload cannot try to spend it again and show an error for
+ * a sign-in that actually worked.
+ *
+ * Returns true when it consumed a code, so the caller knows this load was an
+ * OAuth return and not an ordinary one.
+ */
+export async function completeGoogleSignIn(): Promise<boolean> {
+  const hash = globalThis.location?.hash ?? '';
+  const code = new URLSearchParams(hash.replace(/^#/, '')).get('code');
+  if (!code) return false;
+
+  globalThis.history?.replaceState(null, '', globalThis.location.pathname);
+
+  const response = await fetch('/v1/auth/google/exchange', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: { message?: string };
+    } | null;
+    throw new Error(body?.error?.message ?? 'Could not finish signing in with Google.');
+  }
+
+  saveTokens((await response.json()) as Tokens);
+  return true;
+}
+
 export async function signOut(): Promise<void> {
   const tokens = loadTokens();
   clearTokens();

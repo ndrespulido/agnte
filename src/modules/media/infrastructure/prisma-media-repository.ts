@@ -141,6 +141,28 @@ export class PrismaMediaRepository implements MediaRepository {
     return deleted > 0;
   }
 
+  async findAbandonedPending(before: Date): Promise<Media[]> {
+    const rows = await requireDatabase().$queryRaw<MediaRow[]>`
+      SELECT id, owner_id, status, content_type, declared_size_bytes,
+             storage_key, created_at, updated_at, version
+      FROM media.media
+      WHERE status = 'pending'
+        AND created_at < ${before}
+      -- Bounded so one run cannot try to delete a runaway backlog in a single
+      -- statement; the scheduler comes back every day and takes the next slice.
+      LIMIT 1000
+    `;
+    return rows.map(toMedia);
+  }
+
+  async deleteMany(ids: readonly string[]): Promise<number> {
+    if (ids.length === 0) return 0;
+
+    return requireDatabase().$executeRaw`
+      DELETE FROM media.media WHERE id = ANY(${[...ids]}::uuid[])
+    `;
+  }
+
   async createVariant(variant: MediaVariant): Promise<void> {
     await requireDatabase().$executeRaw`
       INSERT INTO media.media_variant

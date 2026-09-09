@@ -26,6 +26,31 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ['@google-cloud/tasks'],
 
   /**
+   * The other half of the same problem, and the half that only shows up in a
+   * container.
+   *
+   * `serverExternalPackages` stops the bundler choking on the dynamic requires
+   * at *build* time. It does not make the files those requires reach for
+   * survive into `output: 'standalone'`: the tracer follows imports it can
+   * see, and `@google-cloud/tasks` loads its protobuf definitions through a
+   * path it computes at runtime. The package directory is copied, its
+   * `build/protos/protos.json` is not, and the module throws on require —
+   * taking down every route that transitively imports the media module, which
+   * is the whole timeline.
+   *
+   * Invisible in development (no standalone output) and invisible to
+   * `next build` (which succeeds). It reached production, where it read as
+   * "Request failed (500)" on the timeline.
+   *
+   * `'**'` rather than a single route: the media module is imported by
+   * /v1/timeline, /v1/tags, /v1/verses, /v1/search and /v1/media, and listing
+   * them would be a list to keep in sync with a failure mode this quiet.
+   */
+  outputFileTracingIncludes: {
+    '**': ['./node_modules/@google-cloud/tasks/build/protos/**'],
+  },
+
+  /**
    * The app moved from /timeline to the root, and the status page from the root
    * to /status.
    *

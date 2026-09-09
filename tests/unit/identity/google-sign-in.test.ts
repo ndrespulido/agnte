@@ -10,13 +10,10 @@ import { createVerifiedUser } from '@/modules/identity/domain/user';
 import type { Email } from '@/modules/identity/domain/email';
 import type { ProviderIdentity } from '@/modules/identity/domain/ports';
 import {
-  FakeAccessTokenIssuer,
   FakeOAuthAccountRepository,
   FakeOAuthProvider,
   FakePasswordHasher,
-  FakeRefreshTokenRepository,
   FakeStateSigner,
-  FakeTokenGenerator,
   FakeUserRepository,
 } from '../../support/identity-fakes';
 
@@ -34,17 +31,13 @@ const identity = (over: Partial<ProviderIdentity> = {}): ProviderIdentity => ({
 
 let users: FakeUserRepository;
 let accounts: FakeOAuthAccountRepository;
-let sessions: FakeRefreshTokenRepository;
 let state: FakeStateSigner;
 
 const deps = (provider: FakeOAuthProvider): SignInWithGoogleDeps => ({
   users,
   accounts,
-  sessions,
   provider,
   state,
-  accessTokens: new FakeAccessTokenIssuer(),
-  refreshTokens: new FakeTokenGenerator(),
   clock,
 });
 
@@ -61,7 +54,6 @@ const run = async (provider: FakeOAuthProvider, stateValue?: string) =>
 beforeEach(() => {
   users = new FakeUserRepository();
   accounts = new FakeOAuthAccountRepository();
-  sessions = new FakeRefreshTokenRepository();
   state = new FakeStateSigner();
 });
 
@@ -72,7 +64,9 @@ describe('signInWithGoogle', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.created).toBe(true);
-    expect(result.value.tokens.tokenType).toBe('Bearer');
+    // A user id, not a session. Issuing one is the exchange endpoint's job now
+    // — see domain/oauth-handoff.ts for why the two were separated.
+    expect(result.value.userId).toMatch(/[0-9a-f-]{36}/);
 
     const user = await users.findByEmail('person@example.com' as Email);
     // Google has proven the address, which is exactly what our own verification
@@ -94,11 +88,6 @@ describe('signInWithGoogle', () => {
     expect(again.value.created).toBe(false);
     expect(users.users.size).toBe(before);
     expect(accounts.links).toHaveLength(1);
-  });
-
-  it('starts a real session, so the tokens can be refreshed', async () => {
-    await run(new FakeOAuthProvider(identity()));
-    expect(sessions.rows.size).toBe(1);
   });
 
   it('carries the display name Google supplied', async () => {

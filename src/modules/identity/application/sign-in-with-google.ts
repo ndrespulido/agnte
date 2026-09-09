@@ -1,25 +1,18 @@
 import { err, ok, type Clock, type DomainError, type Result } from '@/shared/kernel';
 import { oauthEmailUnverified, oauthStateInvalid } from '../domain/errors';
-import { ACCESS_TOKEN_TTL_MS, startSession, type TokenPair } from '../domain/session';
 import { createVerifiedUser } from '../domain/user';
 import type {
-  AccessTokenIssuer,
   OAuthAccountRepository,
   OAuthProvider,
   OAuthStateSigner,
-  RefreshTokenGenerator,
-  RefreshTokenRepository,
   UserRepository,
 } from '../domain/ports';
 
 export interface SignInWithGoogleDeps {
   users: UserRepository;
   accounts: OAuthAccountRepository;
-  sessions: RefreshTokenRepository;
   provider: OAuthProvider;
   state: OAuthStateSigner;
-  accessTokens: AccessTokenIssuer;
-  refreshTokens: RefreshTokenGenerator;
   clock: Clock;
 }
 
@@ -29,8 +22,17 @@ export interface SignInWithGoogleCommand {
   redirectUri: string;
 }
 
+/**
+ * Which account this Google identity is, and nothing more.
+ *
+ * Deliberately not a token pair. This used to issue the session itself, which
+ * was fine while the callback answered with JSON — but the browser arrives at
+ * that callback by redirect, so the tokens had nowhere to go. Resolving the
+ * user and issuing a session are now separate steps, and the OAuth callback
+ * puts a short-lived handoff code between them (domain/oauth-handoff.ts).
+ */
 export interface SignInWithGoogleOutcome {
-  readonly tokens: TokenPair;
+  readonly userId: string;
   /** True when this sign-in created the account rather than finding it. */
   readonly created: boolean;
 }
@@ -86,7 +88,7 @@ export async function signInWithGoogle(
   );
 
   if (existingLink) {
-    return finish(existingLink.userId, false, deps);
+    return finish(existingLink.userId, false);
   }
 
   const byEmail = await deps.users.findByEmail(identity.email);
@@ -98,7 +100,7 @@ export async function signInWithGoogle(
       userId: byEmail.id,
       email: identity.email,
     });
-    return finish(byEmail.id, false, deps);
+    return finish(byEmail.id, false);
   }
 
   const user = createVerifiedUser({
@@ -126,7 +128,7 @@ export async function signInWithGoogle(
       userId: raced.id,
       email: identity.email,
     });
-    return finish(raced.id, false, deps);
+    return finish(raced.id, false);
   }
 
   await deps.accounts.link({
@@ -136,27 +138,13 @@ export async function signInWithGoogle(
     email: identity.email,
   });
 
-  return finish(user.id, true, deps);
+  return finish(user.id, true);
 }
 
-/** Issues the same token pair a password sign-in would, so downstream sees one auth model (§4). */
-async function finish(
+/** The three paths above all end the same way: this is the account. */
+function finish(
   userId: string,
   created: boolean,
-  deps: SignInWithGoogleDeps,
-): Promise<Result<SignInWithGoogleOutcome, DomainError>> {
-  const issued = deps.refreshTokens.issue();
-  await deps.sessions.start(
-    startSession({ tokenHash: issued.tokenHash, userId, clock: deps.clock }),
-  );
-
-  return ok({
-    tokens: {
-      accessToken: await deps.accessTokens.issue(userId),
-      refreshToken: issued.token,
-      expiresIn: Math.floor(ACCESS_TOKEN_TTL_MS / 1000),
-      tokenType: 'Bearer',
-    },
-    created,
-  });
+): Result<SignInWithGoogleOutcome, DomainError> {
+  return ok({ userId, created });
 }

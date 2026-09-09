@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { QuickAdd } from './QuickAdd';
 import { SignIn } from './SignIn';
 import { Timeline } from './Timeline';
 import {
+  completeGoogleSignIn,
   getServerSessionSnapshot,
   getSessionSnapshot,
   signOut,
@@ -21,12 +22,30 @@ import {
  * every open. 'unknown' during server rendering is what lets this render
  * nothing until the browser has actually answered.
  */
-export function App() {
+export function App({ googleEnabled }: { googleEnabled: boolean }) {
   const session = useSyncExternalStore(
     subscribeToSession,
     getSessionSnapshot,
     getServerSessionSnapshot,
   );
+
+  const [googleError, setGoogleError] = useState<string | null>(null);
+
+  /**
+   * If this load is the redirect back from Google, finish the sign-in.
+   *
+   * Runs before anything else can care about the session: `completeGoogleSignIn`
+   * stores the tokens, which notifies the external store above and re-renders
+   * this component as signed in. A load that is not an OAuth return does
+   * nothing and resolves false.
+   */
+  useEffect(() => {
+    completeGoogleSignIn().catch((cause: unknown) => {
+      setGoogleError(
+        cause instanceof Error ? cause.message : 'Could not finish signing in.',
+      );
+    });
+  }, []);
 
   const [dateLabel, setDateLabel] = useState('Today');
   /**
@@ -39,7 +58,14 @@ export function App() {
   const onDateChange = useCallback((label: string) => setDateLabel(label), []);
 
   if (session === 'unknown') return null;
-  if (session === 'signed-out') return <SignIn onSignedIn={() => undefined} />;
+  if (session === 'signed-out')
+    return (
+      <SignIn
+        onSignedIn={() => undefined}
+        googleEnabled={googleEnabled}
+        notice={googleError}
+      />
+    );
 
   return (
     <>
