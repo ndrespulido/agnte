@@ -962,9 +962,9 @@ anything's data path.
 
 ```bash
 cd infra/domain-proxy
-docker build --platform linux/amd64 \
-  -t europe-west3-docker.pkg.dev/agnte-prod/agnte/domain-proxy:latest .
-docker push europe-west3-docker.pkg.dev/agnte-prod/agnte/domain-proxy:latest
+gcloud builds submit \
+  --tag=europe-west3-docker.pkg.dev/agnte-prod/agnte/domain-proxy:latest \
+  --project=agnte-prod
 
 gcloud run deploy agnte-domain-proxy \
   --image=europe-west3-docker.pkg.dev/agnte-prod/agnte/domain-proxy:latest \
@@ -975,6 +975,17 @@ gcloud run deploy agnte-domain-proxy \
   --min-instances=0 \
   --set-env-vars=ORIGIN_HOST=agnte-lddzhm2pxa-ey.a.run.app
 ```
+
+`gcloud builds submit` (Cloud Build), not `docker build`/`docker push` —
+deliberately. Local dev on this project has never had Docker available
+(architecture.md §7.1, and the constraints this doc itself is written
+under), and Cloud Build needs nothing beyond `gcloud`'s own credentials,
+already working for every other command in this section: no local daemon,
+no docker-credential helper, none of the podman-emulation or snap-confined
+credential-helper failures a `docker push` from this kind of machine runs
+into. It uploads `infra/domain-proxy/` as source and builds the Dockerfile
+in it the same way `docker build` would, just on Google's infrastructure
+instead of the machine running this command.
 
 The Artifact Registry repo is `europe-west3` (the same one `bootstrap-gcp.sh`
 created) even though the service deploys to `us-central1` — Cloud Run pulls
