@@ -102,12 +102,20 @@ describe('a bucket with no CORS rule', () => {
 describe('after set-r2-cors applies its rule', () => {
   const PROD = 'https://agnte-lddzhm2pxa-ey.a.run.app';
   const PREVIEW_BASE = 'https://agnte-preview-lddzhm2pxa-ey.a.run.app';
+  // Cloud Run's own URL and a custom domain are both real, live origins once
+  // one fronts the service (docs/operations.md §2k) — no Domain Mapping, so
+  // nothing stops the run.app URL from still being loaded directly.
+  const CUSTOM_DOMAIN = 'https://agnte.app';
 
   beforeAll(async () => {
     await client().send(
       new PutBucketCorsCommand({
         Bucket: BUCKET,
-        CORSConfiguration: corsConfiguration([PROD, previewOriginPattern(PREVIEW_BASE)]),
+        CORSConfiguration: corsConfiguration([
+          PROD,
+          previewOriginPattern(PREVIEW_BASE),
+          CUSTOM_DOMAIN,
+        ]),
       }),
     );
   });
@@ -119,6 +127,7 @@ describe('after set-r2-cors applies its rule', () => {
     expect(CORSRules?.[0]?.AllowedOrigins).toEqual([
       PROD,
       previewOriginPattern(PREVIEW_BASE),
+      CUSTOM_DOMAIN,
     ]);
   });
 
@@ -132,6 +141,11 @@ describe('after set-r2-cors applies its rule', () => {
     const response = await preflight(
       'https://pr-99---agnte-preview-lddzhm2pxa-ey.a.run.app',
     );
+    expect(response.ok).toBe(true);
+  });
+
+  it('lets the custom domain through preflight, alongside the run.app URL', async () => {
+    const response = await preflight(CUSTOM_DOMAIN);
     expect(response.ok).toBe(true);
   });
 

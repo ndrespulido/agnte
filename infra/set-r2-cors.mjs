@@ -84,6 +84,7 @@ async function main() {
     R2_SECRET_ACCESS_KEY,
     PROD_URL,
     PREVIEW_URL,
+    CUSTOM_DOMAIN,
   } = process.env;
 
   if (!R2_ENDPOINT || !R2_BUCKET || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) {
@@ -94,9 +95,17 @@ async function main() {
   const origins = [];
   if (PROD_URL) origins.push(PROD_URL.replace(/\/+$/, ''));
   if (PREVIEW_URL) origins.push(previewOriginPattern(PREVIEW_URL.replace(/\/+$/, '')));
+  // Cloud Run's own URL stays reachable even once a custom domain is
+  // fronting the service (docs/operations.md §2k) — no Domain Mapping is
+  // involved, Cloudflare just proxies the domain to it — so this adds the
+  // domain rather than replacing PROD_URL with it. Both are real origins a
+  // browser might load the app from.
+  if (CUSTOM_DOMAIN) origins.push(CUSTOM_DOMAIN.replace(/\/+$/, ''));
 
   if (origins.length === 0) {
-    console.error('  Neither PROD_URL nor PREVIEW_URL is set — nothing to allow.');
+    console.error(
+      '  Neither PROD_URL, PREVIEW_URL nor CUSTOM_DOMAIN is set — nothing to allow.',
+    );
     console.error('  Deploy at least one of the two services first.');
     process.exit(1);
   }
@@ -109,12 +118,32 @@ async function main() {
     credentials: { accessKeyId: R2_ACCESS_KEY_ID, secretAccessKey: R2_SECRET_ACCESS_KEY },
   });
 
-  await client.send(
-    new PutBucketCorsCommand({
-      Bucket: R2_BUCKET,
-      CORSConfiguration: corsConfiguration(origins),
-    }),
-  );
+  try {
+    await client.send(
+      new PutBucketCorsCommand({
+        Bucket: R2_BUCKET,
+        CORSConfiguration: corsConfiguration(origins),
+      }),
+    );
+  } catch (error) {
+    if (error?.name === 'AccessDenied') {
+      console.error('  R2 rejected this with AccessDenied.');
+      console.error('');
+      console.error("  Setting a bucket's CORS policy is a configuration change, which");
+      console.error(
+        '  needs an Admin-scoped token — Object Read & Write (what production',
+      );
+      console.error(
+        '  runs with) cannot do it. infra/set-r2-cors.sh asks for a separate',
+      );
+      console.error(
+        '  Admin token rather than reading the stored one; if you called this',
+      );
+      console.error('  script directly, pass an Admin-scoped R2_ACCESS_KEY_ID instead.');
+      process.exit(1);
+    }
+    throw error;
+  }
 
   // Read it back rather than trusting the PUT returned 200 — the same
   // round-trip-not-just-a-status-code discipline verify-r2.mjs uses for the
