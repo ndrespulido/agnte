@@ -33,6 +33,13 @@ REPOSITORY="${REPOSITORY:-agnte}"
 RUNTIME_SA="agnte-runtime"
 DEPLOYER_SA="agnte-deployer"
 
+# The queue deferred work goes through (architecture.md §1.3). One queue for
+# every environment: a task carries its own callback URL, so a preview's task
+# reaches the preview and production's reaches production, and queues are a
+# named resource worth not multiplying per pull request. Must match
+# CLOUD_TASKS_QUEUE in src/shared/infra/config.ts.
+TASKS_QUEUE="${TASKS_QUEUE:-agnte-media-thumbnails}"
+
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 note() { printf '    %s\n' "$*"; }
 
@@ -146,6 +153,7 @@ gcloud services enable \
   iamcredentials.googleapis.com \
   cloudresourcemanager.googleapis.com \
   billingbudgets.googleapis.com \
+  cloudtasks.googleapis.com \
   --project="${PROJECT_ID}"
 note "Enabled."
 
@@ -228,6 +236,57 @@ gcloud iam service-accounts add-iam-policy-binding "${RUNTIME_EMAIL}" \
 note "roles/iam.serviceAccountUser (scoped to ${RUNTIME_SA})"
 
 # ----------------------------------------------------------------------------
+# Cloud Tasks (architecture.md §1.3, §8.3)
+#
+# Cloud Run may kill a container as soon as it returns a response, so work
+# that must outlive the request — generating a photo's thumbnails — is handed
+# to a queue that calls back into /internal/* in a request of its own.
+#
+# Free tier is one million operations a month; an upload enqueues one task, so
+# this costs nothing at this project's scale.
+# ----------------------------------------------------------------------------
+
+say "Cloud Tasks"
+wait_for_api cloudtasks.googleapis.com
+
+if gcloud tasks queues describe "${TASKS_QUEUE}" \
+    --location="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+  note "Queue ${TASKS_QUEUE} already exists."
+else
+  # --max-attempts caps how long a genuinely broken task is retried. The
+  # handler already writes `failed` to the row and answers 200 for an image it
+  # can never process (modules/media/application/process-thumbnail.ts), so a
+  # retry here only ever means an infrastructure failure — five attempts is
+  # plenty, and unlimited retries against a persistent fault is how a free
+  # tier stops being free.
+  retry 3 gcloud tasks queues create "${TASKS_QUEUE}" \
+    --location="${REGION}" \
+    --project="${PROJECT_ID}" \
+    --max-attempts=5 \
+    --max-concurrent-dispatches=10 \
+    --quiet >/dev/null
+  note "Created ${TASKS_QUEUE} in ${REGION}."
+fi
+
+# The runtime account creates tasks; it does not administer the queue. Granted
+# on the queue rather than the project, so a second queue added later is not
+# writable by accident — the same scoping the serviceAccountUser grant above
+# uses.
+gcloud tasks queues add-iam-policy-binding "${TASKS_QUEUE}" \
+  --location="${REGION}" \
+  --project="${PROJECT_ID}" \
+  --member="serviceAccount:${RUNTIME_EMAIL}" \
+  --role="roles/cloudtasks.enqueuer" \
+  --quiet >/dev/null
+note "roles/cloudtasks.enqueuer (scoped to ${TASKS_QUEUE})"
+
+# Nothing grants Cloud Tasks permission to *invoke* Cloud Run, because the
+# service runs --allow-unauthenticated (a preview has to be reachable from a
+# phone with no Google account). /internal/* is kept private by a shared
+# secret instead — see shared/infra/internal-auth.ts, and the
+# agnte-internal-tasks-secret entry in ./infra/set-secrets.sh.
+
+# ----------------------------------------------------------------------------
 # Budget and alerts
 #
 # A budget is a notification, not a cap — and GCP's spend data lags by hours,
@@ -269,6 +328,7 @@ cat <<SUMMARY
     ARTIFACT_REPO      ${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}
     RUNTIME_SA         ${RUNTIME_EMAIL}
     DEPLOYER_SA        ${DEPLOYER_EMAIL}
+    CLOUD_TASKS_QUEUE  ${TASKS_QUEUE}
 
   None of these are secret — they are identifiers, safe to paste into a
   public repository or a chat. No service account key was created and none

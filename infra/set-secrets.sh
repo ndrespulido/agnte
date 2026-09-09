@@ -346,6 +346,48 @@ else
 fi
 
 # ----------------------------------------------------------------------------
+# Internal task callback secret (architecture.md §1.3)
+#
+# Cloud Tasks calls back into /internal/* to do deferred work. Cloud Run runs
+# --allow-unauthenticated, because a preview URL has to open on a phone with
+# no Google account, so IAM cannot be what keeps those routes private — this
+# shared secret is (shared/infra/internal-auth.ts). Whatever enqueues a task
+# signs it with this; the route compares in constant time and answers 401
+# otherwise.
+#
+# Generated, not prompted, for the same reason as the signing key above: it is
+# 32 random bytes, and asking would only invite a memorable value.
+#
+# Rotating it is much cheaper than rotating the signing key — the blast radius
+# is tasks already queued, whose callbacks answer 401 until they exhaust their
+# retries. Still left alone on re-runs, so it is never a surprise.
+# ----------------------------------------------------------------------------
+
+say "Internal task callback secret"
+
+if gcloud secrets describe agnte-internal-tasks-secret --project="${PROJECT_ID}" >/dev/null 2>&1; then
+  note "agnte-internal-tasks-secret already exists; leaving it alone."
+  note "To rotate (in-flight task callbacks will 401 until they are retried):"
+  note "  openssl rand -hex 32 | gcloud secrets versions add agnte-internal-tasks-secret --data-file=-"
+  INTERNAL_TASKS_SECRET=""
+else
+  INTERNAL_TASKS_SECRET="$(openssl rand -hex 32)"
+  note "Generated a new 32-byte secret."
+fi
+
+# A separate one for previews, for the same reason the signing key is split:
+# previews are publicly reachable, and a secret shared with production would
+# mean anything able to read a preview's environment could drive production's
+# /internal/* routes.
+if gcloud secrets describe agnte-internal-tasks-secret-preview --project="${PROJECT_ID}" >/dev/null 2>&1; then
+  note "agnte-internal-tasks-secret-preview already exists; leaving it alone."
+  INTERNAL_TASKS_SECRET_PREVIEW=""
+else
+  INTERNAL_TASKS_SECRET_PREVIEW="$(openssl rand -hex 32)"
+  note "Generated a separate 32-byte secret for preview environments."
+fi
+
+# ----------------------------------------------------------------------------
 # Google OAuth (architecture.md §4)
 #
 # Optional like R2 and Resend. Production only, by necessity: Google does not
@@ -407,6 +449,14 @@ if [[ -n "${JWT_SECRET}" ]]; then
   store agnte-jwt-secret "${JWT_SECRET}"
 fi
 
+if [[ -n "${INTERNAL_TASKS_SECRET_PREVIEW}" ]]; then
+  store agnte-internal-tasks-secret-preview "${INTERNAL_TASKS_SECRET_PREVIEW}"
+fi
+
+if [[ -n "${INTERNAL_TASKS_SECRET}" ]]; then
+  store agnte-internal-tasks-secret "${INTERNAL_TASKS_SECRET}"
+fi
+
 if [[ -n "${RESEND_API_KEY}" ]]; then
   store agnte-resend-api-key "${RESEND_API_KEY}"
   store agnte-email-from "${EMAIL_FROM}"
@@ -449,12 +499,13 @@ fi
 
 # Unconditional: the secret exists by now either way — this run created it, or
 # an earlier one did — and the binding is idempotent.
-for jwt_secret in agnte-jwt-secret agnte-jwt-secret-preview; do
-  gcloud secrets add-iam-policy-binding "${jwt_secret}" \
+for generated in agnte-jwt-secret agnte-jwt-secret-preview \
+                 agnte-internal-tasks-secret agnte-internal-tasks-secret-preview; do
+  gcloud secrets add-iam-policy-binding "${generated}" \
     --member="serviceAccount:${RUNTIME_SA}" \
     --role=roles/secretmanager.secretAccessor \
     --project="${PROJECT_ID}" --quiet >/dev/null
-  note "runtime  -> ${jwt_secret}"
+  note "runtime  -> ${generated}"
 done
 
 # ----------------------------------------------------------------------------
@@ -474,7 +525,8 @@ done
 # up. Knowing the secret exists is the whole requirement.
 # ----------------------------------------------------------------------------
 for secret in agnte-jwt-secret agnte-jwt-secret-preview agnte-resend-api-key agnte-email-from \
-              agnte-google-client-id agnte-google-client-secret; do
+              agnte-google-client-id agnte-google-client-secret \
+              agnte-internal-tasks-secret agnte-internal-tasks-secret-preview; do
   if gcloud secrets describe "${secret}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
     gcloud secrets add-iam-policy-binding "${secret}" \
       --member="serviceAccount:${DEPLOYER_SA}" \
@@ -543,6 +595,8 @@ fi
 
 verify agnte-jwt-secret "${RUNTIME_SA}" "runtime"
 verify agnte-jwt-secret-preview "${RUNTIME_SA}" "runtime"
+verify agnte-internal-tasks-secret "${RUNTIME_SA}" "runtime"
+verify agnte-internal-tasks-secret-preview "${RUNTIME_SA}" "runtime"
 
 if [[ -n "${RESEND_API_KEY}" ]]; then
   for secret in agnte-resend-api-key agnte-email-from; do
