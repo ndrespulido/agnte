@@ -42,11 +42,18 @@ export interface MediaRepository {
  * An upload target: where to send the bytes, and what the client must send
  * alongside them.
  *
- * `headers` exists because the R2 adapter signs `Content-Type` and
- * `Content-Length` into the URL — a PUT sent without matching headers is
- * rejected by R2 itself, which is the first (imperfect but free) layer against
- * an upload that lies about what it is. The local adapter returns an empty
- * object; its dev-only route trusts whatever arrives.
+ * `headers` carries `content-type`, which the R2 adapter signs into the URL —
+ * a PUT sent with a different one is rejected by R2 itself. It does *not*
+ * carry a content-length: a browser's `fetch` computes and sends that header
+ * itself from the body's real length and refuses to let calling code override
+ * it, which is exactly what makes signing it a genuine size restriction on a
+ * real client — but it is also not something this codebase has verified,
+ * because the local S3-compatible test double (s3rver) does not enforce
+ * signed headers at all; a request signed for one content-length and sent
+ * with another round-trips successfully in the test harness. So this is
+ * documented as defence-in-depth, not relied on: the actual, tested boundary
+ * against an oversized or mislabelled upload is `head()`, called after the
+ * client confirms — see `application/confirm-upload.ts`.
  */
 export interface UploadTarget {
   readonly url: string;
@@ -60,18 +67,24 @@ export interface StoredObjectInfo {
 }
 
 export interface MediaBlobStore {
-  presignUpload(input: {
-    key: string;
-    contentType: string;
-    sizeBytes: number;
-  }): Promise<UploadTarget>;
+  presignUpload(input: { key: string; contentType: string }): Promise<UploadTarget>;
 
-  /** A short-lived signed URL for reading, or null if nothing is at that key. */
-  presignDownload(key: string, expiresInSeconds: number): Promise<string | null>;
+  /**
+   * A short-lived signed URL for reading.
+   *
+   * Does not check the key exists first — that would be a live request to R2
+   * on every call, and every caller already knows from Postgres (a Media or
+   * MediaVariant row) that the key it is asking about should exist before it
+   * ever reaches this port.
+   */
+  presignDownload(key: string, expiresInSeconds: number): Promise<string>;
 
-  /** What actually landed at a key — the check that makes `presignUpload`'s
-   * declared size and content type more than an honor system. Null if nothing
-   * is there yet. */
+  /**
+   * What actually landed at a key — the real check behind `presignUpload`'s
+   * declared content type and size, called once the client confirms an
+   * upload is done. Null if nothing is there yet, which on confirm means the
+   * client is lying about having finished.
+   */
   head(key: string): Promise<StoredObjectInfo | null>;
 
   readBuffer(key: string): Promise<Buffer | null>;
