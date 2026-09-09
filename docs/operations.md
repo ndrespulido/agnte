@@ -28,7 +28,7 @@ Everything below is a one-time setup step. Per-deploy infrastructure lives in
 | Task callback secret | Shared secret for `/internal/*` (by set-secrets.sh) | 4.9 | ☐ |
 | Retention sweep | Daily Cloud Scheduler job → `/internal/prune` | 4.10 | ☐ |
 | R2 CORS | Bucket CORS rule so the browser's presigned upload isn't blocked | 4.11 | ☐ |
-| Custom domain | Cloudflare-proxied CNAME to production, `APP_BASE_URL` pinned | 4.12 | ☐ |
+| Custom domain | Cloud Run Domain Mapping, Cloudflare-proxied, `APP_BASE_URL` pinned | 4.12 | ☐ |
 
 CI runs the database-backed tests against a throwaway Postgres container (added
 in 1.5) rather than a Neon branch — every push would otherwise spend one, and
@@ -541,7 +541,7 @@ than leaving someone to discover it at the button.
 `APP_BASE_URL` disagree — a trailing slash, `http` against `https`, or the
 Cloud Run URL against a custom domain. Both must be the same string. If a
 custom domain gets connected later (§2k), it needs a *second* registered
-URI here, not a replacement one — see §2k step 3.
+URI here, not a replacement one — see §2k step 5.
 
 ### What is deliberately not requested
 
@@ -922,80 +922,79 @@ upgrade of that dependency does not quietly reintroduce it.
 
 ## 2k. A custom domain in front of production
 
-No Cloud Run Domain Mapping, and no load balancer — architecture.md §3.1 is
-explicit that a load balancer never gets created here, and "Cloudflare in
-front of everything" (§3, bullet 6) is already the plan. So the domain is
-connected the same way R2 already gets served through Cloudflare (§2b): DNS
-on Cloudflare, proxied, terminating there.
+No load balancer — architecture.md §3.1 rules that out regardless of which
+of the two ways below connects the domain. Domain Mapping is not a load
+balancer; it is a distinct, free Cloud Run feature, and it is what this
+section now documents.
 
-### 1. DNS, in the Cloudflare dashboard
+**Revised from an earlier version of this section**, which routed the
+domain through Cloudflare with a plain proxied CNAME and no Domain Mapping,
+on the assumption that Cloudflare could rewrite the Host header for free.
+Two things turned out to be wrong with that in sequence: first, a bare CNAME
+without any Host rewrite gets Google's own generic 404 (Cloud Run routes
+incoming requests by Host header, not by TLS SNI, and a Host it has no
+service registered for is indistinguishable from a Domain Mapping that was
+never created); second, the fix for *that* — Cloudflare's Origin Rules "Host
+Header" override — turned out to need **Cloudflare Pro or higher**, not
+Free, confirmed against a live account. Domain Mapping sidesteps both
+problems at once: Google's frontend recognises `agnte.app` directly once
+mapped, so no Host-header rewrite is needed from anything in front of it.
 
-Add the domain's zone to Cloudflare if it isn't already, then:
+### 1. Verify domain ownership
 
-```
-Type:   CNAME
-Name:   agnte.app          (the apex — Cloudflare flattens a proxied CNAME
-                             at the root automatically, unlike most DNS hosts)
-Target: agnte-lddzhm2pxa-ey.a.run.app     (production's own URL, from
-                                            `gcloud run services describe agnte
-                                            --format='value(status.url)'` —
-                                            it will differ per project)
-Proxy:  Proxied (orange cloud) — required. A grey-clouded record is a bare
-        DNS answer with no WAF, no edge rate limiting, and defeats §8.6's
-        first line of defence.
-```
+Domain Mapping requires the domain to be verified for this Google account,
+via [Search Console](https://search.google.com/search-console) if it isn't
+already (a TXT or HTML-file challenge Search Console gives you — a one-time
+check, not a recurring one). Skip this if the domain is already verified
+under the same account the GCP project uses.
 
-SSL/TLS mode: **Full (strict)**. Cloud Run always serves a valid Google-managed
-certificate on its own `.run.app` hostname, so Cloudflare's connection to the
-origin verifies cleanly with no origin certificate to create or rotate —
-"Flexible" would work but sends Cloudflare-to-origin traffic unencrypted,
-which is the one thing Full (strict) exists to avoid.
+### 2. Create the mapping
 
-### 1a. Rewrite the Host header, or Google 404s everything
-
-The CNAME alone is not enough, and the failure mode is not subtle:
-`agnte.app` loads Google's own generic error page —
-
-```
-404. That's an error.
-The requested URL / was not found on this server. That's all we know.
+```bash
+gcloud run domain-mappings create \
+  --service=agnte \
+  --domain=agnte.app \
+  --region=europe-west3 \
+  --project=agnte-prod
 ```
 
-— not this app's 404, not Cloudflare's. That phrasing is Google's shared
-frontend (GFE) saying it has never heard of this hostname, which is exactly
-right: **Cloud Run routes incoming HTTP requests by Host header, not by TLS
-SNI alone.** Cloudflare's proxy, by default, forwards the browser's original
-Host header (`agnte.app`) unchanged to the origin — it does not rewrite it
-to match the CNAME target just because that's where the connection goes. So
-Cloud Run's frontend receives a TLS connection that correctly reaches this
-project's cluster (SNI got that far), carrying a Host it has no service
-registered for, and answers with the same generic 404 it would give a
-Domain Mapping that was never created — because functionally, none was.
+This prints the DNS records to add — for an apex domain, a set of Google's
+own A and AAAA records (a CNAME is not valid at a zone apex in classic DNS).
+Use exactly what this command prints, not a copied example: which specific
+addresses Google hands back is not something to hardcode in a doc that
+outlives any one lookup.
 
-Fix it with a Cloudflare **Origin Rule** (Rules → Origin Rules → Create
-rule — on the Free plan too, not an Enterprise feature):
+### 3. DNS, in the Cloudflare dashboard
 
+Delete the CNAME record from the earlier approach — production's own URL is
+no longer what the domain needs to point at. Add the A and AAAA records
+step 2 printed, name `agnte.app` (the apex).
+
+**Leave these DNS-only (grey cloud) at first.** Google provisions a managed
+certificate for the mapping after DNS resolves, which can take anywhere from
+a few minutes to a few hours, and Cloudflare's proxy sitting in front before
+that finishes can interfere with provisioning. Check progress with:
+
+```bash
+gcloud run domain-mappings describe --domain=agnte.app \
+  --region=europe-west3 --project=agnte-prod
 ```
-When incoming requests match:  Hostname equals agnte.app
-Then:                          Rewrite request header → Host →
-                                agnte-lddzhm2pxa-ey.a.run.app
-```
 
-This is what makes the earlier claim about SNI true in practice: Cloudflare
-already opens the right TLS connection using the origin hostname's SNI, and
-this rule makes it send that same hostname as the HTTP Host header too, so
-Cloud Run's frontend routes the request as if it had been addressed to
-`agnte-lddzhm2pxa-ey.a.run.app` directly — which, from Cloud Run's side, it
-now has been. `agnte.app` still only ever exists at the edge, between the
-browser and Cloudflare; this rule is what keeps that true past the TLS
-handshake.
+Once its `status` shows the certificate as ready (`Ready: True` in the
+conditions), switch the records to **Proxied** (orange cloud) in Cloudflare
+to restore the WAF and edge rate limiting §8.6 relies on as the first line
+of defence — nothing else about the setup changes at that point. SSL/TLS
+mode stays **Full (strict)**: the mapping's certificate is a real one, so
+there is nothing to trust blindly the way "Flexible" would ask Cloudflare to.
 
-If Origin Rules aren't available on the zone for some reason, a Cloudflare
-Worker bound to the route can set the same header
-(`request.headers.set('Host', 'agnte-lddzhm2pxa-ey.a.run.app')` before
-`fetch`ing the origin) — more moving parts, so prefer the rule.
+*Have Cloudflare Pro or higher already?* Origin Rules' Host Header override
+(Rules → Origin Rules → "Then" → Host Header → Rewrite to the `.run.app`
+URL) is a legitimate alternative to all of the above — proxy a plain CNAME
+straight to `agnte-lddzhm2pxa-ey.a.run.app` and skip Domain Mapping and
+Search Console verification entirely. Not documented step-by-step here
+because it does not work on the plan this project runs on.
 
-### 2. Pin the canonical origin
+### 4. Pin the canonical origin
 
 Once DNS resolves, tell the app: **GitHub → repo Settings → Secrets and
 variables → Actions → Variables → New repository variable**,
@@ -1010,7 +1009,7 @@ an empty commit's worth of patience, or `workflow_dispatch` the production
 workflow by hand, rather than assuming it's live the moment the variable is
 saved.
 
-### 3. Google sign-in's redirect URI
+### 5. Google sign-in's redirect URI
 
 §2f's redirect URI is byte-exact and origin-specific — a second one has to be
 added for the new origin, not swapped in for the old one, in Google Cloud
@@ -1024,7 +1023,7 @@ Leave the `.run.app` one registered until `agnte.app` is confirmed working —
 Google allows more than one redirect URI on a client, and removing the old
 one early just means a mistake in the new setup has no fallback.
 
-### 4. R2 CORS needs the new origin too
+### 6. R2 CORS needs the new origin too
 
 The browser's presigned upload is still a cross-origin request (§2j) — now
 from `https://agnte.app` instead of, or alongside, the `.run.app` URL. Re-run
@@ -1035,9 +1034,8 @@ PROJECT_ID=agnte-prod APP_BASE_URL=https://agnte.app ./infra/set-r2-cors.sh
 ```
 
 This adds the domain to the rule rather than replacing the `.run.app` origin
-with it — Cloud Run's own URL stays reachable (there is no Domain Mapping
-here to make it exclusive), so both stay real origins a browser might load
-the app from.
+with it — a Domain Mapping does not make the default URL stop working, so
+both stay real origins a browser might load the app from.
 
 ### What doesn't need touching
 
