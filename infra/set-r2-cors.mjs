@@ -109,12 +109,32 @@ async function main() {
     credentials: { accessKeyId: R2_ACCESS_KEY_ID, secretAccessKey: R2_SECRET_ACCESS_KEY },
   });
 
-  await client.send(
-    new PutBucketCorsCommand({
-      Bucket: R2_BUCKET,
-      CORSConfiguration: corsConfiguration(origins),
-    }),
-  );
+  try {
+    await client.send(
+      new PutBucketCorsCommand({
+        Bucket: R2_BUCKET,
+        CORSConfiguration: corsConfiguration(origins),
+      }),
+    );
+  } catch (error) {
+    if (error?.name === 'AccessDenied') {
+      console.error('  R2 rejected this with AccessDenied.');
+      console.error('');
+      console.error("  Setting a bucket's CORS policy is a configuration change, which");
+      console.error(
+        '  needs an Admin-scoped token — Object Read & Write (what production',
+      );
+      console.error(
+        '  runs with) cannot do it. infra/set-r2-cors.sh asks for a separate',
+      );
+      console.error(
+        '  Admin token rather than reading the stored one; if you called this',
+      );
+      console.error('  script directly, pass an Admin-scoped R2_ACCESS_KEY_ID instead.');
+      process.exit(1);
+    }
+    throw error;
+  }
 
   // Read it back rather than trusting the PUT returned 200 — the same
   // round-trip-not-just-a-status-code discipline verify-r2.mjs uses for the

@@ -872,6 +872,39 @@ Only `PUT` is allowed, and only the `content-type` header — the one thing
 script's `ALLOWED_HEADERS` needs the same header added, or uploads start
 failing preflight again.
 
+### It asks for a separate token, on purpose
+
+`PutBucketCors` is a bucket-*configuration* operation. The credential
+production runs with (`agnte-r2-access-key-id`) is scoped **Object Read &
+Write** (§2b) — enough to put and get objects, nothing more — and R2 answers
+a config change from it with `AccessDenied`, not silently. This script does
+not fall back to a wider stored credential to work around that; it prompts
+for a separate **Admin**-scoped token instead (R2 → Manage API tokens →
+Create token → Admin Read & Write, scoped to this bucket if the dashboard
+offers "Apply to specific buckets only"), used once for this run and never
+written to Secret Manager or anywhere on disk. Revoke it afterward if you
+like — this is not something that needs changing often.
+
+If you'd rather not create a token at all, the dashboard does this directly:
+R2 → `agnte-media` → Settings → CORS Policy → Add CORS policy, pasting
+
+```json
+[
+  {
+    "AllowedOrigins": ["<production URL>", "https://*---<preview service URL, no https://>"],
+    "AllowedMethods": ["PUT"],
+    "AllowedHeaders": ["content-type"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+with the same two origins the script would have read from Cloud Run. Nothing
+byte-exact to get wrong here the way §2f's `redirect_uri` is, since these are
+whole origins pasted as-is rather than typed — the risk this script mainly
+guards against is forgetting the preview origin, or the `*---` wildcard
+placement, not a typo inside one.
+
 ### What this does not fix on its own
 
 Once the browser's preflight succeeds, the PUT itself can still fail on a
