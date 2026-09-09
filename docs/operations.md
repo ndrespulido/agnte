@@ -950,8 +950,13 @@ under the same account the GCP project uses.
 
 ### 2. Create the mapping
 
+`domain-mappings` with `--region` only exists in the `beta` command track —
+the stable `gcloud run` surface rejects `--region` outright and names the
+fix in its own error message. `gcloud` prompts to install the `beta`
+component automatically the first time it's needed if it isn't already.
+
 ```bash
-gcloud run domain-mappings create \
+gcloud beta run domain-mappings create \
   --service=agnte \
   --domain=agnte.app \
   --region=europe-west3 \
@@ -976,7 +981,7 @@ a few minutes to a few hours, and Cloudflare's proxy sitting in front before
 that finishes can interfere with provisioning. Check progress with:
 
 ```bash
-gcloud run domain-mappings describe --domain=agnte.app \
+gcloud beta run domain-mappings describe --domain=agnte.app \
   --region=europe-west3 --project=agnte-prod
 ```
 
