@@ -123,7 +123,9 @@ jobs:
             APP_BASE_URL=""
           fi
 
-          TAG="${TAG}" APP_BASE_URL="${APP_BASE_URL}" python3 - > /tmp/preview-env.yaml <<'PY'
+          TAG="${TAG}" APP_BASE_URL="${APP_BASE_URL}" \
+          GCP_PROJECT_ID="${{ vars.GCP_PROJECT_ID }}" GCP_REGION="${{ vars.GCP_REGION }}" \
+          python3 - > /tmp/preview-env.yaml <<'PY'
           import json, os
           values = {
               "APP_ENV": "preview",
@@ -132,6 +134,13 @@ jobs:
               "NEON_BRANCH": os.environ["BRANCH_NAME"],
               "R2_PREFIX": os.environ["TAG"] + "/",
               "DATABASE_URL": os.environ["DATABASE_URL"],
+              # Set unconditionally, which is inert on their own: getDeferredJobs()
+              # needs the project, the region, a base URL *and* the shared secret
+              # before it will build a queue, and the secret is mounted below only
+              # if it exists. Two identifiers in the environment of a preview that
+              # has no secret configure nothing.
+              "GCP_PROJECT_ID": os.environ["GCP_PROJECT_ID"],
+              "GCP_REGION": os.environ["GCP_REGION"],
           }
           # Omitted rather than sent empty: the config schema validates this as
           # a URL, and "" would fail the parse and take the whole app down.
@@ -167,6 +176,24 @@ jobs:
             echo "::warning::agnte-jwt-secret-preview is not set — sign-in will" \
               "report as not-configured on this preview. Create it with" \
               "./infra/set-secrets.sh. Production's key is never used here."
+          fi
+
+          # And their own internal task callback secret, for the same reason
+          # and with the same refusal to fall back: this one authenticates
+          # callbacks to /internal/*, which Cloud Run cannot gate with IAM
+          # because previews must open without a Google account. A preview
+          # holding production's secret could drive production's internal
+          # routes.
+          #
+          # The queue itself is shared with production. That is safe because a
+          # task carries its own callback URL and its own bearer token, so a
+          # preview's task reaches the preview and is rejected anywhere else.
+          if gcloud secrets describe agnte-internal-tasks-secret-preview >/dev/null 2>&1; then
+            SECRETS="${SECRETS},INTERNAL_TASKS_SECRET=agnte-internal-tasks-secret-preview:latest"
+          else
+            echo "::warning::agnte-internal-tasks-secret-preview is not set —" \
+              "uploads will succeed on this preview but thumbnails will not" \
+              "generate. Create it with ./infra/set-secrets.sh."
           fi
 
           FLAGS=(

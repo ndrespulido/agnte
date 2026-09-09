@@ -12,6 +12,7 @@ export const VerseErrorCode = {
   TagShortcutInvalid: 'verse.tag_shortcut_invalid',
   TagShortcutTaken: 'verse.tag_shortcut_taken',
   TagNotFound: 'verse.tag_not_found',
+  MediaNotFound: 'verse.media_not_found',
   TagAlreadyExists: 'verse.tag_already_exists',
   VerseNotFound: 'verse.not_found',
   VisibilityInvalid: 'verse.visibility_invalid',
@@ -51,6 +52,15 @@ export const tagShortcutTaken = (shortcut: string): DomainError =>
 
 export const tagNotFound = (): DomainError =>
   new DomainError(VerseErrorCode.TagNotFound, 'That tag does not exist.');
+
+/**
+ * Deliberately worded like `tagNotFound()`: whether a mediaId is unknown or
+ * belongs to someone else, the caller learns nothing that distinguishes
+ * those cases — the same enumeration-avoidance rule as everywhere else in
+ * this module.
+ */
+export const mediaNotFound = (): DomainError =>
+  new DomainError(VerseErrorCode.MediaNotFound, 'That media does not exist.');
 
 export const tagAlreadyExists = (name: string): DomainError =>
   new DomainError(VerseErrorCode.TagAlreadyExists, `You already have a tag .${name}.`, {

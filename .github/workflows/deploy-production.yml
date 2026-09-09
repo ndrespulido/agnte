@@ -137,6 +137,22 @@ jobs:
             echo "::warning::No JWT signing key; sign-in will answer 503. Run ./infra/set-secrets.sh"
           fi
 
+          # Deferred work (architecture.md §1.3): Cloud Tasks calls back into
+          # /internal/* once this request has returned, because Cloud Run may
+          # kill the container the moment it does.
+          #
+          # Same conditional mount as above. Without the secret the queue is
+          # simply not configured, and confirming an upload still succeeds —
+          # a thumbnail that never generates is a missing convenience, not a
+          # broken upload (shared/infra/deferred-jobs.ts). The photo itself is
+          # already safely in R2 by then.
+          if gcloud secrets describe agnte-internal-tasks-secret >/dev/null 2>&1; then
+            SECRETS="${SECRETS},INTERNAL_TASKS_SECRET=agnte-internal-tasks-secret:latest"
+            ENV_VARS="${ENV_VARS},GCP_PROJECT_ID=${{ vars.GCP_PROJECT_ID }},GCP_REGION=${{ vars.GCP_REGION }}"
+          else
+            echo "::warning::No internal tasks secret; thumbnails will not generate. Run ./infra/set-secrets.sh"
+          fi
+
           # Production only. Google will not accept a wildcard redirect URI, so
           # a preview's per-pull-request URL cannot be registered in advance —
           # previews use the email and password path and report Google sign-in

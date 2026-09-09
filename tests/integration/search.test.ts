@@ -2,7 +2,10 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { getDatabase } from '@/shared/infra/database';
 import { resetConfigForTests } from '@/shared/infra/config';
 import { resetEmailTransportForTests } from '@/shared/infra/email';
+import { systemClock } from '@/shared/kernel';
 import { handleLogin, handleRegister, handleVerifyEmail } from '@/modules/identity';
+import { createPendingMedia } from '@/modules/media/domain/media';
+import { PrismaMediaRepository } from '@/modules/media/infrastructure/prisma-media-repository';
 import {
   handleCreateTag,
   handleCreateVerse,
@@ -53,6 +56,7 @@ describe.skipIf(!DATABASE_URL)('search', () => {
     const db = getDatabase()!;
     await db.$executeRawUnsafe('DELETE FROM verse.verse');
     await db.$executeRawUnsafe('DELETE FROM verse.tag');
+    await db.$executeRawUnsafe('DELETE FROM media.media');
     await db.$executeRawUnsafe('DELETE FROM identity.refresh_token');
     await db.$executeRawUnsafe('DELETE FROM identity.pending_registration');
     await db.$executeRawUnsafe('DELETE FROM identity."user"');
@@ -277,9 +281,25 @@ describe.skipIf(!DATABASE_URL)('search', () => {
   });
 
   describe('filters', () => {
-    const setup = async (token: string) => {
+    // Search's write-side validation (write-verse.ts's assertOwnedMedia) now
+    // refuses a mediaId that is not a real, owned Media row, so this needs an
+    // actual one rather than a made-up uuid — created directly through the
+    // repository, the same way tests/integration/media-repository.test.ts
+    // does, rather than a full request-upload/confirm round trip this filter
+    // test has no other reason to exercise.
+    const media = new PrismaMediaRepository();
+
+    const setup = async (token: string, ownerId: string) => {
       const trip = await makeTag(token, 'trip');
       const food = await makeTag(token, 'food');
+
+      const attached = createPendingMedia({
+        ownerId,
+        contentType: 'image/jpeg',
+        declaredSizeBytes: 400_000,
+        clock: systemClock,
+      });
+      await media.create(attached);
 
       await makeVerse(token, {
         tagIds: [trip.id],
@@ -292,15 +312,15 @@ describe.skipIf(!DATABASE_URL)('search', () => {
         xp: 'paella by the sea',
         rating: 9,
         eventStart: '2025-06-01T00:00:00Z',
-        mediaIds: ['0195e2c0-0000-7000-8000-00000000aaaa'],
+        mediaIds: [attached.id],
       });
 
       return { trip, food };
     };
 
     it('filters by rating', async () => {
-      const { token } = await signUp('k@example.com');
-      await setup(token);
+      const { token, userId } = await signUp('k@example.com');
+      await setup(token, userId);
 
       expect((await search(token, '?q=paella')).body.verses).toHaveLength(2);
       expect(
@@ -309,8 +329,8 @@ describe.skipIf(!DATABASE_URL)('search', () => {
     });
 
     it('filters by date range', async () => {
-      const { token } = await signUp('l@example.com');
-      await setup(token);
+      const { token, userId } = await signUp('l@example.com');
+      await setup(token, userId);
 
       const { body } = await search(token, '?q=paella&from=2025-01-01T00:00:00Z');
       expect(body.verses.map((v) => v.xp)).toEqual(['paella by the sea']);
@@ -320,8 +340,8 @@ describe.skipIf(!DATABASE_URL)('search', () => {
     });
 
     it('filters by has-media, both ways', async () => {
-      const { token } = await signUp('m@example.com');
-      await setup(token);
+      const { token, userId } = await signUp('m@example.com');
+      await setup(token, userId);
 
       expect(
         (await search(token, '?q=paella&hasMedia=true')).body.verses.map((v) => v.xp),
@@ -334,8 +354,8 @@ describe.skipIf(!DATABASE_URL)('search', () => {
     });
 
     it('filters by tag, and by all tags together', async () => {
-      const { token } = await signUp('n@example.com');
-      const { trip, food } = await setup(token);
+      const { token, userId } = await signUp('n@example.com');
+      const { trip, food } = await setup(token, userId);
 
       expect((await search(token, `?q=paella&tag=${trip.id}`)).body.verses).toHaveLength(
         2,

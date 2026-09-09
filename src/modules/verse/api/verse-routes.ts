@@ -2,8 +2,9 @@ import { z } from 'zod';
 import { DomainError, systemClock } from '@/shared/kernel';
 import { consume } from '@/shared/infra/rate-limit';
 import { jsonError, rateLimitHeaders, tooManyRequests } from '@/shared/infra/http';
+import { idempotently } from '@/shared/infra/idempotent-write';
 import { authenticate } from '@/modules/identity';
-import { idempotently } from './idempotent';
+import { MediaModuleAdapter } from '../infrastructure/media-adapter';
 import { PrismaTagRepository } from '../infrastructure/prisma-tag-repository';
 import { PrismaVerseRepository } from '../infrastructure/prisma-verse-repository';
 import { PrismaShareRepository } from '../infrastructure/prisma-share-repository';
@@ -59,6 +60,7 @@ const statusFor = (code: string): number => {
     case VerseErrorCode.Forbidden:
     case VerseErrorCode.VerseNotFound:
     case VerseErrorCode.TagNotFound:
+    case VerseErrorCode.MediaNotFound:
       return 404;
     case VerseErrorCode.VersionConflict:
       return 409;
@@ -75,6 +77,7 @@ const deps = () => ({
   verses: new PrismaVerseRepository(),
   tags: new PrismaTagRepository(),
   shares: new PrismaShareRepository(),
+  media: new MediaModuleAdapter(),
   clock: systemClock,
 });
 
@@ -199,7 +202,11 @@ export async function handleTimeline(request: Request): Promise<Response> {
       ...(tagIds.length > 0 ? { tagIds } : {}),
       matchAllTags: params.get('match') === 'all',
     },
-    { verses: new PrismaVerseRepository(), shares: new PrismaShareRepository() },
+    {
+      verses: new PrismaVerseRepository(),
+      shares: new PrismaShareRepository(),
+      media: new MediaModuleAdapter(),
+    },
   );
 
   if (!result.ok) {

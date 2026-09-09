@@ -297,6 +297,55 @@ a {
   margin: 0;
 }
 
+/**
+ * A verse's photos: a single row that scrolls sideways rather than a grid
+ * that reflows. A timeline row has to keep its height predictable — the
+ * sticky date header tracks section positions with an IntersectionObserver,
+ * and a row that grows a second line of thumbnails as the viewport narrows
+ * moves every section below it.
+ */
+.verse-media {
+  list-style: none;
+  margin: 0 0 var(--space-sm);
+  padding: 0;
+  display: flex;
+  gap: var(--space-sm);
+  overflow-x: auto;
+  /* The row is the scroll container, so the page itself never scrolls
+     sideways however many photos a verse carries. */
+  scrollbar-width: none;
+}
+
+.verse-media::-webkit-scrollbar {
+  display: none;
+}
+
+.verse-media li {
+  flex: 0 0 auto;
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--color-paper-raised);
+  border: var(--hairline) solid var(--color-rule);
+}
+
+.verse-media img {
+  width: 100%;
+  height: 100%;
+  /* Cover rather than contain: a thumbnail strip reads as a strip when the
+     tiles are the same shape, and the medium variant is what a detail view
+     will show uncropped. */
+  object-fit: cover;
+  display: block;
+}
+
+/* Uploaded, not yet thumbnailed. Left as an empty tile so the row does not
+   change width when the variant arrives. */
+.verse-media li.pending {
+  background: var(--color-paper-raised);
+}
+
 .verse-tags {
   margin: 0;
   display: flex;
@@ -434,6 +483,109 @@ a {
 .tag-picker .tag.chosen {
   border-color: var(--color-accent-text);
   background: var(--color-paper);
+}
+
+/* The picked photos in the add sheet, before they are a verse. */
+.picked-images {
+  list-style: none;
+  margin: 0 0 var(--space-sm);
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.picked-images li {
+  position: relative;
+  width: 5rem;
+  height: 5rem;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: var(--hairline) solid var(--color-rule);
+}
+
+.picked-images img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Dimmed while the bytes are still going up, so "Uploading…" on the save
+   button has something on screen that explains which photo it means. */
+.picked-images li[data-status='working'] img {
+  opacity: 0.55;
+}
+
+.picked-images li[data-status='failed'] img {
+  opacity: 0.35;
+}
+
+.picked-images .remove {
+  position: absolute;
+  top: var(--space-xxs);
+  right: var(--space-xxs);
+  width: 1.5rem;
+  height: 1.5rem;
+  border: none;
+  border-radius: var(--radius-pill);
+  /* Its own dark chip rather than a token colour: this sits on top of an
+     arbitrary photo, where neither palette is guaranteed to have contrast. */
+  background: rgba(20, 20, 22, 0.66);
+  color: #fff;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.picked-images .badge {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: var(--space-xxs);
+  background: rgba(20, 20, 22, 0.66);
+  color: #fff;
+  font-size: var(--text-micro);
+  text-align: center;
+}
+
+.picked-images .badge.failed {
+  background: rgba(140, 30, 30, 0.8);
+}
+
+/**
+ * The file input, dressed as one of the sheet's own controls.
+ *
+ * The input itself is moved off-screen rather than `display: none` — a
+ * display-none input is skipped by keyboard focus, which would leave no way
+ * to reach the picker without a pointer. Focus lands on it invisibly and the
+ * label's ring is what shows.
+ */
+.file-picker {
+  align-self: flex-start;
+  border: var(--hairline) solid var(--color-rule);
+  border-radius: var(--radius-pill);
+  padding: var(--space-xs) var(--space-md);
+  min-height: var(--size-min-tap-target);
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--color-accent-text);
+  font-size: var(--text-body);
+}
+
+.file-picker input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.file-picker:focus-within {
+  border-color: var(--color-accent-text);
+  outline: var(--hairline) solid var(--color-accent-text);
 }
 
 .sheet-actions {

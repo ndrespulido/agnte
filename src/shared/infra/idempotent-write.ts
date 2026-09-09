@@ -1,26 +1,24 @@
 import { DomainError, systemClock } from '@/shared/kernel';
-import {
-  claim,
-  complete,
-  fingerprint,
-  release,
-  scopeFor,
-} from '@/shared/infra/idempotency';
-import { jsonError } from '@/shared/infra/http';
+import { claim, complete, fingerprint, release, scopeFor } from './idempotency';
+import { jsonError } from './http';
 
 /**
  * The Idempotency-Key dance, once (architecture.md §6).
  *
  * Every write endpoint needs the same five-branch handling — proceed, replay,
- * in-progress, mismatch, and releasing the claim when the work throws — and
- * identity spells it out inline in each route. Repeating that across the
- * verse module's writes would be four more chances to get the *release* branch
- * wrong, which is the one that matters: a claim left behind after a crash makes
- * every retry answer "in progress" forever.
+ * in-progress, mismatch, and releasing the claim when the work throws.
+ * Repeating that across every module's writes (it started as verse-only, then
+ * media needed the exact same five branches for its own writes) would be one
+ * more chance per call site to get the *release* branch wrong, which is the
+ * one that matters: a claim left behind after a crash makes every retry
+ * answer "in progress" forever. identity's writes still spell the primitives
+ * out inline rather than through this — see `shared/infra/idempotency.ts` —
+ * which is fine; this wrapper is a convenience over those primitives, not a
+ * replacement for them.
  *
  * The handler returns a status and a body rather than a Response so this can
- * store what it needs to replay. A Response's body is a stream that can only be
- * read once, so recording it would consume it.
+ * store what it needs to replay. A Response's body is a stream that can only
+ * be read once, so recording it would consume it.
  */
 export interface IdempotentResult {
   status: number;

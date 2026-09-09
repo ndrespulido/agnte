@@ -1,6 +1,14 @@
 import { type DomainError, type Result, err, ok } from '@/shared/kernel';
-import type { ShareRepository, VerseRepository, VisibleVerse } from '../domain/ports';
+import type {
+  MediaResolver,
+  ShareRepository,
+  VerseMedia,
+  VerseRepository,
+  VisibleVerse,
+} from '../domain/ports';
+import type { Tag } from '../domain/tag';
 import type { Verse } from '../domain/verse';
+import type { Visibility } from '../domain/visibility';
 import { canRead, resolveVisibility } from '../domain/visibility';
 import { forbidden } from '../domain/errors';
 
@@ -15,11 +23,19 @@ import { forbidden } from '../domain/errors';
  * The two functions differ only in how many rows they load at once — the
  * decision itself is `resolveVisibility` + `canRead` in both cases, never a
  * predicate written here.
+ *
+ * Media is resolved *after* `canRead` succeeds, and always with the verse's
+ * own `ownerId` — never the viewer's, including when they are the same
+ * person. Media has no visibility concept of its own (CLAUDE.md's Visibility
+ * section); it trusts that by the time this call is made, the only question
+ * left is "what does this owner's media look like", which is true precisely
+ * because everything above this line already decided the viewer may ask it.
  */
 
 export interface ReadDeps {
   verses: VerseRepository;
   shares: ShareRepository;
+  media: MediaResolver;
 }
 
 /**
@@ -56,7 +72,9 @@ export async function visible(
     return err(forbidden());
   }
 
-  return ok({ verse, tags, effectiveVisibility: effective });
+  const media = await deps.media.resolveForVerse(verse.ownerId, verse.mediaIds);
+
+  return ok({ verse, tags, media, effectiveVisibility: effective });
 }
 
 /**
@@ -100,7 +118,7 @@ export async function visibleMany(
       ? await deps.shares.viewerSharesFor(needShare, viewerId)
       : new Set<string>();
 
-  return resolved.filter((r) =>
+  const readable = resolved.filter((r) =>
     canRead({
       ownerId: r.verse.ownerId,
       viewerId,
@@ -108,4 +126,51 @@ export async function visibleMany(
       viewerHasShare: shared.has(r.verse.id),
     }),
   );
+
+  return attachMedia(readable, deps);
+}
+
+/**
+ * Batches the media resolution by owner rather than one call per verse — a
+ * page from one timeline is always one owner in practice (`TimelineQuery`
+ * and `SearchQuery` are both scoped to a single `ownerId`), but grouping
+ * here rather than trusting that keeps this correct even if a future caller
+ * ever mixes owners in one `visibleMany` call. A verse with no media never
+ * reaches `deps.media.resolveForVerse` at all — the common case, since a
+ * Verse can be minimal (CLAUDE.md) — so an ordinary timeline page with few
+ * photos costs one such call, not one per row.
+ */
+async function attachMedia(
+  rows: readonly {
+    verse: Verse;
+    tags: readonly Tag[];
+    effectiveVisibility: Visibility;
+  }[],
+  deps: ReadDeps,
+): Promise<VisibleVerse[]> {
+  const idsByOwner = new Map<string, Set<string>>();
+  for (const row of rows) {
+    if (row.verse.mediaIds.length === 0) continue;
+    const ids = idsByOwner.get(row.verse.ownerId) ?? new Set<string>();
+    for (const id of row.verse.mediaIds) ids.add(id);
+    idsByOwner.set(row.verse.ownerId, ids);
+  }
+
+  const mediaByOwner = new Map<string, Map<string, VerseMedia>>();
+  await Promise.all(
+    [...idsByOwner].map(async ([ownerId, ids]) => {
+      const found = await deps.media.resolveForVerse(ownerId, [...ids]);
+      mediaByOwner.set(ownerId, new Map(found.map((m) => [m.id, m])));
+    }),
+  );
+
+  return rows.map((row) => {
+    const byId = mediaByOwner.get(row.verse.ownerId);
+    const media = byId
+      ? row.verse.mediaIds
+          .map((id) => byId.get(id))
+          .filter((m): m is VerseMedia => m !== undefined)
+      : [];
+    return { ...row, media };
+  });
 }

@@ -11,6 +11,21 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
 
   /**
+   * `@google-cloud/tasks` is required at runtime rather than bundled.
+   *
+   * It reaches protobuf definitions through dynamic requires that a bundler
+   * cannot follow, and the failure is not subtle: the module throws "Cannot
+   * find module as expression is too dynamic" at *import* time, which takes
+   * down every route that transitively imports the media module — the whole
+   * timeline, not just the deferred-jobs path that actually needs Cloud Tasks.
+   *
+   * `sharp` needs no entry here: Next already ships it in the default
+   * opt-out list (see next/dist/docs .../serverExternalPackages.md). This
+   * package is not on that list.
+   */
+  serverExternalPackages: ['@google-cloud/tasks'],
+
+  /**
    * The app moved from /timeline to the root, and the status page from the root
    * to /status.
    *

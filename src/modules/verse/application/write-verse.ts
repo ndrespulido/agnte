@@ -1,5 +1,10 @@
 import { type Clock, type DomainError, type Result, err, ok } from '@/shared/kernel';
-import type { ShareRepository, TagRepository, VerseRepository } from '../domain/ports';
+import type {
+  MediaOwnership,
+  ShareRepository,
+  TagRepository,
+  VerseRepository,
+} from '../domain/ports';
 import {
   applyChanges,
   createVerse,
@@ -16,6 +21,7 @@ import { isVisibility, type Visibility } from '../domain/visibility';
 import {
   dateInvalid,
   forbidden,
+  mediaNotFound,
   noTags,
   tagNotFound,
   versionConflict,
@@ -26,7 +32,28 @@ export interface WriteDeps {
   verses: VerseRepository;
   tags: TagRepository;
   shares: ShareRepository;
+  media: MediaOwnership;
   clock: Clock;
+}
+
+/**
+ * Refuses a mediaId list containing anything the owner does not hold.
+ *
+ * Mirrors the tag-ownership check just above each call site: a request
+ * naming someone else's media must not be silently accepted onto this
+ * verse, since the verse's read path (`application/read-verse.ts`) would
+ * later resolve it into a real, working signed URL using this verse's own
+ * owner id — the exact leak CLAUDE.md's Visibility section warns a single
+ * mis-tag must not cause.
+ */
+async function assertOwnedMedia(
+  ownerId: string,
+  mediaIds: readonly string[],
+  deps: Pick<WriteDeps, 'media'>,
+): Promise<DomainError | null> {
+  if (mediaIds.length === 0) return null;
+  const owned = await deps.media.ownedMediaIds(ownerId, mediaIds);
+  return owned.size === new Set(mediaIds).size ? null : mediaNotFound();
 }
 
 /**
@@ -165,6 +192,9 @@ export async function createVerseFor(
   const owned = await deps.tags.findManyByIds(input.ownerId, input.tagIds);
   if (owned.length !== new Set(input.tagIds).size) return err(tagNotFound());
 
+  const mediaError = await assertOwnedMedia(input.ownerId, input.mediaIds ?? [], deps);
+  if (mediaError) return err(mediaError);
+
   const parsed = parseFields(input);
   if (!parsed.ok) return parsed;
 
@@ -203,6 +233,11 @@ export async function updateVerseFor(
     if (input.tagIds.length === 0) return err(noTags());
     const owned = await deps.tags.findManyByIds(input.ownerId, input.tagIds);
     if (owned.length !== new Set(input.tagIds).size) return err(tagNotFound());
+  }
+
+  if (input.mediaIds !== undefined) {
+    const mediaError = await assertOwnedMedia(input.ownerId, input.mediaIds, deps);
+    if (mediaError) return err(mediaError);
   }
 
   const parsed = parseFields(input);

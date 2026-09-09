@@ -2,6 +2,7 @@ import { DomainError } from '@/shared/kernel';
 import { consume } from '@/shared/infra/rate-limit';
 import { jsonError, rateLimitHeaders, tooManyRequests } from '@/shared/infra/http';
 import { authenticate } from '@/modules/identity';
+import { MediaModuleAdapter } from '../infrastructure/media-adapter';
 import { PrismaVerseRepository } from '../infrastructure/prisma-verse-repository';
 import { PrismaShareRepository } from '../infrastructure/prisma-share-repository';
 import {
@@ -79,7 +80,11 @@ export async function handleSearch(request: Request): Promise<Response> {
       to,
       hasMedia,
     },
-    { verses: new PrismaVerseRepository(), shares: new PrismaShareRepository() },
+    {
+      verses: new PrismaVerseRepository(),
+      shares: new PrismaShareRepository(),
+      media: new MediaModuleAdapter(),
+    },
   );
 
   if (!result.ok) {

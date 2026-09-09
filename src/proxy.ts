@@ -26,9 +26,41 @@ import { NextResponse, type NextRequest } from 'next/server';
  * be statically cached without revisiting this.
  * ---------------------------------------------------------------------------
  */
+/**
+ * The origin a presigned media URL points at, or null when there is none.
+ *
+ * In a deployed environment the browser talks to object storage directly —
+ * a PUT to a presigned URL on upload (`connect-src`), and an <img> at a
+ * presigned URL for every thumbnail (`img-src`). Both are cross-origin, so
+ * both have to be named here or the CSP blocks the whole media feature.
+ *
+ * Locally there is no such origin: `LocalMediaBlobStore` hands out
+ * `/dev/media/...`, which `'self'` already covers.
+ *
+ * Read straight from the environment rather than through `loadConfig()`:
+ * this runs on every document request, and pulling the whole zod schema into
+ * the proxy bundle to read one optional string is a poor trade. The value is
+ * not trusted either way — it is parsed as a URL and only its origin is
+ * used, so a malformed or attacker-supplied value yields null rather than
+ * splicing text into the policy.
+ */
+function mediaOrigin(): string | null {
+  const endpoint = process.env.R2_ENDPOINT;
+  if (!endpoint) return null;
+
+  try {
+    const { origin, protocol } = new URL(endpoint);
+    return protocol === 'https:' || protocol === 'http:' ? origin : null;
+  } catch {
+    return null;
+  }
+}
+
 export function proxy(request: NextRequest): NextResponse {
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
   const isDev = process.env.NODE_ENV === 'development';
+  const media = mediaOrigin();
+  const withMedia = (directive: string) => (media ? `${directive} ${media}` : directive);
 
   const policy = [
     "default-src 'self'",
@@ -48,17 +80,18 @@ export function proxy(request: NextRequest): NextResponse {
     // mean developing against an unstyled page.
     `style-src 'self' ${isDev ? "'unsafe-inline'" : `'nonce-${nonce}'`}`,
 
-    // data: for the SVG icon and any inlined asset; blob: for images the
-    // browser builds locally, which the planned client-side downscale before
-    // upload (§8.3) will produce.
-    "img-src 'self' blob: data:",
+    // data: for the SVG icon and any inlined asset; blob: for the images the
+    // browser builds locally, which the client-side downscale before upload
+    // (§8.3) produces as previews in the add sheet. The media origin is where
+    // thumbnails actually load from once deployed.
+    withMedia("img-src 'self' blob: data:"),
 
     "font-src 'self'",
 
-    // The app talks only to its own API. When media lands, R2 or the Cloudflare
-    // hostname in front of it has to be added here — and the failure will be
-    // loud rather than silent, which is the point of listing it.
-    "connect-src 'self'",
+    // The app talks to its own API, and — for the presigned upload only —
+    // straight to object storage. Bytes deliberately do not pass through the
+    // app server (§8.3), so this is the one cross-origin request it makes.
+    withMedia("connect-src 'self'"),
 
     "object-src 'none'",
     "base-uri 'self'",
