@@ -499,3 +499,77 @@ model VerseShare {
   @@map("verse_share")
   @@schema("verse")
 }
+
+/// An uploaded photo (architecture.md §8.3).
+///
+/// `ownerId` is a plain UUID, not a foreign key into identity.user — the same
+/// rule as `Tag.ownerId` and `Verse.ownerId`, and for the same reason: no
+/// cross-schema foreign keys, so a module reads another module's data through
+/// its public API rather than a join (§1.1).
+///
+/// The row exists before the bytes do. `requestUpload` creates it in
+/// `pending` the moment a client asks for a place to put a file, because the
+/// client needs the id immediately to attach it to a Verse composed offline
+/// (§8.1) — the same reason Verse ids are minted client-side rather than on
+/// save.
+model Media {
+  /// Client-generated UUIDv7 (§2).
+  id String @id @db.Uuid
+
+  ownerId String @map("owner_id") @db.Uuid
+
+  /// pending -> processing -> ready, or -> failed from either of the middle
+  /// two. A string with a CHECK rather than an enum, so the constraint sits
+  /// next to the others in the migration; the transition rule itself lives in
+  /// the domain (modules/media/domain/media.ts), not here — a CHECK can only
+  /// constrain a single row's value, not which value it may move *from*.
+  status String @default("pending")
+
+  /// One of the three canvas.toBlob outputs — see domain/media.ts for why
+  /// nothing else is accepted.
+  contentType String @map("content_type")
+
+  /// Declared by the client when requesting the upload URL; verified against
+  /// what actually landed in storage when the upload is confirmed.
+  declaredSizeBytes Int @map("declared_size_bytes")
+
+  /// Where the original lives in object storage. Never returned in an API
+  /// response — a caller gets a short-lived signed URL instead (§8.3).
+  storageKey String @unique @map("storage_key")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  /// Optimistic concurrency (§2).
+  version Int @default(0)
+
+  variants MediaVariant[]
+
+  @@index([ownerId])
+  @@map("media")
+  @@schema("media")
+}
+
+/// A derived size of a Media original: `thumb` (256px) or `medium` (1024px),
+/// exactly the two §8.3 names. Generated once by the thumbnail worker and
+/// never rewritten in place — see domain/variant.ts for why a variant that
+/// needed changing gets a new Media row instead.
+model MediaVariant {
+  mediaId String @map("media_id") @db.Uuid
+
+  /// thumb | medium.
+  kind String
+
+  storageKey String @map("storage_key")
+  width      Int
+  height     Int
+  sizeBytes  Int    @map("size_bytes")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  media Media @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@id([mediaId, kind])
+  @@map("media_variant")
+  @@schema("media")
+}
