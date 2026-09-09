@@ -36,6 +36,18 @@ export interface MediaRepository {
 
   /** The timeline's N+1 guard, same shape as verse's `tagsOfMany`. */
   variantsForMany(mediaIds: readonly string[]): Promise<Map<string, MediaVariant[]>>;
+
+  /**
+   * `pending` rows created before a cutoff — uploads nobody ever confirmed.
+   *
+   * Returns the rows rather than deleting them, because their storage keys
+   * are needed to clean up the bytes and the row is the only record of where
+   * those live.
+   */
+  findAbandonedPending(before: Date): Promise<Media[]>;
+
+  /** Unconditional, unlike `delete`: the pruner has no version to check. */
+  deleteMany(ids: readonly string[]): Promise<number>;
 }
 
 /**

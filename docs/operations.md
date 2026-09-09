@@ -26,6 +26,7 @@ Everything below is a one-time setup step. Per-deploy infrastructure lives in
 | Backups | Cloud Run Job + nightly schedule → R2 | 1.8 | ☐ |
 | Cloud Tasks | Thumbnail queue + enqueuer role (in the GCP bootstrap) | 4.9 | ☐ |
 | Task callback secret | Shared secret for `/internal/*` (by set-secrets.sh) | 4.9 | ☐ |
+| Retention sweep | Daily Cloud Scheduler job → `/internal/prune` | 4.10 | ☐ |
 
 CI runs the database-backed tests against a throwaway Postgres container (added
 in 1.5) rather than a Neon branch — every push would otherwise spend one, and
@@ -759,6 +760,68 @@ metadata.
 That also means uploads are a single `PUT` of a few hundred KB, not multipart.
 The "abort incomplete multipart uploads" lifecycle rule suggested in §3b is
 still worth having as a guard, but nothing here creates multipart uploads.
+
+---
+
+## 2i. The retention sweep (task 4.10)
+
+```bash
+PROJECT_ID=agnte-prod ./infra/deploy-prune-schedule.sh
+```
+
+Run it after the service has been deployed at least once — the scheduler needs
+a URL to call. Safe to re-run; the schedule is updated in place.
+
+Seven pruners existed and were tested from Phase 1 onwards and **not one of
+them had a caller**, which several said so in their own doc comments. Rows
+accumulated in seven tables: idempotency keys, rate-limit windows, refresh
+tokens, password reset tokens, pending registrations, OAuth handoff codes, and
+abandoned uploads. This schedules the sweep that clears them, daily at 04:40
+UTC — off the hour and off the backup's 03:17, so the two never contend for
+the same free-tier database.
+
+Two of those matter more than tidiness. A pending registration holds an Argon2
+hash of a password someone typed, and an abandoned upload holds an object in
+R2 that nothing will ever point at again — the only entry on this list that
+costs money to keep.
+
+### Running it now, and reading the result
+
+```bash
+gcloud scheduler jobs run agnte-prune-daily --location=europe-west3 --project=agnte-prod
+gcloud run services logs read agnte --region=europe-west3 --project=agnte-prod | grep internal/prune
+```
+
+The route answers with what it deleted, per table, so a run is legible rather
+than a bare 200:
+
+```json
+{"swept":{"idempotencyKeys":0,"rateLimitWindows":0,"refreshTokens":2,
+          "passwordResetTokens":0,"pendingRegistrations":1,"oauthHandoffs":0,
+          "abandonedUploads":1},"at":"..."}
+```
+
+### It authenticates with the shared secret, not OIDC
+
+Scheduler → Cloud Run would normally use an OIDC token. This service runs
+`--allow-unauthenticated` so a preview opens without a Google account, which
+means Cloud Run's IAM cannot gate `/internal/*` and an OIDC token would have to
+be verified in application code that deliberately does not exist (§2h).
+
+**So rotating `agnte-internal-tasks-secret` means re-running this script**, or
+the daily sweep starts answering 401. Nothing else breaks and nothing is lost:
+the sweep is idempotent, so the next successful run clears whatever the failed
+ones did not.
+
+### Locally
+
+There is no scheduler and nothing needs one — nothing accumulates meaningfully
+on a development machine. The route is there to be called by hand when it does
+(§7.1's "manual trigger route"):
+
+```bash
+curl -X POST localhost:3000/internal/prune -H "authorization: Bearer $INTERNAL_TASKS_SECRET"
+```
 
 ---
 

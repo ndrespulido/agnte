@@ -29,6 +29,7 @@ export { isVerified } from './domain/user';
 export { prunePendingRegistrations } from './infrastructure/prisma-pending-registration-repository';
 export { pruneRefreshTokens } from './infrastructure/prisma-refresh-token-repository';
 export { prunePasswordResetTokens } from './infrastructure/prisma-password-reset-token-repository';
+export { pruneOAuthHandoffs } from './infrastructure/prisma-oauth-handoff-repository';
 
 /** Access-token verification, for the route guard that lands with /v1/me (1.7). */
 export {

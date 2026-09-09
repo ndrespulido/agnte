@@ -20,4 +20,5 @@ export {
   handleRequestUpload,
 } from './api/media-routes';
 export { ownedMediaIds, resolveMediaForVerse } from './application/verse-integration';
+export { prunePendingMedia } from './application/prune-media';
 export type { MediaSummaryForVerse } from './application/verse-integration';

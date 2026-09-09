@@ -68,3 +68,19 @@ export class PrismaOAuthHandoffRepository implements OAuthHandoffRepository {
     `;
   }
 }
+
+/**
+ * The scheduled sweep's entry point, matching the other identity pruners.
+ *
+ * A free function beside the class for the same reason they are: the sweep is
+ * not a repository operation on behalf of a use case, it is maintenance, and
+ * `/internal/prune` should not have to construct a repository to ask for it.
+ */
+export async function pruneOAuthHandoffs(now: Date): Promise<number> {
+  const db = getDatabase();
+  if (!db) return 0;
+
+  return db.$executeRaw`
+    DELETE FROM identity.oauth_handoff WHERE expires_at <= ${now}
+  `;
+}
