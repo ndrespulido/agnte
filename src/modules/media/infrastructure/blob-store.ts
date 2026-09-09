@@ -44,6 +44,17 @@ export function getMediaBlobStore(): MediaBlobStore | undefined {
       region: 'auto',
       endpoint: config.R2_ENDPOINT,
       forcePathStyle: true,
+      // The SDK's default ('WHEN_SUPPORTED') computes a CRC32 checksum for
+      // every PutObject and bakes it into the request. For a *presigned*
+      // PutObject that happens at presign-uses time, before the real body
+      // exists — so it signs the checksum of an empty buffer into the URL's
+      // query string as `x-amz-checksum-crc32`. The browser then PUTs the
+      // actual image bytes against that URL unchanged, R2 computes the real
+      // checksum, finds it does not match the one baked into the signed
+      // request, and rejects the upload. 'WHEN_REQUIRED' only attaches a
+      // checksum when a command explicitly asks for one (ChecksumAlgorithm),
+      // which presignUpload below never does.
+      requestChecksumCalculation: 'WHEN_REQUIRED',
       credentials: {
         accessKeyId: config.R2_ACCESS_KEY_ID,
         secretAccessKey: config.R2_SECRET_ACCESS_KEY,
