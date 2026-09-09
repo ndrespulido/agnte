@@ -1,6 +1,7 @@
 import type { Email } from './email';
 import type { RawPassword } from './password';
 import type { User } from './user';
+import type { OAuthHandoff } from './oauth-handoff';
 import type { PasswordResetToken } from './password-reset';
 import type { RefreshToken } from './session';
 import type { PendingRegistration } from './verification';
@@ -291,4 +292,25 @@ export interface OAuthAccountRepository {
 export interface OAuthStateSigner {
   issue(): Promise<string>;
   verify(state: string): Promise<boolean>;
+}
+
+export interface OAuthHandoffRepository {
+  issue(handoff: OAuthHandoff): Promise<void>;
+
+  /**
+   * Atomically claims a code, or answers null.
+   *
+   * Null covers unknown, expired and already-spent without distinguishing
+   * them, unlike `redeem` on the reset token above. Nobody reads this answer:
+   * the exchange is a machine call the client makes a second after the
+   * redirect, so there is no person to give a better message to — and telling
+   * a caller which of the three it was is only useful to someone probing.
+   *
+   * Atomic because two exchanges of one code must not both produce a session.
+   * A read-then-delete would let a replay race the original.
+   */
+  consume(codeHash: string, now: Date): Promise<OAuthHandoff | null>;
+
+  /** Expired codes nobody came back for. */
+  prune(now: Date): Promise<number>;
 }

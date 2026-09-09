@@ -1,7 +1,8 @@
 import { err, ok, type Clock, type DomainError, type Result } from '@/shared/kernel';
 import { parseEmail } from '../domain/email';
 import { invalidCredentials } from '../domain/errors';
-import { ACCESS_TOKEN_TTL_MS, startSession, type TokenPair } from '../domain/session';
+import type { TokenPair } from '../domain/session';
+import { issueSession } from './issue-session';
 import type {
   AccessTokenIssuer,
   PasswordHasher,
@@ -66,15 +67,5 @@ export async function login(
 
   // No verified check: an account only exists once its address is proven
   // (see PendingRegistration), so there are no unverified users to turn away.
-  const issued = deps.refreshTokens.issue();
-  await deps.sessions.start(
-    startSession({ tokenHash: issued.tokenHash, userId: user.id, clock: deps.clock }),
-  );
-
-  return ok({
-    accessToken: await deps.accessTokens.issue(user.id),
-    refreshToken: issued.token,
-    expiresIn: Math.floor(ACCESS_TOKEN_TTL_MS / 1000),
-    tokenType: 'Bearer',
-  });
+  return ok(await issueSession(user.id, deps));
 }

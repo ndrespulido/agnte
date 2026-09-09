@@ -669,3 +669,37 @@ button.quiet {
   flex-direction: column;
   gap: var(--space-lg);
 }
+
+/* A hairline rule with the word sitting in it, rather than a bare centred
+   "or" floating between two blocks. */
+.or {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin: 0;
+  font-size: var(--text-small);
+  color: var(--color-ink-faint);
+}
+
+.or::before,
+.or::after {
+  content: '';
+  flex: 1;
+  border-top: var(--hairline) solid var(--color-rule);
+}
+
+/* An anchor, not a button: this leaves the page for Google. Styled to match
+   the primary action's weight without claiming to be the primary action. */
+.google-sign-in {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--size-min-tap-target);
+  padding: var(--space-sm) var(--space-lg);
+  border: var(--hairline) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  background: var(--color-paper-raised);
+  color: var(--color-ink);
+  text-decoration: none;
+  font-size: var(--text-body);
+}

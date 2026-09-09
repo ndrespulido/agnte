@@ -11,7 +11,11 @@ export { handleVerifyEmail } from './api/verify-email-route';
 export { handleLogin, handleLogout, handleRefresh } from './api/session-routes';
 export { handleForgotPassword, handleResetPassword } from './api/password-reset-routes';
 export { handleMe } from './api/me-route';
-export { handleGoogleStart, handleGoogleCallback } from './api/google-routes';
+export {
+  handleGoogleStart,
+  handleGoogleCallback,
+  handleGoogleExchange,
+} from './api/google-routes';
 
 /** The route guard, for protected routes in other modules (verse, media, ...). */
 export { authenticate } from './api/authenticate';

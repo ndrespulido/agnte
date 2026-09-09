@@ -1,7 +1,9 @@
 import { DomainError, systemClock } from '@/shared/kernel';
 import { loadConfig } from '@/shared/infra/config';
 import { consume } from '@/shared/infra/rate-limit';
+import { issueSession } from '../application/issue-session';
 import { signInWithGoogle } from '../application/sign-in-with-google';
+import { issueOAuthHandoff } from '../domain/oauth-handoff';
 import { IdentityErrorCode } from '../domain/errors';
 import { CryptoTokenGenerator } from '../infrastructure/crypto-token-generator';
 import { GoogleOAuthProvider } from '../infrastructure/google-oauth-provider';
@@ -11,6 +13,7 @@ import {
 } from '../infrastructure/jwt-access-token-issuer';
 import { JwtOAuthStateSigner } from '../infrastructure/jwt-oauth-state-signer';
 import { PrismaOAuthAccountRepository } from '../infrastructure/prisma-oauth-account-repository';
+import { PrismaOAuthHandoffRepository } from '../infrastructure/prisma-oauth-handoff-repository';
 import { PrismaRefreshTokenRepository } from '../infrastructure/prisma-refresh-token-repository';
 import { PrismaUserRepository } from '../infrastructure/prisma-user-repository';
 import { baseUrl, clientIp, jsonError, tooManyRequests } from './http';
@@ -81,11 +84,21 @@ export async function handleGoogleStart(request: Request): Promise<Response> {
 /**
  * Google's callback.
  *
- * Returns JSON rather than redirecting with tokens in the URL. A redirect
- * carrying an access token puts a credential in browser history, in the
- * Referer header of whatever the page loads next, and in any proxy log along
- * the way. The web client will exchange this for its own storage; the native
- * client (§4) needs the JSON anyway.
+ * Redirects to the app with a single-use handoff code in the fragment, and
+ * the client trades that for a session at `/v1/auth/google/exchange`.
+ *
+ * This used to answer with the token pair as JSON, on the reasoning — still
+ * correct — that a redirect carrying an access token puts a credential in
+ * browser history, in the Referer of whatever loads next, and in any proxy
+ * log on the way. What that reasoning missed is that Google redirects the
+ * *browser* here, so the JSON was a page someone was looking at rather than a
+ * value any client could pick up: the flow simply had no ending.
+ *
+ * A code is not a credential. It names a user, dies in two minutes, and works
+ * exactly once (domain/oauth-handoff.ts), so the objection to a redirect does
+ * not apply to it. The fragment is never sent to a server at all, which is
+ * what keeps it out of the Referer and the proxy logs the old comment worried
+ * about.
  */
 export async function handleGoogleCallback(request: Request): Promise<Response> {
   const context = googleContext(request);
@@ -116,11 +129,8 @@ export async function handleGoogleCallback(request: Request): Promise<Response> 
     {
       users: new PrismaUserRepository(),
       accounts: new PrismaOAuthAccountRepository(),
-      sessions: new PrismaRefreshTokenRepository(),
       provider: context.provider,
       state: context.state,
-      accessTokens: context.accessTokens,
-      refreshTokens: new CryptoTokenGenerator(),
       clock: systemClock,
     },
   );
@@ -140,8 +150,83 @@ export async function handleGoogleCallback(request: Request): Promise<Response> 
     return jsonError(result.error, status);
   }
 
+  const issued = new CryptoTokenGenerator().issue();
+  await new PrismaOAuthHandoffRepository().issue(
+    issueOAuthHandoff({
+      codeHash: issued.tokenHash,
+      userId: result.value.userId,
+      created: result.value.created,
+      clock: systemClock,
+    }),
+  );
+
+  // 303, so the browser follows with GET however it arrived, and a relative
+  // location so this can never become an open redirect — the target is this
+  // app's own root, and the code rides in the fragment.
+  return new Response(null, {
+    status: 303,
+    headers: { location: `/#code=${issued.token}`, ...noStore },
+  });
+}
+
+/**
+ * Trades a handoff code for a session.
+ *
+ * The one place a Google sign-in becomes a token pair. It answers the same
+ * shape `/v1/auth/login` does, because a client should not care which of the
+ * two got it here.
+ *
+ * Every failure is one error: unknown code, expired code, already-spent code.
+ * They are indistinguishable on purpose — nobody reads this response but a
+ * script that just followed a redirect, so there is no message to improve,
+ * and separating them would only help someone guessing.
+ */
+export async function handleGoogleExchange(request: Request): Promise<Response> {
+  const decision = await consume('auth.login', {
+    ip: clientIp(request),
+    email: 'google-exchange',
+  });
+  if (!decision.allowed) return tooManyRequests(decision);
+
+  const body: unknown = await request.json().catch(() => null);
+  const code =
+    typeof body === 'object' && body !== null && 'code' in body
+      ? (body as { code: unknown }).code
+      : null;
+
+  if (typeof code !== 'string' || code.length === 0) {
+    return jsonError(new DomainError('bad_request', 'Missing code.'), 400);
+  }
+
+  const config = loadConfig();
+  const secret = accessTokenSecret(config.JWT_SECRET, config.APP_ENV === 'local');
+  if (!secret) return notConfigured();
+
+  const generator = new CryptoTokenGenerator();
+  const handoff = await new PrismaOAuthHandoffRepository().consume(
+    generator.hashOf(code),
+    systemClock.now(),
+  );
+
+  if (!handoff) {
+    return jsonError(
+      new DomainError(
+        'oauth_handoff_invalid',
+        'That sign-in link has already been used or has expired. Try signing in again.',
+      ),
+      400,
+    );
+  }
+
+  const tokens = await issueSession(handoff.userId, {
+    sessions: new PrismaRefreshTokenRepository(),
+    accessTokens: new JwtAccessTokenIssuer(secret, config.APP_ENV),
+    refreshTokens: generator,
+    clock: systemClock,
+  });
+
   return Response.json(
-    { ...result.value.tokens, created: result.value.created },
+    { ...tokens, created: handoff.created },
     { status: 200, headers: noStore },
   );
 }

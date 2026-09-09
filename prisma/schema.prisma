@@ -115,6 +115,7 @@ model User {
   refreshTokens       RefreshToken[]
   passwordResetTokens PasswordResetToken[]
   oauthAccounts       OAuthAccount[]
+  oauthHandoffs       OAuthHandoff[]
 
   @@map("user")
   @@schema("identity")
@@ -572,4 +573,42 @@ model MediaVariant {
   @@id([mediaId, kind])
   @@map("media_variant")
   @@schema("media")
+}
+
+/// A single-use code handing a completed Google sign-in to the browser (§4).
+///
+/// Google redirects the *browser* to our callback, so anything that callback
+/// returns is a page someone is looking at rather than a value the app can
+/// read. This row is what the redirect carries instead of the token pair: the
+/// client trades it for a session at `/v1/auth/google/exchange`.
+///
+/// Nothing here is a credential on its own. It names a user and expires in two
+/// minutes, where the refresh token it stands in for lasts thirty days.
+model OAuthHandoff {
+  /// Hex SHA-256 of the code in the redirect fragment — the same treatment
+  /// every other lookup-by-value token in this schema gets, and for the same
+  /// reason: 256 bits from a CSPRNG cannot be guessed, but it can be read out
+  /// of a database, so what is stored is not what is presented.
+  codeHash String @id @map("code_hash")
+
+  userId String @map("user_id") @db.Uuid
+
+  /// Whether this sign-in created the account rather than finding it. Carried
+  /// through the handoff because the client asks for it and the exchange is
+  /// the only place left that still knows.
+  created Boolean
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  /// Deleted on use, not marked spent — unlike PasswordResetToken, which keeps
+  /// the row so a second click can be told "already used". Nobody reads this
+  /// one: the exchange is a machine call, so there is no message to improve,
+  /// and deleting is the strongest guarantee a code cannot be replayed.
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("oauth_handoff")
+  @@schema("identity")
 }

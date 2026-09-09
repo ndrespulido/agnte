@@ -11,7 +11,18 @@ import { register, signIn } from './session';
  * (architecture.md §4), so anything else here would be a lie about what just
  * happened.
  */
-export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
+export function SignIn({
+  onSignedIn,
+  googleEnabled,
+  notice,
+}: {
+  onSignedIn: () => void;
+  /** False in every preview, where Google cannot register the redirect URI. */
+  googleEnabled: boolean;
+  /** A message from a sign-in attempt that started before this screen — an
+   * OAuth return that failed on the way back. */
+  notice?: string | null;
+}) {
   const [mode, setMode] = useState<'sign-in' | 'register'>('sign-in');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -81,9 +92,9 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
           />
         </label>
 
-        {error ? (
+        {(error ?? notice) ? (
           <p className="notice error" role="alert">
-            {error}
+            {error ?? notice}
           </p>
         ) : null}
 
@@ -91,6 +102,19 @@ export function SignIn({ onSignedIn }: { onSignedIn: () => void }) {
           {busy ? 'Working…' : mode === 'sign-in' ? 'Sign in' : 'Create account'}
         </button>
       </form>
+
+      {/* A link rather than a fetch: the flow is a top-level navigation to
+          Google and back, so it has to leave the page. Hidden entirely when
+          Google is not configured — a button that answers 503 is worse than
+          no button, and previews are permanently in that state. */}
+      {googleEnabled ? (
+        <>
+          <p className="or">or</p>
+          <a className="google-sign-in" href="/v1/auth/google">
+            Continue with Google
+          </a>
+        </>
+      ) : null}
 
       <button
         type="button"
