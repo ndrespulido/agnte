@@ -18,7 +18,24 @@ import { PrismaUserRepository } from '@/modules/identity/infrastructure/prisma-u
  */
 const DATABASE_URL = process.env.DATABASE_URL;
 const ORIGINAL_ENV = { ...process.env };
-const NOW = new Date('2026-09-09T12:00:00.000Z');
+/**
+ * Relative to the real clock, not a hardcoded calendar date — deliberately.
+ *
+ * handleGoogleExchange checks expiry against systemClock.now() (correctly:
+ * production must check a handoff's expiry against real time, not a fixed
+ * one), while this file mints handoffs through `clock`, a fixedClock, so it
+ * can assert on exact createdAt/expiresAt values. OAUTH_HANDOFF_TTL_MS is
+ * two minutes, so a hardcoded "now" — 2026-09-09T12:00:00Z, true when this
+ * test was written — silently becomes a past timestamp the moment real time
+ * crosses 12:02 UTC that same day, and every exchange() call in "the
+ * exchange endpoint" starts answering 400 (handoff already expired) from
+ * then on, forever, with nothing in the diff to explain why. That is exactly
+ * what happened: this test passed on every earlier commit today and started
+ * failing on this one for no reason connected to it. A margin computed off
+ * Date.now() can't fall behind Date.now() no matter which real day the test
+ * runs on.
+ */
+const NOW = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
 const clock = fixedClock(NOW);
 
 const handoffs = new PrismaOAuthHandoffRepository();
