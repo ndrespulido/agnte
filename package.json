@@ -17,7 +17,7 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify": "npm run typecheck && npm run lint && npm run format:check && npm run test",
+    "verify": "npm run typecheck && npm run lint && npm run format:check && npm run test && npm run build",
     "seed": "tsx scripts/seed.ts",
     "tokens": "tsx scripts/generate-tokens-css.ts"
   },

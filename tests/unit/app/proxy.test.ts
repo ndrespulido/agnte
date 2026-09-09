@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { NextRequest } from 'next/server';
 import { config, proxy } from '@/proxy';
 
@@ -59,9 +59,8 @@ describe('the content security policy', () => {
   });
 
   it('restricts where the app may connect to', () => {
-    // The client talks only to its own API. When media lands, R2 has to be
-    // added here — and the failure will be a visible broken image rather than
-    // a silent exfiltration channel.
+    // With no object storage configured — local development — the client
+    // talks only to its own API.
     expect(directive(policyOf(), 'connect-src')).toBe("connect-src 'self'");
   });
 
@@ -71,6 +70,60 @@ describe('the content security policy', () => {
     expect(images).toContain('data:');
     expect(images).toContain('blob:');
     expect(images).not.toMatch(/https?:\/\//);
+  });
+});
+
+/**
+ * Media is the one thing the browser fetches from somewhere other than this
+ * app: it PUTs an upload straight to object storage and loads every thumbnail
+ * from there (architecture.md §8.3 — bytes never pass through the app
+ * server). That makes these two directives load-bearing in exactly one
+ * direction: too narrow and the whole media feature breaks in production
+ * while working perfectly in development, which is the failure that costs a
+ * deploy cycle to notice.
+ */
+describe('the media origin in the policy', () => {
+  const ORIGINAL = process.env.R2_ENDPOINT;
+
+  afterEach(() => {
+    if (ORIGINAL === undefined) delete process.env.R2_ENDPOINT;
+    else process.env.R2_ENDPOINT = ORIGINAL;
+  });
+
+  it('lets the browser reach configured object storage, for uploads and thumbnails', () => {
+    process.env.R2_ENDPOINT = 'https://abc123.r2.cloudflarestorage.com';
+    const policy = policyOf();
+
+    expect(directive(policy, 'connect-src')).toBe(
+      "connect-src 'self' https://abc123.r2.cloudflarestorage.com",
+    );
+    expect(directive(policy, 'img-src')).toContain(
+      'https://abc123.r2.cloudflarestorage.com',
+    );
+  });
+
+  it('names the origin only, never a path from the endpoint', () => {
+    // R2_ENDPOINT can legitimately carry a path; a CSP source is an origin.
+    process.env.R2_ENDPOINT = 'https://abc123.r2.cloudflarestorage.com/bucket';
+    expect(directive(policyOf(), 'connect-src')).toBe(
+      "connect-src 'self' https://abc123.r2.cloudflarestorage.com",
+    );
+  });
+
+  it('ignores a value that is not a usable http origin rather than splicing it in', () => {
+    // A CSP is a string built by concatenation, so anything reaching it from
+    // configuration has to be parsed first — otherwise a value containing a
+    // semicolon could append directives of its own choosing.
+    for (const bad of [
+      'not a url',
+      'javascript:alert(1)',
+      'https://x.test; script-src *',
+    ]) {
+      process.env.R2_ENDPOINT = bad;
+      const policy = policyOf();
+      expect(directive(policy, 'connect-src')).toBe("connect-src 'self'");
+      expect(directive(policy, 'script-src')).not.toContain('*');
+    }
   });
 });
 

@@ -219,6 +219,8 @@ function VerseRow({ verse }: { verse: VerseView }) {
       {time ? <span className="verse-time">{time}</span> : null}
 
       <div className="verse-body">
+        <VerseMedia verse={verse} />
+
         {verse.xp ? <p className="verse-xp">{verse.xp}</p> : null}
 
         {verse.location ? <p className="verse-meta">{verse.location}</p> : null}
@@ -251,6 +253,41 @@ function VerseRow({ verse }: { verse: VerseView }) {
         </p>
       </div>
     </li>
+  );
+}
+
+/**
+ * A verse's photos.
+ *
+ * Shows the `thumb` variant (256px), which is what the timeline needs — the
+ * `medium` and the original exist for a detail view that does not exist yet,
+ * and fetching either here would download several times the bytes for the
+ * same row.
+ *
+ * A media item still `processing` has no variant yet: it gets a placeholder
+ * rather than being hidden, because the alternative is a row that silently
+ * gains a photo a few seconds after it was written. `failed` items are left
+ * out entirely — there is nothing to show and nothing the reader can do.
+ */
+function VerseMedia({ verse }: { verse: VerseView }) {
+  const shown = verse.media.filter((media) => media.status !== 'failed');
+  if (shown.length === 0) return null;
+
+  return (
+    <ul className="verse-media">
+      {shown.map((media) =>
+        media.thumbUrl ? (
+          <li key={media.id}>
+            {/* eslint-disable-next-line @next/next/no-img-element --
+                next/image would route a short-lived signed URL through the
+                optimiser, which caches it past the point it stays valid. */}
+            <img src={media.thumbUrl} alt="" loading="lazy" />
+          </li>
+        ) : (
+          <li key={media.id} className="pending" aria-label="Photo still processing" />
+        ),
+      )}
+    </ul>
   );
 }
 

@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { createTag, createVerse, fetchTags, type TagView } from './api';
+import { createTag, createVerse, fetchTags, uploadImage, type TagView } from './api';
+import { downscaleImage } from './downscale';
 
 /**
  * The add button and its sheet.
@@ -44,12 +45,28 @@ export function QuickAdd({ onAdded }: { onAdded: () => void }) {
   );
 }
 
+/**
+ * One picked image, from the moment it is chosen to the moment the server
+ * has it.
+ *
+ * `previewUrl` is an object URL for the *downscaled* blob, not the original
+ * file: it is already in memory, it is the thing actually being uploaded, and
+ * previewing it means what the sheet shows is what gets stored.
+ */
+interface PickedImage {
+  key: string;
+  previewUrl: string;
+  status: 'working' | 'ready' | 'failed';
+  mediaId: string | null;
+}
+
 function AddSheet({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
   const [tags, setTags] = useState<TagView[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [newTag, setNewTag] = useState('');
   const [xp, setXp] = useState('');
   const [location, setLocation] = useState('');
+  const [images, setImages] = useState<PickedImage[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -72,10 +89,81 @@ function AddSheet({ onClose, onAdded }: { onClose: () => void; onAdded: () => vo
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  /**
+   * Object URLs are a manual allocation: the browser holds the blob alive
+   * until they are revoked, and a sheet opened and closed a few times with
+   * photos in it would keep every one of them.
+   *
+   * Tracked in a ref, with an unmount-only effect, rather than by depending on
+   * `images` — an effect that listed `images` would run its cleanup on every
+   * change to the array and revoke URLs that are still on screen, which shows
+   * up as previews going blank the moment a second photo is added.
+   */
+  const objectUrls = useRef(new Set<string>());
+  useEffect(
+    () => () => {
+      for (const url of objectUrls.current) URL.revokeObjectURL(url);
+      objectUrls.current.clear();
+    },
+    [],
+  );
+
   const toggle = (id: string) =>
     setSelected((current) =>
       current.includes(id) ? current.filter((t) => t !== id) : [...current, id],
     );
+
+  /**
+   * Downscales and uploads each picked file, one entry at a time so a slow or
+   * failing upload shows up against its own thumbnail rather than as one
+   * opaque "something went wrong".
+   *
+   * Deliberately not awaited by the caller: the input's onChange returns
+   * immediately and the sheet stays usable — a person can be writing the note
+   * while the photo goes up, which is most of the point of doing this here
+   * rather than at save time.
+   */
+  async function addFiles(files: readonly File[]): Promise<void> {
+    for (const file of files) {
+      const key = crypto.randomUUID();
+
+      try {
+        const downscaled = await downscaleImage(file);
+        const previewUrl = URL.createObjectURL(downscaled.blob);
+        objectUrls.current.add(previewUrl);
+        setImages((current) => [
+          ...current,
+          { key, previewUrl, status: 'working', mediaId: null },
+        ]);
+
+        const mediaId = await uploadImage(downscaled);
+        setImages((current) =>
+          current.map((image) =>
+            image.key === key ? { ...image, status: 'ready', mediaId } : image,
+          ),
+        );
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : 'Could not add that image.');
+        setImages((current) =>
+          current.map((image) =>
+            image.key === key ? { ...image, status: 'failed' } : image,
+          ),
+        );
+      }
+    }
+  }
+
+  const removeImage = (key: string) =>
+    setImages((current) => {
+      const going = current.find((image) => image.key === key);
+      if (going) {
+        URL.revokeObjectURL(going.previewUrl);
+        objectUrls.current.delete(going.previewUrl);
+      }
+      return current.filter((image) => image.key !== key);
+    });
+
+  const uploading = images.some((image) => image.status === 'working');
 
   async function save() {
     setSaving(true);
@@ -97,6 +185,10 @@ function AddSheet({ onClose, onAdded }: { onClose: () => void; onAdded: () => vo
         return;
       }
 
+      const mediaIds = images
+        .filter((image) => image.status === 'ready' && image.mediaId !== null)
+        .map((image) => image.mediaId as string);
+
       await createVerse({
         tagIds,
         xp: xp.trim() === '' ? null : xp.trim(),
@@ -104,6 +196,7 @@ function AddSheet({ onClose, onAdded }: { onClose: () => void; onAdded: () => vo
         // The moment it is written is the default placement — the habit this
         // app came from is messaging yourself something *now*.
         eventStart: new Date().toISOString(),
+        ...(mediaIds.length > 0 ? { mediaIds } : {}),
       });
 
       onAdded();
@@ -144,6 +237,59 @@ function AddSheet({ onClose, onAdded }: { onClose: () => void; onAdded: () => vo
         </label>
 
         <fieldset className="field">
+          <legend>Photos</legend>
+          {images.length > 0 ? (
+            <ul className="picked-images">
+              {images.map((image) => (
+                <li key={image.key} data-status={image.status}>
+                  {/* eslint-disable-next-line @next/next/no-img-element --
+                      next/image wants a known width and height and rewrites
+                      the URL through the optimiser; this is a local blob:
+                      URL of a picture already sized to fit. */}
+                  <img src={image.previewUrl} alt="" />
+                  <button
+                    type="button"
+                    className="remove"
+                    aria-label="Remove this photo"
+                    onClick={() => removeImage(image.key)}
+                  >
+                    ×
+                  </button>
+                  {image.status === 'working' ? (
+                    <span className="badge" role="status">
+                      Uploading…
+                    </span>
+                  ) : null}
+                  {image.status === 'failed' ? (
+                    <span className="badge failed">Failed</span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          {/* A label wrapping a hidden input, rather than a button that
+              clicks one: the native control cannot be styled to match the
+              rest of the sheet, and this keeps it a real file input for the
+              keyboard and for assistive tech. */}
+          <label className="file-picker">
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={(event) => {
+                const files = [...(event.target.files ?? [])];
+                // The input is cleared so picking the same file twice in a
+                // row still fires a change event.
+                event.target.value = '';
+                void addFiles(files);
+              }}
+            />
+            <span>{images.length === 0 ? 'Add photos' : 'Add another'}</span>
+          </label>
+        </fieldset>
+
+        <fieldset className="field">
           <legend>Tags</legend>
           <div className="tag-picker">
             {tags.map((tag) => (
@@ -176,8 +322,16 @@ function AddSheet({ onClose, onAdded }: { onClose: () => void; onAdded: () => vo
           <button type="button" className="quiet" onClick={onClose}>
             Cancel
           </button>
-          <button type="button" className="primary" onClick={save} disabled={saving}>
-            {saving ? 'Saving…' : 'Add'}
+          {/* Blocked while a photo is still going up, rather than saving
+              without it: a verse that quietly loses the picture it was
+              written about is worse than a two-second wait. */}
+          <button
+            type="button"
+            className="primary"
+            onClick={save}
+            disabled={saving || uploading}
+          >
+            {saving ? 'Saving…' : uploading ? 'Uploading…' : 'Add'}
           </button>
         </div>
       </div>
