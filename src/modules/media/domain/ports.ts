@@ -1,5 +1,5 @@
 import type { Media } from './media';
-import type { MediaVariant } from './variant';
+import type { MediaVariant, VariantKind } from './variant';
 
 /**
  * The ports the media module needs (hexagonal architecture, architecture.md
@@ -104,4 +104,26 @@ export interface MediaBlobStore {
  */
 export interface ThumbnailQueue {
   enqueueThumbnailJob(mediaId: string): Promise<void>;
+}
+
+export interface GeneratedVariant {
+  readonly kind: VariantKind;
+  readonly buffer: Buffer;
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * Turns an original's bytes into its variants (architecture.md §8.3).
+ *
+ * Named for what it does in media's vocabulary, not "image processor" or
+ * "resizer" — those describe the library behind `infrastructure/sharp-
+ * thumbnail-generator.ts`, not the job this module asks of it. Takes only the
+ * bytes: the original's declared content type is not needed because the
+ * implementation reads the real format from the bytes themselves, the same
+ * "trust what is actually there, not what was declared" rule `head()` above
+ * follows for size.
+ */
+export interface ThumbnailGenerator {
+  generate(original: Buffer): Promise<GeneratedVariant[]>;
 }

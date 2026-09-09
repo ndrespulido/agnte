@@ -1,6 +1,9 @@
 import { handleDevMediaDownload, handleDevMediaUpload } from '@/modules/media';
 
 export const dynamic = 'force-dynamic';
+// Backed by node:fs, so this route needs the Node runtime — moot in
+// practice, since it 404s outside APP_ENV=local and nothing deploys local.
+export const runtime = 'nodejs';
 
 /**
  * Stands in for R2 locally (architecture.md §7.1): `LocalMediaBlobStore`
