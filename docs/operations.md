@@ -27,6 +27,7 @@ Everything below is a one-time setup step. Per-deploy infrastructure lives in
 | Cloud Tasks | Thumbnail queue + enqueuer role (in the GCP bootstrap) | 4.9 | ☐ |
 | Task callback secret | Shared secret for `/internal/*` (by set-secrets.sh) | 4.9 | ☐ |
 | Retention sweep | Daily Cloud Scheduler job → `/internal/prune` | 4.10 | ☐ |
+| R2 CORS | Bucket CORS rule so the browser's presigned upload isn't blocked | 4.11 | ☐ |
 
 CI runs the database-backed tests against a throwaway Postgres container (added
 in 1.5) rather than a Neon branch — every push would otherwise spend one, and
@@ -383,6 +384,10 @@ The application writes one object, `_healthcheck/probe`, on every health check
 and reads it back. Round-tripping a fresh value is what proves the wire: a write
 and a read of two unrelated objects would both pass against a bucket that
 silently discarded writes.
+
+**One more step before uploads work from a browser: §2j, R2 CORS.** The health
+check above goes server-to-R2 and says nothing about it — the presigned
+upload goes browser-to-R2, which a bucket with no CORS rule blocks outright.
 
 ---
 
@@ -822,6 +827,60 @@ on a development machine. The route is there to be called by hand when it does
 ```bash
 curl -X POST localhost:3000/internal/prune -H "authorization: Bearer $INTERNAL_TASKS_SECRET"
 ```
+
+---
+
+## 2j. R2 CORS for the presigned upload (task 4.11)
+
+```bash
+PROJECT_ID=agnte-prod ./infra/set-r2-cors.sh
+```
+
+Run it after the production (and, if it exists yet, preview) Cloud Run service
+has been deployed at least once — it reads their URLs back the same way the
+deploy workflows do. Safe to re-run: it replaces the whole CORS rule rather
+than adding to it, which is what you want after adding a custom domain.
+
+### Why this exists
+
+The upload (architecture.md §8.3) goes straight from the browser to R2 — the
+app server only signs the URL, so bytes never pass through a Cloud Run
+instance. That makes it a cross-origin request from the app's origin to R2's,
+and the browser preflights it with an OPTIONS request before sending the PUT.
+A bucket with no CORS rule answers that preflight with no
+`Access-Control-Allow-Origin` header at all, and the browser blocks the
+upload before it leaves:
+
+```
+Access to fetch at 'https://<account>.r2.cloudflarestorage.com/...' from
+origin 'https://agnte-....run.app' has been blocked by CORS policy: Response
+to preflight request doesn't pass access control check: No
+'Access-Control-Allow-Origin' header is present on the requested resource.
+```
+
+R2 exposes the same S3 `PutBucketCors` API AWS does, so this is scripted
+rather than another manual dashboard step — an allowed origin has to match
+byte for byte, the same class of mistake as the Google `redirect_uri` in
+§2f, and a script cannot fat-finger a paste the way a dashboard form can.
+Preview origins are registered as one wildcard pattern
+(`https://*---agnte-preview-....run.app`) rather than one entry per pull
+request, mirroring the tag substitution `.github/workflows/deploy-preview.yml`
+already does for a single concrete tag.
+
+Only `PUT` is allowed, and only the `content-type` header — the one thing
+`src/app/_client/api.ts`'s upload actually sends. If that ever changes, this
+script's `ALLOWED_HEADERS` needs the same header added, or uploads start
+failing preflight again.
+
+### What this does not fix on its own
+
+Once the browser's preflight succeeds, the PUT itself can still fail on a
+`@aws-sdk/client-s3` version whose default checksum behaviour bakes a CRC32 of
+an *empty* body into a presigned URL (nothing can be hashed before the file is
+picked). `src/modules/media/infrastructure/blob-store.ts` sets
+`requestChecksumCalculation: 'WHEN_REQUIRED'` on the R2 client for exactly
+this reason — see the comment there. Nothing to do here; noted so a future
+upgrade of that dependency does not quietly reintroduce it.
 
 ---
 
