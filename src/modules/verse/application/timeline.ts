@@ -1,5 +1,6 @@
 import { type DomainError, type Result, err, ok } from '@/shared/kernel';
 import type {
+  MediaResolver,
   Page,
   ShareRepository,
   TimelineRepository,
@@ -26,6 +27,7 @@ export interface TimelineInput {
 export interface TimelineDeps {
   verses: VerseRepository & TimelineRepository;
   shares: ShareRepository;
+  media: MediaResolver;
 }
 
 /**

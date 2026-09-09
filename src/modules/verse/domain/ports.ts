@@ -205,13 +205,48 @@ export interface ShareRepository {
 }
 
 /**
- * A resolved verse as read paths hand it out: the verse, its tags, and the
- * visibility decision already made. Bundling the decision with the data is
- * deliberate — a caller that receives a Verse alone has to remember to resolve,
- * and "remember to" is how the leak happens.
+ * What a read path needs to know about one attached media item, in verse's
+ * own words rather than media's. A local shape rather than importing media's
+ * `MediaSummaryForVerse` type: CLAUDE.md is explicit that sharing an
+ * *infrastructure* boundary (calling media's public function) is fine where
+ * sharing a *domain type* across it would re-couple the modules — so this is
+ * defined here and an adapter in infrastructure/ maps media's answer onto it,
+ * even though the fields happen to match today.
+ */
+export interface VerseMedia {
+  readonly id: string;
+  readonly status: string;
+  readonly originalUrl: string | null;
+  readonly thumbUrl: string | null;
+  readonly mediumUrl: string | null;
+}
+
+/** Verse's own name for "ask media whether these ids belong to this owner". */
+export interface MediaOwnership {
+  ownedMediaIds(
+    ownerId: string,
+    mediaIds: readonly string[],
+  ): Promise<ReadonlySet<string>>;
+}
+
+/** Verse's own name for "ask media to resolve these ids into readable links". */
+export interface MediaResolver {
+  resolveForVerse(ownerId: string, mediaIds: readonly string[]): Promise<VerseMedia[]>;
+}
+
+/**
+ * A resolved verse as read paths hand it out: the verse, its tags, its
+ * attached media, and the visibility decision already made. Bundling the
+ * decision with the data is deliberate — a caller that receives a Verse alone
+ * has to remember to resolve, and "remember to" is how the leak happens.
+ *
+ * `media` is resolved using the *verse owner's* id, always — see
+ * `application/read-verse.ts`'s doc comment for why, and never the viewer's,
+ * even when they are the same person for an owner viewing their own verse.
  */
 export interface VisibleVerse {
   readonly verse: Verse;
   readonly tags: readonly Tag[];
+  readonly media: readonly VerseMedia[];
   readonly effectiveVisibility: Visibility;
 }

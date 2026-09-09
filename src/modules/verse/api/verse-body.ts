@@ -23,7 +23,18 @@ export const verseBody = (v: VisibleVerse) => ({
   visibility: v.effectiveVisibility,
   explicitVisibility: v.verse.visibility,
   tags: v.tags.map((t) => ({ id: t.id, name: t.name, label: format(t) })),
+  // `mediaIds` is kept alongside the resolved `media` below rather than
+  // replaced by it: a client editing a verse needs the raw ids (to send back
+  // on update) independently of whatever signed URLs happened to resolve on
+  // this particular read.
   mediaIds: v.verse.mediaIds,
+  media: v.media.map((m) => ({
+    id: m.id,
+    status: m.status,
+    originalUrl: m.originalUrl,
+    thumbUrl: m.thumbUrl,
+    mediumUrl: m.mediumUrl,
+  })),
   createdAt: v.verse.createdAt.toISOString(),
   updatedAt: v.verse.updatedAt.toISOString(),
   version: v.verse.version,

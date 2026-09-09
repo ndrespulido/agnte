@@ -16,6 +16,13 @@ export interface VerseView {
   explicitVisibility: 'private' | 'shared' | 'public' | null;
   tags: { id: string; name: string; label: string }[];
   mediaIds: string[];
+  media: {
+    id: string;
+    status: string;
+    originalUrl: string | null;
+    thumbUrl: string | null;
+    mediumUrl: string | null;
+  }[];
   createdAt: string;
   updatedAt: string;
   version: number;

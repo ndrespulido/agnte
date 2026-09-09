@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { getDatabase } from '@/shared/infra/database';
 import { resetConfigForTests } from '@/shared/infra/config';
 import { resetEmailTransportForTests } from '@/shared/infra/email';
+import { fixedClock } from '@/shared/kernel';
 import { handleLogin, handleRegister, handleVerifyEmail } from '@/modules/identity';
 import { handleCreateTag, handleCreateVerse, handleTimeline } from '@/modules/verse';
 import {
@@ -9,6 +10,8 @@ import {
   encodeCursor,
   timelineYears,
 } from '@/modules/verse/domain/timeline';
+import { createPendingMedia, transition } from '@/modules/media/domain/media';
+import { PrismaMediaRepository } from '@/modules/media/infrastructure/prisma-media-repository';
 
 /**
  * The timeline: ordering across calendar and deep time, keyset paging, tag
@@ -51,6 +54,7 @@ describe.skipIf(!DATABASE_URL)('timeline', () => {
     const db = getDatabase()!;
     await db.$executeRawUnsafe('DELETE FROM verse.verse');
     await db.$executeRawUnsafe('DELETE FROM verse.tag');
+    await db.$executeRawUnsafe('DELETE FROM media.media');
     await db.$executeRawUnsafe('DELETE FROM identity.refresh_token');
     await db.$executeRawUnsafe('DELETE FROM identity.pending_registration');
     await db.$executeRawUnsafe('DELETE FROM identity."user"');
@@ -136,6 +140,31 @@ describe.skipIf(!DATABASE_URL)('timeline', () => {
         nextCursor: string | null;
       },
     };
+  };
+
+  /** A `ready` Media row, created directly through the repository — see
+   * tests/integration/verse-routes.test.ts's identical helper. */
+  const readyMedia = async (ownerId: string): Promise<string> => {
+    const media = new PrismaMediaRepository();
+    const clock = fixedClock(new Date());
+
+    const pending = createPendingMedia({
+      ownerId,
+      contentType: 'image/jpeg',
+      declaredSizeBytes: 400_000,
+      clock,
+    });
+    await media.create(pending);
+
+    const processing = transition(pending, 'processing', clock);
+    if (!processing.ok) throw new Error('unreachable');
+    await media.update(processing.value, pending.version);
+
+    const ready = transition(processing.value, 'ready', clock);
+    if (!ready.ok) throw new Error('unreachable');
+    await media.update(ready.value, processing.value.version);
+
+    return pending.id;
   };
 
   describe('ordering', () => {
@@ -400,6 +429,41 @@ describe.skipIf(!DATABASE_URL)('timeline', () => {
         `?anchor=2026-01-01T00:00:00Z&tag=${trip.id}&tag=${food.id}&match=all`,
       );
       expect(all.body.verses.map((v) => v.xp)).toEqual(['both']);
+    });
+  });
+
+  describe('media', () => {
+    it('attaches each verse its own media, not the whole page batch to every row', async () => {
+      // application/read-verse.ts's visibleMany batches the media lookup by
+      // owner rather than one call per verse — this is the test that would
+      // fail if that batching accidentally mixed results between rows
+      // instead of mapping each back to its own verse.
+      const { token, userId } = await signUp('media-owner@example.com');
+      const tag = await makeTag(token, 'diary');
+      const mediaId = await readyMedia(userId);
+
+      await makeVerse(token, {
+        tagIds: [tag.id],
+        xp: 'with a photo',
+        eventStart: '2026-01-01T00:00:00Z',
+        mediaIds: [mediaId],
+      });
+      await makeVerse(token, {
+        tagIds: [tag.id],
+        xp: 'no photo',
+        eventStart: '2026-01-02T00:00:00Z',
+      });
+
+      const { body } = await timeline(token, '?anchor=2026-01-03T00:00:00Z');
+      const withPhoto = body.verses.find((v) => v.xp === 'with a photo') as {
+        media?: { id: string }[];
+      };
+      const withoutPhoto = body.verses.find((v) => v.xp === 'no photo') as {
+        media?: { id: string }[];
+      };
+
+      expect(withPhoto.media).toEqual([expect.objectContaining({ id: mediaId })]);
+      expect(withoutPhoto.media).toEqual([]);
     });
   });
 

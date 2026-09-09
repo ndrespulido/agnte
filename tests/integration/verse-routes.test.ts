@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { getDatabase } from '@/shared/infra/database';
 import { resetConfigForTests } from '@/shared/infra/config';
 import { resetEmailTransportForTests } from '@/shared/infra/email';
+import { fixedClock, uuidv7 } from '@/shared/kernel';
 import { handleLogin, handleRegister, handleVerifyEmail } from '@/modules/identity';
 import {
   handleCreateTag,
@@ -11,7 +12,8 @@ import {
   handleUpdateVerse,
 } from '@/modules/verse';
 import { PrismaShareRepository } from '@/modules/verse/infrastructure/prisma-share-repository';
-import { uuidv7 } from '@/shared/kernel';
+import { createPendingMedia, transition } from '@/modules/media/domain/media';
+import { PrismaMediaRepository } from '@/modules/media/infrastructure/prisma-media-repository';
 
 /**
  * The verse endpoints end to end. The visibility cases are the point: this is
@@ -54,6 +56,7 @@ describe.skipIf(!DATABASE_URL)('verse routes', () => {
     const db = getDatabase()!;
     await db.$executeRawUnsafe('DELETE FROM verse.verse');
     await db.$executeRawUnsafe('DELETE FROM verse.tag');
+    await db.$executeRawUnsafe('DELETE FROM media.media');
     await db.$executeRawUnsafe('DELETE FROM identity.refresh_token');
     await db.$executeRawUnsafe('DELETE FROM identity.pending_registration');
     await db.$executeRawUnsafe('DELETE FROM identity."user"');
@@ -142,6 +145,54 @@ describe.skipIf(!DATABASE_URL)('verse routes', () => {
       id,
     );
 
+  /**
+   * A `ready` Media row with both variants, created directly through the
+   * repository — the same shortcut tests/integration/search.test.ts takes —
+   * rather than a full request-upload/confirm/thumbnail round trip these
+   * tests have no other reason to exercise.
+   */
+  const readyMedia = async (ownerId: string): Promise<string> => {
+    const media = new PrismaMediaRepository();
+    const clock = fixedClock(new Date());
+
+    const pending = createPendingMedia({
+      ownerId,
+      contentType: 'image/jpeg',
+      declaredSizeBytes: 400_000,
+      clock,
+    });
+    await media.create(pending);
+
+    const processing = transition(pending, 'processing', clock);
+    if (!processing.ok) throw new Error('unreachable');
+    await media.update(processing.value, pending.version);
+
+    const ready = transition(processing.value, 'ready', clock);
+    if (!ready.ok) throw new Error('unreachable');
+    await media.update(ready.value, processing.value.version);
+
+    await media.createVariant({
+      mediaId: pending.id,
+      kind: 'thumb',
+      storageKey: `media/${ownerId}/${pending.id}/thumb.jpg`,
+      width: 256,
+      height: 192,
+      sizeBytes: 111,
+      createdAt: new Date(),
+    });
+    await media.createVariant({
+      mediaId: pending.id,
+      kind: 'medium',
+      storageKey: `media/${ownerId}/${pending.id}/medium.jpg`,
+      width: 1024,
+      height: 768,
+      sizeBytes: 222,
+      createdAt: new Date(),
+    });
+
+    return pending.id;
+  };
+
   describe('creating', () => {
     it('accepts a minimal verse: one tag, nothing else', async () => {
       const { token } = await signUp('a@example.com');
@@ -198,6 +249,32 @@ describe.skipIf(!DATABASE_URL)('verse routes', () => {
 
       const response = await post(mine.token, { tagIds: [theirTag.id] });
       expect(response.status).toBe(404);
+    });
+
+    it("refuses another user's media with 404, not by silently dropping it", async () => {
+      // The gap CLAUDE.md's Visibility section warns about: mediaIds used to
+      // be accepted with no ownership check at all, which meant a verse could
+      // end up pointing at whatever id was sent, real or not, someone else's
+      // or not.
+      const mine = await signUp('aa@example.com');
+      const theirs = await signUp('ab@example.com');
+      const tag = await makeTag(mine.token, 'holiday');
+      const theirMedia = createPendingMedia({
+        ownerId: theirs.userId,
+        contentType: 'image/jpeg',
+        declaredSizeBytes: 400_000,
+        clock: fixedClock(new Date()),
+      });
+      await new PrismaMediaRepository().create(theirMedia);
+
+      const response = await post(mine.token, {
+        tagIds: [tag.id],
+        mediaIds: [theirMedia.id],
+      });
+      expect(response.status).toBe(404);
+      expect(await response.json()).toMatchObject({
+        error: { code: 'verse.media_not_found' },
+      });
     });
 
     it('refuses a calendar date and deep time together', async () => {
@@ -357,6 +434,40 @@ describe.skipIf(!DATABASE_URL)('verse routes', () => {
       });
 
       expect((await get(friend.token, created.id)).status).toBe(200);
+    });
+
+    it("resolves a shared verse's media using the owner's id, not the viewer's", async () => {
+      // The whole point of the design: media has no visibility of its own
+      // (CLAUDE.md), so a viewer who can read this verse only through a
+      // share must still see the owner's media resolve — if this code
+      // mistakenly asked media using the *viewer's* id instead, `friend`
+      // owns no media at all and the result would come back empty.
+      const mine = await signUp('ac@example.com');
+      const friend = await signUp('ad@example.com');
+      const tag = await makeTag(mine.token, 'trip', 'shared');
+      const mediaId = await readyMedia(mine.userId);
+
+      const created = (await (
+        await post(mine.token, { tagIds: [tag.id], mediaIds: [mediaId] })
+      ).json()) as { id: string };
+
+      await new PrismaShareRepository().shareTag({
+        tagId: tag.id,
+        granteeId: friend.userId,
+        permission: 'read',
+        createdAt: new Date(),
+      });
+
+      const response = await get(friend.token, created.id);
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        media: { id: string; status: string; thumbUrl: string | null }[];
+      };
+      expect(body.media).toHaveLength(1);
+      expect(body.media[0]).toMatchObject({ id: mediaId, status: 'ready' });
+      expect(body.media[0]?.thumbUrl).toBe(
+        `/dev/media/media/${mine.userId}/${mediaId}/thumb.jpg`,
+      );
     });
 
     it('a share does not open a verse a second tag made private', async () => {

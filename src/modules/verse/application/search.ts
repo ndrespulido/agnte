@@ -1,5 +1,6 @@
 import { type DomainError, type Result, err, ok } from '@/shared/kernel';
 import type {
+  MediaResolver,
   Page,
   SearchHit,
   SearchRepository,
@@ -31,6 +32,7 @@ export interface SearchInput {
 export interface SearchDeps {
   verses: VerseRepository & SearchRepository;
   shares: ShareRepository;
+  media: MediaResolver;
 }
 
 export interface RankedVerse extends VisibleVerse {
