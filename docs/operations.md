@@ -951,12 +951,49 @@ origin verifies cleanly with no origin certificate to create or rotate —
 "Flexible" would work but sends Cloudflare-to-origin traffic unencrypted,
 which is the one thing Full (strict) exists to avoid.
 
-Cloud Run does no Host-header routing of its own here (that is what a Domain
-Mapping would add) — it doesn't need to. Cloudflare's proxy makes its own
-outbound HTTPS connection to `agnte-lddzhm2pxa-ey.a.run.app` using that
-hostname's own SNI, which is all Cloud Run's front end needs to route the
-request; `agnte.app` only ever exists at the edge, between the browser and
-Cloudflare.
+### 1a. Rewrite the Host header, or Google 404s everything
+
+The CNAME alone is not enough, and the failure mode is not subtle:
+`agnte.app` loads Google's own generic error page —
+
+```
+404. That's an error.
+The requested URL / was not found on this server. That's all we know.
+```
+
+— not this app's 404, not Cloudflare's. That phrasing is Google's shared
+frontend (GFE) saying it has never heard of this hostname, which is exactly
+right: **Cloud Run routes incoming HTTP requests by Host header, not by TLS
+SNI alone.** Cloudflare's proxy, by default, forwards the browser's original
+Host header (`agnte.app`) unchanged to the origin — it does not rewrite it
+to match the CNAME target just because that's where the connection goes. So
+Cloud Run's frontend receives a TLS connection that correctly reaches this
+project's cluster (SNI got that far), carrying a Host it has no service
+registered for, and answers with the same generic 404 it would give a
+Domain Mapping that was never created — because functionally, none was.
+
+Fix it with a Cloudflare **Origin Rule** (Rules → Origin Rules → Create
+rule — on the Free plan too, not an Enterprise feature):
+
+```
+When incoming requests match:  Hostname equals agnte.app
+Then:                          Rewrite request header → Host →
+                                agnte-lddzhm2pxa-ey.a.run.app
+```
+
+This is what makes the earlier claim about SNI true in practice: Cloudflare
+already opens the right TLS connection using the origin hostname's SNI, and
+this rule makes it send that same hostname as the HTTP Host header too, so
+Cloud Run's frontend routes the request as if it had been addressed to
+`agnte-lddzhm2pxa-ey.a.run.app` directly — which, from Cloud Run's side, it
+now has been. `agnte.app` still only ever exists at the edge, between the
+browser and Cloudflare; this rule is what keeps that true past the TLS
+handshake.
+
+If Origin Rules aren't available on the zone for some reason, a Cloudflare
+Worker bound to the route can set the same header
+(`request.headers.set('Host', 'agnte-lddzhm2pxa-ey.a.run.app')` before
+`fetch`ing the origin) — more moving parts, so prefer the rule.
 
 ### 2. Pin the canonical origin
 
