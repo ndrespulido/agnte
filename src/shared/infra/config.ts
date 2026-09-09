@@ -81,6 +81,41 @@ const schema = z.object({
    */
   GOOGLE_CLIENT_ID: z.string().min(1).optional(),
   GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
+
+  /**
+   * Deferred work (architecture.md §1.3): Cloud Tasks in a deployed
+   * environment, an in-process loopback locally.
+   *
+   * `GCP_PROJECT_ID` and `GCP_REGION` are not required together with each
+   * other in the schema sense — both are needed to create a task, but neither
+   * on its own is a dropped secret the way half of R2 would be, and requiring
+   * the pair here would duplicate a check the Cloud Tasks adapter already has
+   * to make (it needs a queue name too, and three-way refinements read worse
+   * than they save).
+   */
+  GCP_PROJECT_ID: z.string().min(1).optional(),
+  GCP_REGION: z.string().min(1).optional(),
+  CLOUD_TASKS_QUEUE: z.string().min(1).default('agnte-media-thumbnails'),
+
+  /**
+   * Shared secret for `/internal/*` routes (architecture.md §1.3).
+   *
+   * Cloud Run runs this service with `--allow-unauthenticated` — required
+   * because previews need a URL reachable from a phone with no Google account
+   * — so Cloud Run's own IAM cannot be the thing that keeps `/internal/*`
+   * private. This header is: the enqueuing code reads it from the same place
+   * the route checks it, so a task Cloud Tasks delivers carries a value only
+   * this deployment could have produced.
+   *
+   * Unset locally means the in-process adapter calls the route directly over
+   * loopback with no header at all, and the route's local-environment check
+   * (identical in spirit to the JWT and email "no config needed for `npm run
+   * dev`" rule, §7.1) accepts that. Unset in a deployed environment means
+   * deferred work cannot run: the status page says so, and the routes that
+   * would enqueue a job answer 503 rather than queuing work nothing can ever
+   * authorize.
+   */
+  INTERNAL_TASKS_SECRET: z.string().min(32).optional(),
 });
 
 /**
