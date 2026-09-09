@@ -107,12 +107,23 @@ jobs:
           # Pin the origin used in email links rather than deriving it from the
           # request Host, which a client controls — a forged one would put an
           # attacker's domain into a verification link carrying the victim's
-          # token. Read back from the service itself so there is no URL to keep
-          # in sync here; on the very first deploy the service does not exist
-          # yet, and the app falls back to the request origin for that one run.
-          BASE_URL=$(gcloud run services describe "${SERVICE}" \
-            --region="${{ vars.GCP_REGION }}" \
-            --format='value(status.url)' 2>/dev/null || true)
+          # token.
+          #
+          # vars.APP_BASE_URL (a repo variable, Settings -> Secrets and
+          # variables -> Actions -> Variables — see docs/operations.md §2k)
+          # wins when set: once a custom domain fronts the service, the
+          # canonical origin is that domain, not whatever Cloud Run's own URL
+          # happens to be. Unset, this reads the URL back from the service
+          # itself so there is nothing to keep in sync before a domain exists;
+          # on the very first deploy the service doesn't exist yet either, and
+          # the app falls back to the request origin for that one run.
+          if [[ -n "${{ vars.APP_BASE_URL }}" ]]; then
+            BASE_URL="${{ vars.APP_BASE_URL }}"
+          else
+            BASE_URL=$(gcloud run services describe "${SERVICE}" \
+              --region="${{ vars.GCP_REGION }}" \
+              --format='value(status.url)' 2>/dev/null || true)
+          fi
           if [[ -n "$BASE_URL" ]]; then
             ENV_VARS="${ENV_VARS},APP_BASE_URL=${BASE_URL}"
           fi

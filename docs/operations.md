@@ -28,6 +28,7 @@ Everything below is a one-time setup step. Per-deploy infrastructure lives in
 | Task callback secret | Shared secret for `/internal/*` (by set-secrets.sh) | 4.9 | ☐ |
 | Retention sweep | Daily Cloud Scheduler job → `/internal/prune` | 4.10 | ☐ |
 | R2 CORS | Bucket CORS rule so the browser's presigned upload isn't blocked | 4.11 | ☐ |
+| Custom domain | Cloudflare-proxied CNAME to production, `APP_BASE_URL` pinned | 4.12 | ☐ |
 
 CI runs the database-backed tests against a throwaway Postgres container (added
 in 1.5) rather than a Neon branch — every push would otherwise spend one, and
@@ -538,7 +539,9 @@ than leaving someone to discover it at the button.
 
 `redirect_uri_mismatch` at sign-in almost always means this URI and
 `APP_BASE_URL` disagree — a trailing slash, `http` against `https`, or the
-Cloud Run URL against a custom domain. Both must be the same string.
+Cloud Run URL against a custom domain. Both must be the same string. If a
+custom domain gets connected later (§2k), it needs a *second* registered
+URI here, not a replacement one — see §2k step 3.
 
 ### What is deliberately not requested
 
@@ -914,6 +917,98 @@ picked). `src/modules/media/infrastructure/blob-store.ts` sets
 `requestChecksumCalculation: 'WHEN_REQUIRED'` on the R2 client for exactly
 this reason — see the comment there. Nothing to do here; noted so a future
 upgrade of that dependency does not quietly reintroduce it.
+
+---
+
+## 2k. A custom domain in front of production
+
+No Cloud Run Domain Mapping, and no load balancer — architecture.md §3.1 is
+explicit that a load balancer never gets created here, and "Cloudflare in
+front of everything" (§3, bullet 6) is already the plan. So the domain is
+connected the same way R2 already gets served through Cloudflare (§2b): DNS
+on Cloudflare, proxied, terminating there.
+
+### 1. DNS, in the Cloudflare dashboard
+
+Add the domain's zone to Cloudflare if it isn't already, then:
+
+```
+Type:   CNAME
+Name:   agnte.app          (the apex — Cloudflare flattens a proxied CNAME
+                             at the root automatically, unlike most DNS hosts)
+Target: agnte-lddzhm2pxa-ey.a.run.app     (production's own URL, from
+                                            `gcloud run services describe agnte
+                                            --format='value(status.url)'` —
+                                            it will differ per project)
+Proxy:  Proxied (orange cloud) — required. A grey-clouded record is a bare
+        DNS answer with no WAF, no edge rate limiting, and defeats §8.6's
+        first line of defence.
+```
+
+SSL/TLS mode: **Full (strict)**. Cloud Run always serves a valid Google-managed
+certificate on its own `.run.app` hostname, so Cloudflare's connection to the
+origin verifies cleanly with no origin certificate to create or rotate —
+"Flexible" would work but sends Cloudflare-to-origin traffic unencrypted,
+which is the one thing Full (strict) exists to avoid.
+
+Cloud Run does no Host-header routing of its own here (that is what a Domain
+Mapping would add) — it doesn't need to. Cloudflare's proxy makes its own
+outbound HTTPS connection to `agnte-lddzhm2pxa-ey.a.run.app` using that
+hostname's own SNI, which is all Cloud Run's front end needs to route the
+request; `agnte.app` only ever exists at the edge, between the browser and
+Cloudflare.
+
+### 2. Pin the canonical origin
+
+Once DNS resolves, tell the app: **GitHub → repo Settings → Secrets and
+variables → Actions → Variables → New repository variable**,
+`APP_BASE_URL` = `https://agnte.app`.
+
+Without this the next deploy goes on reading `status.url` back from Cloud Run
+(§4, `deploy-production.yml`) and email links, the OAuth redirect, and
+everything else derived from `APP_BASE_URL` keep pointing at the `.run.app`
+URL even though `agnte.app` is what people actually load. Setting the
+variable does nothing until the **next** deploy applies it — trigger one with
+an empty commit's worth of patience, or `workflow_dispatch` the production
+workflow by hand, rather than assuming it's live the moment the variable is
+saved.
+
+### 3. Google sign-in's redirect URI
+
+§2f's redirect URI is byte-exact and origin-specific — a second one has to be
+added for the new origin, not swapped in for the old one, in Google Cloud
+console → APIs & Services → Credentials → the OAuth client:
+
+```
+https://agnte.app/v1/auth/google/callback
+```
+
+Leave the `.run.app` one registered until `agnte.app` is confirmed working —
+Google allows more than one redirect URI on a client, and removing the old
+one early just means a mistake in the new setup has no fallback.
+
+### 4. R2 CORS needs the new origin too
+
+The browser's presigned upload is still a cross-origin request (§2j) — now
+from `https://agnte.app` instead of, or alongside, the `.run.app` URL. Re-run
+`set-r2-cors.sh` with it added:
+
+```bash
+PROJECT_ID=agnte-prod APP_BASE_URL=https://agnte.app ./infra/set-r2-cors.sh
+```
+
+This adds the domain to the rule rather than replacing the `.run.app` origin
+with it — Cloud Run's own URL stays reachable (there is no Domain Mapping
+here to make it exclusive), so both stay real origins a browser might load
+the app from.
+
+### What doesn't need touching
+
+CSP (`src/proxy.ts`) is unaffected — its `'self'` directives resolve against
+whatever origin actually served the page, so `agnte.app` satisfies them the
+same way the `.run.app` URL always did. No code checks a hardcoded hostname
+anywhere in `src/` — the only two things that needed to learn about a second
+origin were the deploy workflow's `APP_BASE_URL` and R2's CORS rule, above.
 
 ---
 

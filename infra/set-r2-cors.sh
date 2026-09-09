@@ -12,6 +12,11 @@
 # Usage:
 #   PROJECT_ID=agnte-prod ./infra/set-r2-cors.sh
 #
+#   Once a custom domain fronts the service (docs/operations.md §2k), add it
+#   too — Cloud Run's own URL stays reachable, but the browser's Origin on a
+#   presigned upload is whatever the person actually loaded the app from:
+#   PROJECT_ID=agnte-prod APP_BASE_URL=https://agnte.app ./infra/set-r2-cors.sh
+#
 # Prerequisites: gcloud installed and `gcloud auth login` done, R2 already
 # configured via ./infra/set-secrets.sh, node with `npm install` run in this
 # repository, and a *separate*, Admin-scoped R2 API token — see below.
@@ -90,7 +95,11 @@ else
   note "Preview service does not exist yet — skipping."
 fi
 
-if [[ -z "${PROD_URL}" && -z "${PREVIEW_URL}" ]]; then
+if [[ -n "${APP_BASE_URL:-}" ]]; then
+  note "Custom domain: ${APP_BASE_URL}"
+fi
+
+if [[ -z "${PROD_URL}" && -z "${PREVIEW_URL}" && -z "${APP_BASE_URL:-}" ]]; then
   echo "  Neither service has been deployed yet. Deploy at least one first."
   exit 1
 fi
@@ -98,7 +107,7 @@ fi
 say "Setting the CORS rule on ${R2_BUCKET}"
 if ! R2_ENDPOINT="${R2_ENDPOINT}" R2_BUCKET="${R2_BUCKET}" \
   R2_ACCESS_KEY_ID="${R2_ADMIN_ACCESS_KEY_ID}" R2_SECRET_ACCESS_KEY="${R2_ADMIN_SECRET_ACCESS_KEY}" \
-  PROD_URL="${PROD_URL}" PREVIEW_URL="${PREVIEW_URL}" \
+  PROD_URL="${PROD_URL}" PREVIEW_URL="${PREVIEW_URL}" CUSTOM_DOMAIN="${APP_BASE_URL:-}" \
   node "$(dirname "$0")/set-r2-cors.mjs"; then
   echo
   echo "  If that said AccessDenied, the token above is not Admin-scoped —"
