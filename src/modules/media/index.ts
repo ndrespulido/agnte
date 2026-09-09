@@ -1,13 +1,20 @@
 /**
  * The media module's public surface.
  *
- * Phase 4.4: the dev-storage-route handlers and the internal thumbnail-job
- * callback exist to export — the `/v1/media` API and its application layer
- * land in 4.5/4.6. Everything else in this module (the domain, the
- * repository, the blob store adapters) stays unexported so the app layer and
- * other modules can only reach media through whatever is listed here, per
- * architecture.md §1.1.
+ * No read route: a Media item is read through verse, not directly. Verse
+ * resolves visibility (media has no visibility concept of its own — see
+ * CLAUDE.md's Visibility section) and, once a Verse is confirmed readable,
+ * asks media for signed URLs using the *verse owner's* id, not the viewer's —
+ * media trusts that decision rather than repeating it. That integration is
+ * still open work, tracked as a known gap rather than built here (see
+ * `application/delete-media.ts`'s doc comment for the same boundary from the
+ * other direction: media cannot see which Verses reference an id it deletes).
  */
 
 export { handleDevMediaDownload, handleDevMediaUpload } from './api/dev-storage-routes';
 export { handleThumbnailJob } from './api/internal-routes';
+export {
+  handleConfirmUpload,
+  handleDeleteMedia,
+  handleRequestUpload,
+} from './api/media-routes';

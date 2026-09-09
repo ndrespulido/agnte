@@ -16,7 +16,7 @@ export interface RequestUploadInput {
   /** Client-generated UUIDv7 (architecture.md §2), when the client made one —
    * an offline-composed Verse (§8.1) needs a Media id to point at before this
    * call, let alone before the bytes exist. */
-  id?: string;
+  id?: string | undefined;
 }
 
 export interface RequestedUpload {

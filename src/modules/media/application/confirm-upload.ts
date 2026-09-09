@@ -103,5 +103,13 @@ export async function confirmUpload(
   // checked out.
   await deps.queue?.enqueueThumbnailJob(media.id).catch(() => undefined);
 
-  return ok(processing.value);
+  // Re-read rather than return `processing.value` directly: locally, the
+  // queue above just *ran* the thumbnail job in-process to completion
+  // (architecture.md §7.1) rather than merely scheduling it, so the row this
+  // function read a moment ago as `processing` may already be `ready` or
+  // `failed` by now. In a deployed environment this is one extra cheap read
+  // that comes back unchanged, but it is what keeps the response honest about
+  // which of those two worlds actually ran.
+  const latest = await deps.media.findById(input.mediaId);
+  return ok(latest ?? processing.value);
 }
