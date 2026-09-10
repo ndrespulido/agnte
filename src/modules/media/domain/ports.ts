@@ -46,6 +46,21 @@ export interface MediaRepository {
    */
   findAbandonedPending(before: Date): Promise<Media[]>;
 
+  /**
+   * `processing` rows that have sat there past a cutoff — a thumbnail job
+   * that was never enqueued, or enqueued and never run.
+   *
+   * `confirmUpload` treats a failed enqueue as a missing convenience rather
+   * than a failed upload, and deliberately swallows it. Without this, that
+   * choice is terminal: the row is left `processing` forever, its photo shows
+   * as a blank tile forever, and nothing anywhere ever looks at it again.
+   * This is what makes the swallow recoverable instead.
+   *
+   * Cut on `updatedAt`, not `createdAt`: the row entered `processing` when
+   * its upload was confirmed, which may be long after it was requested.
+   */
+  findStalledProcessing(before: Date): Promise<Media[]>;
+
   /** Unconditional, unlike `delete`: the pruner has no version to check. */
   deleteMany(ids: readonly string[]): Promise<number>;
 }

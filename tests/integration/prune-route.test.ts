@@ -8,7 +8,8 @@ import { fixedClock, uuidv7 } from '@/shared/kernel';
 import { POST as prune } from '@/app/internal/prune/route';
 import { createPendingMedia } from '@/modules/media/domain/media';
 import { PENDING_UPLOAD_TTL_MS } from '@/modules/media/application/prune-media';
-import { prunePendingMedia } from '@/modules/media';
+import { STALLED_PROCESSING_TTL_MS } from '@/modules/media/application/requeue-stalled-thumbnails';
+import { prunePendingMedia, requeueStalledThumbnails } from '@/modules/media';
 import { LocalMediaBlobStore } from '@/modules/media/infrastructure/local-media-blob-store';
 import { PrismaMediaRepository } from '@/modules/media/infrastructure/prisma-media-repository';
 
@@ -64,7 +65,10 @@ describe.skipIf(!DATABASE_URL)('the scheduled prune', () => {
     const response = await prune(request({ authorization: `Bearer ${SECRET}` }));
     expect(response.status).toBe(200);
 
-    const body = (await response.json()) as { swept: Record<string, number> };
+    const body = (await response.json()) as {
+      swept: Record<string, number>;
+      requeued: Record<string, number>;
+    };
     // The point is that all seven are wired in — a pruner missing from the
     // route is exactly the failure this whole route exists to fix, and it
     // would otherwise look identical to one that found nothing to do.
@@ -77,6 +81,10 @@ describe.skipIf(!DATABASE_URL)('the scheduled prune', () => {
       'rateLimitWindows',
       'refreshTokens',
     ]);
+    // Separate from `swept` because nothing is deleted, and asserted here for
+    // the same reason as the rest: silently dropping it from the route would
+    // look exactly like a run with nothing stuck.
+    expect(Object.keys(body.requeued)).toEqual(['thumbnails']);
   });
 
   it('deletes an abandoned upload and the bytes it left behind', async () => {
@@ -129,5 +137,51 @@ describe.skipIf(!DATABASE_URL)('the scheduled prune', () => {
 
     expect(await prunePendingMedia(NOW)).toBe(0);
     expect((await media.findById(old.id))?.status).toBe('ready');
+  });
+
+  /**
+   * The failure these cover actually happened in production: the Cloud Tasks
+   * API was not enabled, every enqueue threw, `confirmUpload` swallowed it by
+   * design — and the rows sat in `processing` with nothing in the system ever
+   * looking at them again, so those photos were invisible permanently.
+   *
+   * `APP_ENV` is `local` here, so the queue is the in-process one: a
+   * re-enqueue runs the job body immediately rather than scheduling it. The
+   * original's bytes are deliberately absent, so the job fails and writes
+   * `failed` — which is what makes "no longer `processing`" a precise
+   * assertion that the row was actually re-driven, with no image fixture and
+   * no sharp decode involved.
+   */
+  const processingSince = async (updatedAt: Date): Promise<string> => {
+    const row = createPendingMedia({
+      ownerId: uuidv7(NOW.getTime()),
+      contentType: 'image/jpeg',
+      declaredSizeBytes: 400_000,
+      clock: fixedClock(updatedAt),
+    });
+    await media.create(row);
+    await getDatabase()!.$executeRawUnsafe(
+      `UPDATE media.media SET status = 'processing', updated_at = '${updatedAt.toISOString()}'
+       WHERE id = '${row.id}'`,
+    );
+    return row.id;
+  };
+
+  it('re-drives a thumbnail whose job was never enqueued', async () => {
+    const stuck = await processingSince(
+      new Date(NOW.getTime() - STALLED_PROCESSING_TTL_MS - 60_000),
+    );
+
+    expect(await requeueStalledThumbnails(NOW)).toBe(1);
+    expect((await media.findById(stuck))?.status).not.toBe('processing');
+  });
+
+  it('leaves a thumbnail that is merely slow, not lost', async () => {
+    // Inside the window: the job may well still be running, and re-enqueueing
+    // it would buy a duplicate dispatch for nothing.
+    const recent = await processingSince(new Date(NOW.getTime() - 60_000));
+
+    expect(await requeueStalledThumbnails(NOW)).toBe(0);
+    expect((await media.findById(recent))?.status).toBe('processing');
   });
 });

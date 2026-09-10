@@ -8,7 +8,7 @@ import {
   prunePendingRegistrations,
   pruneRefreshTokens,
 } from '@/modules/identity';
-import { prunePendingMedia } from '@/modules/media';
+import { prunePendingMedia, requeueStalledThumbnails } from '@/modules/media';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -56,8 +56,16 @@ export async function POST(request: Request): Promise<Response> {
     abandonedUploads: await prunePendingMedia(now),
   };
 
+  /**
+   * Reported separately from `swept`, because it is not one: nothing is
+   * deleted here. A thumbnail job whose enqueue was lost leaves its Media
+   * `processing` forever (see `requeueStalledThumbnails`), and this daily run
+   * is what gives it another go.
+   */
+  const requeued = { thumbnails: await requeueStalledThumbnails(now) };
+
   return Response.json(
-    { swept, at: now.toISOString() },
+    { swept, requeued, at: now.toISOString() },
     { status: 200, headers: { 'cache-control': 'no-store' } },
   );
 }
