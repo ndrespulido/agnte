@@ -612,3 +612,42 @@ model OAuthHandoff {
   @@map("oauth_handoff")
   @@schema("identity")
 }
+
+/// A shared, read-only historical event: the catalogue every user's past
+/// scroll runs into once their own runs out (CLAUDE.md).
+///
+/// Ownerless on purpose — this is the one table in the system that is the same
+/// for everybody, so there is no `owner_id` and no visibility to resolve. It is
+/// also the reason the whole thing can be cached hard and never invalidated
+/// per user.
+///
+/// Seeded by migration rather than by an operator step: a catalogue that is
+/// present in one environment and absent in another is a bug that only shows
+/// up as a timeline that stops early.
+model DeepTimeEvent {
+  id String @id @db.Uuid
+
+  /// The natural key, so a later migration can add events without risking a
+  /// duplicate and without depending on generated ids being stable.
+  slug String @unique
+
+  /// The same axis `verse.timeline_years` uses — years from 2000-01-01,
+  /// negative into the past — so a catalogue entry and a Verse are directly
+  /// comparable without either module knowing the other's table.
+  timelineYears Float @map("timeline_years")
+
+  title String
+
+  /// One sentence of context. Optional because a few entries say everything in
+  /// their title.
+  detail String?
+
+  /// cosmic | geological | life | human. A string rather than an enum for the
+  /// same reason Media.status is: the constraint lives in the migration next to
+  /// the others.
+  category String
+
+  @@index([timelineYears, id])
+  @@map("deep_time_event")
+  @@schema("insights")
+}

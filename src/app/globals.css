@@ -383,6 +383,42 @@ a {
   background: var(--color-paper-raised);
 }
 
+/*
+ * The shared catalogue, past the end of a person's own record.
+ *
+ * Set back rather than boxed off: it is the same column continuing, and a
+ * panel around it would read as a different feature rather than as history
+ * the scroll has arrived at.
+ */
+.catalogue {
+  margin-top: var(--space-xl);
+  color: var(--color-ink-soft);
+}
+
+.catalogue-seam {
+  margin: 0 0 var(--space-lg);
+  padding-top: var(--space-lg);
+  border-top: var(--hairline) solid var(--color-rule);
+  font-size: var(--text-small);
+  color: var(--color-ink-faint);
+}
+
+/* Deep time reads as words, not a clock, so it needs the room the tabular
+   time column does not give it. */
+.catalogue .verse {
+  grid-template-columns: 1fr;
+  gap: var(--space-xxs);
+}
+
+.catalogue .verse-time {
+  font-variant-numeric: normal;
+  color: var(--color-ink-faint);
+}
+
+.catalogue .verse-body {
+  grid-column: 1;
+}
+
 .verse-tags {
   margin: 0;
   display: flex;
