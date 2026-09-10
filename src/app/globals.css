@@ -250,6 +250,43 @@ a {
   display: grid;
   grid-template-columns: 3.25rem 1fr;
   gap: var(--space-md);
+  /* The anchor for the stretched open button below. */
+  position: relative;
+}
+
+/*
+ * The whole row, as one target, without wrapping the row in a <button>.
+ *
+ * See Timeline.tsx for why it is empty and stretched rather than a wrapper: a
+ * button may only hold phrasing content, and this row holds paragraphs, a
+ * list and a definition list. Transparent, so the row looks exactly as it did
+ * — the focus ring is the only time it draws itself.
+ */
+.verse-open {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  /*
+   * On top of the row's own content, not under it.
+   *
+   * Under it, the content takes every click and only the padding between
+   * elements reaches the button — which is to say the row is not tappable at
+   * all, which is how a browser found this. The cost is that the row's text
+   * stops being selectable; that is the right trade for a row whose whole job
+   * is to open on tap, and the detail view it opens is where the text can be
+   * selected.
+   */
+  z-index: 1;
+}
+
+.verse-open:focus-visible {
+  outline: var(--hairline) solid var(--color-accent-text);
+  outline-offset: var(--space-xxs);
 }
 
 .verse-time {
@@ -450,7 +487,8 @@ a {
 }
 
 .field input,
-.field textarea {
+.field textarea,
+.field select {
   font: inherit;
   font-size: var(--text-body);
   color: var(--color-ink);
@@ -460,6 +498,48 @@ a {
   padding: var(--space-sm);
   /* 16px prevents iOS zooming the whole page on focus. */
   min-height: var(--size-min-tap-target);
+}
+
+/*
+ * Two controls on one line — start/end dates, rating/visibility.
+ *
+ * `minmax(0, 1fr)` rather than `1fr`: a date input has a wide intrinsic
+ * minimum, and a bare `1fr` refuses to shrink below it, which pushes the pair
+ * wider than the sheet on a narrow phone.
+ */
+.field-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-md);
+  align-items: end;
+}
+
+.field-pair > label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.property-row {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  margin-bottom: var(--space-sm);
+}
+
+.property-row input {
+  font: inherit;
+  font-size: var(--text-body);
+  color: var(--color-ink);
+  background: var(--color-paper);
+  border: var(--hairline) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+  min-height: var(--size-min-tap-target);
+  min-width: 0;
+}
+
+.add-property {
+  align-self: flex-start;
 }
 
 .tag-picker {
@@ -641,6 +721,101 @@ button.quiet {
 .notice.error {
   color: var(--color-failed);
   text-align: left;
+}
+
+/*
+ * Delete, once it has been asked for a second time.
+ *
+ * Colour is the whole affordance — no fill, no border — because the palette
+ * has one restrained accent and a solid red block would be the loudest thing
+ * in the app by a distance.
+ */
+button.danger {
+  font: inherit;
+  min-height: var(--size-min-tap-target);
+  padding: var(--space-sm) var(--space-md);
+  background: none;
+  border: none;
+  color: var(--color-failed);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* One verse, in full: the screen the `medium` variant was always for. */
+.verse-detail {
+  gap: var(--space-md);
+}
+
+.detail-date {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-large);
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--tracking-display);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink);
+}
+
+.detail-media {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.detail-media img {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: var(--radius-sm);
+}
+
+.detail-media li.pending {
+  padding: var(--space-lg);
+  text-align: center;
+  font-size: var(--text-small);
+  color: var(--color-ink-faint);
+  background: var(--color-paper-raised);
+  border: var(--hairline) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+}
+
+.detail-xp {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--color-ink);
+}
+
+.detail-facts {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  font-size: var(--text-small);
+}
+
+/* A hairline between label and value rather than a boxed table — the same
+   rule-not-box choice the rest of the app makes. */
+.detail-facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding-bottom: var(--space-xs);
+  border-bottom: var(--hairline) solid var(--color-rule);
+}
+
+.detail-facts dt {
+  color: var(--color-ink-soft);
+}
+
+.detail-facts dd {
+  margin: 0;
+  color: var(--color-ink);
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 .notice.end {

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { QuickAdd } from './QuickAdd';
 import { SignIn } from './SignIn';
 import { Timeline } from './Timeline';
+import { VerseDetail } from './VerseDetail';
 import {
   completeGoogleSignIn,
   getServerSessionSnapshot,
@@ -55,7 +56,17 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
    */
   const [anchor, setAnchor] = useState(() => new Date());
 
+  /**
+   * The verse being looked at, over the timeline rather than instead of it.
+   *
+   * An overlay, not a route: the timeline behind keeps its scroll position and
+   * its loaded pages, which a navigation would throw away and have to rebuild
+   * a page at a time on the way back.
+   */
+  const [openVerseId, setOpenVerseId] = useState<string | null>(null);
+
   const onDateChange = useCallback((label: string) => setDateLabel(label), []);
+  const onOpen = useCallback((verseId: string) => setOpenVerseId(verseId), []);
 
   if (session === 'unknown') return null;
   if (session === 'signed-out')
@@ -77,10 +88,18 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
       </header>
 
       <main className="app-main">
-        <Timeline onDateChange={onDateChange} anchor={anchor} />
+        <Timeline onDateChange={onDateChange} anchor={anchor} onOpen={onOpen} />
       </main>
 
       <QuickAdd onAdded={() => setAnchor(new Date())} />
+
+      {openVerseId !== null ? (
+        <VerseDetail
+          verseId={openVerseId}
+          onClose={() => setOpenVerseId(null)}
+          onChanged={() => setAnchor(new Date())}
+        />
+      ) : null}
     </>
   );
 }
