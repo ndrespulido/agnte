@@ -28,7 +28,7 @@ Everything below is a one-time setup step. Per-deploy infrastructure lives in
 | Task callback secret | Shared secret for `/internal/*` (by set-secrets.sh) | 4.9 | ☐ |
 | Retention sweep | Daily Cloud Scheduler job → `/internal/prune` | 4.10 | ☐ |
 | R2 CORS | Bucket CORS rule so the browser's presigned upload isn't blocked | 4.11 | ☐ |
-| Custom domain | Cloudflare-proxied CNAME to production, `APP_BASE_URL` pinned | 4.12 | ☐ |
+| Custom domain | Cloud Run Domain Mapping, Cloudflare-proxied, `APP_BASE_URL` pinned | 4.12 | ☐ |
 
 CI runs the database-backed tests against a throwaway Postgres container (added
 in 1.5) rather than a Neon branch — every push would otherwise spend one, and
@@ -541,7 +541,7 @@ than leaving someone to discover it at the button.
 `APP_BASE_URL` disagree — a trailing slash, `http` against `https`, or the
 Cloud Run URL against a custom domain. Both must be the same string. If a
 custom domain gets connected later (§2k), it needs a *second* registered
-URI here, not a replacement one — see §2k step 3.
+URI here, not a replacement one — see §2k step 6.
 
 ### What is deliberately not requested
 
@@ -922,43 +922,149 @@ upgrade of that dependency does not quietly reintroduce it.
 
 ## 2k. A custom domain in front of production
 
-No Cloud Run Domain Mapping, and no load balancer — architecture.md §3.1 is
-explicit that a load balancer never gets created here, and "Cloudflare in
-front of everything" (§3, bullet 6) is already the plan. So the domain is
-connected the same way R2 already gets served through Cloudflare (§2b): DNS
-on Cloudflare, proxied, terminating there.
+No load balancer — architecture.md §3.1 rules that out regardless of which
+way a domain connects. Domain Mapping is not a load balancer; it is a
+distinct, free Cloud Run feature, and it is what this section documents —
+by way of a small proxy service, for a reason worth stating up front because
+it is not obvious from Cloud Run's own error messages.
 
-### 1. DNS, in the Cloudflare dashboard
+**Revised twice from earlier versions of this section**, in sequence, each
+correction found by actually running the previous one against real
+infrastructure:
 
-Add the domain's zone to Cloudflare if it isn't already, then:
+1. Routing the domain through Cloudflare with a plain proxied CNAME and no
+   Domain Mapping, on the assumption Cloudflare would rewrite the Host
+   header for free — it doesn't; Cloud Run routes incoming requests by Host
+   header, not by TLS SNI, and a Host it has no service registered for is
+   indistinguishable from a Domain Mapping that was never created, so
+   `agnte.app` loaded Google's own generic 404.
+2. Cloudflare Origin Rules' Host Header override, the fix for that —
+   confirmed against a live account to need **Pro or higher**, not Free.
+3. Cloud Run Domain Mapping itself, tried directly against the real
+   service — `gcloud` accepted `--region=us-central1` (the mapping's own
+   region) but then answered `Route agnte does not exist`. Domain Mapping
+   only works in a small, historical list of regions, and `europe-west3` —
+   where the real service runs, chosen to sit near the Neon database
+   (architecture.md) — was never one of them. The mapping's region and the
+   service's region are not independent: the service has to actually live
+   in a supported region for the mapping to find it.
 
+Moving the whole app to `us-central1` would trade database latency on every
+request, permanently, for a one-time domain-setup convenience. Instead,
+`infra/domain-proxy/` is a small, dependency-free reverse proxy — forwards
+everything, correcting only the `Host` header — deployed *only* to
+`us-central1`, existing solely so a Domain Mapping has a Route to attach to
+there. The real service keeps running in `europe-west3`, unchanged; the
+proxy adds one fixed extra hop to every request rather than moving
+anything's data path.
+
+### 1. Deploy the domain proxy
+
+```bash
+cd infra/domain-proxy
+gcloud builds submit \
+  --tag=europe-west3-docker.pkg.dev/agnte-prod/agnte/domain-proxy:latest \
+  --project=agnte-prod
+
+gcloud run deploy agnte-domain-proxy \
+  --image=europe-west3-docker.pkg.dev/agnte-prod/agnte/domain-proxy:latest \
+  --region=us-central1 \
+  --project=agnte-prod \
+  --allow-unauthenticated \
+  --max-instances=2 \
+  --min-instances=0 \
+  --set-env-vars=ORIGIN_HOST=agnte-lddzhm2pxa-ey.a.run.app
 ```
-Type:   CNAME
-Name:   agnte.app          (the apex — Cloudflare flattens a proxied CNAME
-                             at the root automatically, unlike most DNS hosts)
-Target: agnte-lddzhm2pxa-ey.a.run.app     (production's own URL, from
-                                            `gcloud run services describe agnte
-                                            --format='value(status.url)'` —
-                                            it will differ per project)
-Proxy:  Proxied (orange cloud) — required. A grey-clouded record is a bare
-        DNS answer with no WAF, no edge rate limiting, and defeats §8.6's
-        first line of defence.
+
+`gcloud builds submit` (Cloud Build), not `docker build`/`docker push` —
+deliberately. Local dev on this project has never had Docker available
+(architecture.md §7.1, and the constraints this doc itself is written
+under), and Cloud Build needs nothing beyond `gcloud`'s own credentials,
+already working for every other command in this section: no local daemon,
+no docker-credential helper, none of the podman-emulation or snap-confined
+credential-helper failures a `docker push` from this kind of machine runs
+into. It uploads `infra/domain-proxy/` as source and builds the Dockerfile
+in it the same way `docker build` would, just on Google's infrastructure
+instead of the machine running this command.
+
+The Artifact Registry repo is `europe-west3` (the same one `bootstrap-gcp.sh`
+created) even though the service deploys to `us-central1` — Cloud Run pulls
+cross-region without issue, and this deploys rarely enough (a Node base image
+patch, at most) that the one-time cross-region pull cost is not worth a
+second regional repo to avoid.
+
+No `--service-account` is set, deliberately: this proxy calls no GCP API and
+touches no secret, so the default compute service account — which needs no
+role granted for this to work — is enough. Every other service in this
+project gets a purpose-scoped one *because* it touches something that needs
+scoping; this one doesn't, so it doesn't get one either.
+
+### 2. Verify domain ownership
+
+Domain Mapping requires the domain to be verified for this Google account,
+via [Search Console](https://search.google.com/search-console) if it isn't
+already (a TXT or HTML-file challenge Search Console gives you — a one-time
+check, not a recurring one). Skip this if the domain is already verified
+under the same account the GCP project uses.
+
+### 3. Create the mapping
+
+Against the proxy, in `us-central1` — not the real service, and not
+`europe-west3`.
+
+```bash
+gcloud beta run domain-mappings create \
+  --service=agnte-domain-proxy \
+  --domain=agnte.app \
+  --region=us-central1 \
+  --project=agnte-prod
 ```
 
-SSL/TLS mode: **Full (strict)**. Cloud Run always serves a valid Google-managed
-certificate on its own `.run.app` hostname, so Cloudflare's connection to the
-origin verifies cleanly with no origin certificate to create or rotate —
-"Flexible" would work but sends Cloudflare-to-origin traffic unencrypted,
-which is the one thing Full (strict) exists to avoid.
+(`--region` for `domain-mappings` only exists in the `beta` command track —
+the stable `gcloud run` surface rejects it outright and names the fix in its
+own error message. `gcloud` offers to install the `beta` component
+automatically the first time it's needed.)
 
-Cloud Run does no Host-header routing of its own here (that is what a Domain
-Mapping would add) — it doesn't need to. Cloudflare's proxy makes its own
-outbound HTTPS connection to `agnte-lddzhm2pxa-ey.a.run.app` using that
-hostname's own SNI, which is all Cloud Run's front end needs to route the
-request; `agnte.app` only ever exists at the edge, between the browser and
-Cloudflare.
+This prints the DNS records to add — for an apex domain, a set of Google's
+own A and AAAA records (a CNAME is not valid at a zone apex in classic DNS).
+Use exactly what this command prints, not a copied example: which specific
+addresses Google hands back is not something to hardcode in a doc that
+outlives any one lookup.
 
-### 2. Pin the canonical origin
+### 4. DNS, in the Cloudflare dashboard
+
+Delete the CNAME record from the very first approach, if it's still there —
+nothing points at production's own URL directly any more. Add the A and AAAA
+records step 3 printed, name `agnte.app` (the apex).
+
+**Leave these DNS-only (grey cloud) at first.** Google provisions a managed
+certificate for the mapping after DNS resolves, which can take anywhere from
+a few minutes to a few hours, and Cloudflare's proxy sitting in front before
+that finishes can interfere with provisioning. Check progress with:
+
+```bash
+gcloud beta run domain-mappings describe --domain=agnte.app \
+  --region=us-central1 --project=agnte-prod
+```
+
+Once its `status` shows the certificate as ready (`Ready: True` in the
+conditions), switch the records to **Proxied** (orange cloud) in Cloudflare
+to restore the WAF and edge rate limiting §8.6 relies on as the first line
+of defence — nothing else about the setup changes at that point, including
+the Host-header question that started all of this: Google now recognises
+`agnte.app` directly (that's what the mapping registers), so it no longer
+matters what Host Cloudflare forwards. SSL/TLS mode stays **Full (strict)**:
+the mapping's certificate is a real one, so there is nothing to trust
+blindly the way "Flexible" would ask Cloudflare to.
+
+*Have Cloudflare Pro or higher already?* Origin Rules' Host Header override
+(Rules → Origin Rules → "Then" → Host Header → Rewrite to the `.run.app`
+URL) is a legitimate alternative to all of the above — proxy a plain CNAME
+straight to `agnte-lddzhm2pxa-ey.a.run.app` and skip the proxy service,
+Domain Mapping, and Search Console verification entirely. Not documented
+step-by-step here because it does not work on the plan this project runs on.
+
+### 5. Pin the canonical origin
 
 Once DNS resolves, tell the app: **GitHub → repo Settings → Secrets and
 variables → Actions → Variables → New repository variable**,
@@ -973,7 +1079,7 @@ an empty commit's worth of patience, or `workflow_dispatch` the production
 workflow by hand, rather than assuming it's live the moment the variable is
 saved.
 
-### 3. Google sign-in's redirect URI
+### 6. Google sign-in's redirect URI
 
 §2f's redirect URI is byte-exact and origin-specific — a second one has to be
 added for the new origin, not swapped in for the old one, in Google Cloud
@@ -987,7 +1093,7 @@ Leave the `.run.app` one registered until `agnte.app` is confirmed working —
 Google allows more than one redirect URI on a client, and removing the old
 one early just means a mistake in the new setup has no fallback.
 
-### 4. R2 CORS needs the new origin too
+### 7. R2 CORS needs the new origin too
 
 The browser's presigned upload is still a cross-origin request (§2j) — now
 from `https://agnte.app` instead of, or alongside, the `.run.app` URL. Re-run
@@ -998,9 +1104,8 @@ PROJECT_ID=agnte-prod APP_BASE_URL=https://agnte.app ./infra/set-r2-cors.sh
 ```
 
 This adds the domain to the rule rather than replacing the `.run.app` origin
-with it — Cloud Run's own URL stays reachable (there is no Domain Mapping
-here to make it exclusive), so both stay real origins a browser might load
-the app from.
+with it — a Domain Mapping does not make the default URL stop working, so
+both stay real origins a browser might load the app from.
 
 ### What doesn't need touching
 

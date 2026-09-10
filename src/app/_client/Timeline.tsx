@@ -24,9 +24,12 @@ interface Section {
 export function Timeline({
   onDateChange,
   anchor,
+  onOpen,
 }: {
   /** Reports the date of whatever is under the sticky header. */
   onDateChange: (label: string) => void;
+  /** A row was tapped: the shell opens the detail view over the timeline. */
+  onOpen: (verseId: string) => void;
   /**
    * The point the timeline runs back from. Owned by the shell rather than
    * computed here: a `new Date()` recomputed on render would move mid-scroll
@@ -194,7 +197,7 @@ export function Timeline({
 
           <ul className="verses">
             {section.verses.map((verse) => (
-              <VerseRow key={verse.id} verse={verse} />
+              <VerseRow key={verse.id} verse={verse} onOpen={onOpen} />
             ))}
           </ul>
         </section>
@@ -210,13 +213,36 @@ export function Timeline({
   );
 }
 
-function VerseRow({ verse }: { verse: VerseView }) {
+function VerseRow({
+  verse,
+  onOpen,
+}: {
+  verse: VerseView;
+  onOpen: (verseId: string) => void;
+}) {
   const placement = placementOf(verse);
   const time = timeLabel(placement);
 
   return (
     <li className="verse">
       {time ? <span className="verse-time">{time}</span> : null}
+
+      {/*
+        An empty button stretched over the whole row, rather than wrapping the
+        row's content in one.
+
+        A <button> may only contain phrasing content, and this row holds <p>,
+        <dl> and <ul> — wrapping them would be invalid HTML and lands
+        assistive tech in a control whose accessible name is the entire row
+        read as one string. Stretched over the top, the row keeps its
+        structure and the button carries a name that says what it does.
+      */}
+      <button
+        type="button"
+        className="verse-open"
+        onClick={() => onOpen(verse.id)}
+        aria-label={`Open ${verse.xp ? verse.xp.slice(0, 60) : 'this verse'}`}
+      />
 
       <div className="verse-body">
         <VerseMedia verse={verse} />

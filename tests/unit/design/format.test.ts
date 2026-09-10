@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   deepTimeLabel,
+  fromDateTimeInput,
   headerLabel,
   placementOf,
   sectionKey,
   timeLabel,
+  toDateTimeInput,
 } from '@/app/_client/format';
 
 const NOW = new Date('2026-09-08T12:00:00.000Z');
@@ -122,5 +124,42 @@ describe('timeLabel', () => {
 
   it('has nothing to say about deep time', () => {
     expect(timeLabel(verse({ deepTimeYears: -66e6 }))).toBe(null);
+  });
+});
+
+/**
+ * The pair the edit sheet writes dates through.
+ *
+ * The round trip is the property that matters: what the sheet shows for a
+ * stored instant must be the instant it sends back when nothing was typed.
+ * Both halves work in UTC on purpose — see the doc comment on
+ * `toDateTimeInput` for the cost of that, and why matching the display layer
+ * beats being independently right.
+ */
+describe('the datetime-local pair', () => {
+  it('round-trips an instant unchanged', () => {
+    const iso = '2026-03-01T14:30:00.000Z';
+    expect(fromDateTimeInput(toDateTimeInput(iso))).toBe(iso);
+  });
+
+  it('reads and writes in UTC, not the browser zone', () => {
+    // The whole point: were this local, a machine in Madrid would render
+    // 16:30 here and the timeline (which reads UTC parts) would then disagree
+    // with the field the person just typed into.
+    expect(toDateTimeInput('2026-03-01T14:30:00.000Z')).toBe('2026-03-01T14:30');
+    expect(fromDateTimeInput('2026-03-01T14:30')).toBe('2026-03-01T14:30:00.000Z');
+  });
+
+  it('treats empty as no date in both directions', () => {
+    // Not the same as "leave it alone": the sheet sends this null explicitly
+    // so that clearing a date actually clears it.
+    expect(toDateTimeInput(null)).toBe('');
+    expect(fromDateTimeInput('')).toBe(null);
+    expect(fromDateTimeInput('   ')).toBe(null);
+  });
+
+  it('answers empty rather than throwing on something unparseable', () => {
+    expect(toDateTimeInput('not a date')).toBe('');
+    expect(fromDateTimeInput('not a date')).toBe(null);
   });
 });

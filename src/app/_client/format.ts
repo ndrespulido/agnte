@@ -140,6 +140,44 @@ const round = (value: number): string => {
   return fixed.endsWith('.0') ? fixed.slice(0, -2) : fixed;
 };
 
+/**
+ * An ISO instant as an `<input type="datetime-local">` value, and back.
+ *
+ * Both halves work in UTC, deliberately, because everything else on this
+ * screen does: `headerLabel`, `sectionKey` and `timeLabel` all read UTC parts.
+ * Converting to the browser's local zone here and not there would mean a verse
+ * entered at 14:00 filing itself under a different hour — or, across midnight,
+ * a different day — than the one just typed.
+ *
+ * The honest cost is that "14:00" means 14:00 UTC, not 14:00 where the person
+ * is standing. That is a real bug for a journal, but it is the *display*
+ * layer's bug and it already exists: the timeline has always rendered UTC.
+ * Fixing it means changing both together, which is not this change.
+ */
+export function toDateTimeInput(iso: string | null): string {
+  if (iso === null) return '';
+
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return '';
+
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${at.getUTCFullYear()}-${pad(at.getUTCMonth() + 1)}-${pad(at.getUTCDate())}` +
+    `T${pad(at.getUTCHours())}:${pad(at.getUTCMinutes())}`
+  );
+}
+
+/** Empty means "no date", which the API takes as an explicit null. */
+export function fromDateTimeInput(value: string): string | null {
+  if (value.trim() === '') return null;
+
+  // `Z` rather than letting Date parse it as local: a bare "YYYY-MM-DDTHH:mm"
+  // is interpreted in the browser's zone, which is the shift this whole pair
+  // exists to avoid.
+  const at = new Date(`${value}:00.000Z`);
+  return Number.isNaN(at.getTime()) ? null : at.toISOString();
+}
+
 /** The small line under a header: the time of day, when there is one. */
 export function timeLabel(placement: Placement): string | null {
   if (placement.kind !== 'date') return null;

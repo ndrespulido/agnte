@@ -203,7 +203,15 @@ Sober, minimalist, iOS-glass, with the feel of a 1990s paper agenda.
   excluded Prisma migrations from the repo).
 - **Push back on scope.** The v1 build repeatedly expanded mid-phase. If a
   request implies more than it appears to, say so before building.
-- **Small, reviewable commits** with messages explaining *why*, not just what.
+- **Fixer, not explainer.** The user is on a tight usage budget. Default to
+  doing the work and reporting the result in a line or two, not walking
+  through the reasoning. Skip narrating what you're about to check; just check
+  it. Save longer explanations for when something is genuinely ambiguous or
+  the user asks "why".
+- **Commit size follows the change, not a rule of thumb.** One logical change
+  per commit still holds, but don't split a single coherent fix into several
+  commits just to keep each one small — that costs the user a review pass and
+  a CI run per commit. Bundle related mechanical changes together.
 
 ---
 

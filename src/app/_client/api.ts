@@ -92,6 +92,9 @@ export interface NewVerse {
   location?: string | null;
   rating?: number | null;
   eventStart?: string | null;
+  eventEnd?: string | null;
+  visibility?: string | null;
+  properties?: Record<string, string>;
   mediaIds?: string[];
 }
 
@@ -106,6 +109,71 @@ export const createVerse = (input: NewVerse): Promise<VerseView> =>
     },
     body: JSON.stringify(input),
   }).then((r) => json<VerseView>(r));
+
+export const fetchVerse = (id: string): Promise<VerseView> =>
+  authedFetch(`/v1/verses/${id}`).then((r) => json<VerseView>(r));
+
+/**
+ * A patch, with the version the editor was opened on.
+ *
+ * Every field is optional and the server reads an omitted one as "leave it",
+ * an explicit `null` as "clear it" — so a sheet that manages a field must send
+ * it on every save, including when it was emptied. `expectedVersion` is what
+ * turns a save on stale data into a 409 rather than a silent overwrite of
+ * whatever changed underneath (architecture.md §2).
+ */
+export interface VerseEdit {
+  expectedVersion: number;
+  tagIds?: string[];
+  xp?: string | null;
+  location?: string | null;
+  rating?: number | null;
+  eventStart?: string | null;
+  eventEnd?: string | null;
+  visibility?: string | null;
+  properties?: Record<string, string>;
+  mediaIds?: string[];
+}
+
+export class VersionConflict extends Error {}
+
+export const updateVerse = async (id: string, input: VerseEdit): Promise<VerseView> => {
+  const response = await authedFetch(`/v1/verses/${id}`, {
+    method: 'PATCH',
+    headers: {
+      'content-type': 'application/json',
+      'idempotency-key': crypto.randomUUID(),
+    },
+    body: JSON.stringify(input),
+  });
+
+  // Distinguished from every other failure because it is the only one the
+  // reader can actually do something about, and what they should do — reload
+  // and look at what changed — is particular enough to deserve saying.
+  if (response.status === 409) {
+    throw new VersionConflict(
+      'This verse changed somewhere else while you were editing it. Reopen it to see the current version.',
+    );
+  }
+
+  return json<VerseView>(response);
+};
+
+export const deleteVerse = async (id: string, expectedVersion: number): Promise<void> => {
+  const response = await authedFetch(
+    `/v1/verses/${id}?expectedVersion=${expectedVersion}`,
+    { method: 'DELETE', headers: { 'idempotency-key': crypto.randomUUID() } },
+  );
+
+  if (response.status === 409) {
+    throw new VersionConflict(
+      'This verse changed somewhere else. Reopen it before deleting.',
+    );
+  }
+  // 204 is the success case and `ok` covers it; anything else goes through
+  // `json` purely to raise the server's own message.
+  if (!response.ok) await json<unknown>(response);
+};
 
 export const searchVerses = (query: string): Promise<TimelinePage> =>
   authedFetch(`/v1/search?q=${encodeURIComponent(query)}`).then((r) =>

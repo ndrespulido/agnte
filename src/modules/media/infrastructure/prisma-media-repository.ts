@@ -155,6 +155,21 @@ export class PrismaMediaRepository implements MediaRepository {
     return rows.map(toMedia);
   }
 
+  async findStalledProcessing(before: Date): Promise<Media[]> {
+    const rows = await requireDatabase().$queryRaw<MediaRow[]>`
+      SELECT id, owner_id, status, content_type, declared_size_bytes,
+             storage_key, created_at, updated_at, version
+      FROM media.media
+      WHERE status = 'processing'
+        AND updated_at < ${before}
+      -- A tighter bound than findAbandonedPending's: every row here becomes a
+      -- queued task, a Cloud Run request and a sharp decode, where every row
+      -- there becomes one DELETE. The daily run takes the next hundred.
+      LIMIT 100
+    `;
+    return rows.map(toMedia);
+  }
+
   async deleteMany(ids: readonly string[]): Promise<number> {
     if (ids.length === 0) return 0;
 
