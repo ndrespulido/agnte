@@ -1,18 +1,38 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { fetchTimeline, type VerseView } from './api';
 import { clearTokens, NotSignedIn } from './session';
 import { headerLabel, placementOf, sectionKey, timeLabel } from './format';
 
 /**
- * The timeline: today at the top, scrolling into the past.
+ * The timeline: today in the middle, the future above it, the past below.
  *
- * The future half exists in the API and is deliberately not shown yet — a
- * single column that runs both ways from a centre needs a scroll anchor to stay
- * put while rows are prepended, and getting that wrong makes the page jump
- * under a thumb. Past-only is the honest half of the feature; the other half
- * lands with the quick-add, when there is a reason to look forward.
+ * Time runs downward, so the column reads farthest-future → today → deepest
+ * past, and "scroll up to see what's coming" matches the way the date header
+ * counts backwards as you go down.
+ *
+ * The future half used to be deliberately absent: the API had it, but a column
+ * that grows from both ends needs a scroll anchor to stay put while rows are
+ * prepended, and until dates could be *chosen* there was nothing to look
+ * forward to. Both halves of that changed — the add sheet takes an
+ * `eventStart` now, so a verse can be written into the future and has to be
+ * readable there.
+ *
+ * The anchoring is the whole difficulty. Prepending above the viewport pushes
+ * everything down under the reader's thumb. `overflow-anchor: auto` is the
+ * browser's own fix and Chrome and Firefox implement it — Safari does not, and
+ * this app is iOS-first, so it is done by hand: measure the scroll height
+ * before the rows go in, restore the difference after, in a layout effect so
+ * it lands before paint rather than as a visible jump.
  */
 
 interface Section {
@@ -20,6 +40,9 @@ interface Section {
   label: string;
   verses: VerseView[];
 }
+
+/** How many rows each direction loads at a time. */
+const PAGE = 10;
 
 export function Timeline({
   onDateChange,
@@ -38,14 +61,27 @@ export function Timeline({
    */
   anchor: Date;
 }) {
-  const [verses, setVerses] = useState<VerseView[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
+  /**
+   * The two halves are held apart and joined only for rendering.
+   *
+   * Keeping one merged array instead would mean every future page having to
+   * find where "today" is in order to insert above it, and getting that wrong
+   * silently mis-orders the column. Two lists, each only ever appended to, and
+   * the future one reversed at the join: the API returns future ascending
+   * (nearest first) and the column runs descending, so the reversal is the one
+   * place that fact lives.
+   */
+  const [past, setPast] = useState<VerseView[]>([]);
+  const [future, setFuture] = useState<VerseView[]>([]);
+  const [pastCursor, setPastCursor] = useState<string | null>(null);
+  const [futureCursor, setFutureCursor] = useState<string | null>(null);
+  const [pastDone, setPastDone] = useState(false);
+  const [futureDone, setFutureDone] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [exhausted, setExhausted] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   /**
-   * The first page.
+   * The first page of each direction, together.
    *
    * The fetch is started in the effect but every state update happens in the
    * callback, not synchronously in the effect body — a synchronous setState
@@ -58,12 +94,18 @@ export function Timeline({
   useEffect(() => {
     let cancelled = false;
 
-    fetchTimeline({ anchor, direction: 'past', cursor: null })
-      .then((page) => {
+    Promise.all([
+      fetchTimeline({ anchor, direction: 'past', cursor: null, limit: PAGE }),
+      fetchTimeline({ anchor, direction: 'future', cursor: null, limit: PAGE }),
+    ])
+      .then(([back, forward]) => {
         if (cancelled) return;
-        setVerses(page.verses);
-        setCursor(page.nextCursor);
-        setExhausted(page.nextCursor === null);
+        setPast(back.verses);
+        setPastCursor(back.nextCursor);
+        setPastDone(back.nextCursor === null);
+        setFuture(forward.verses);
+        setFutureCursor(forward.nextCursor);
+        setFutureDone(forward.nextCursor === null);
         setError(null);
       })
       .catch((cause: unknown) => {
@@ -84,27 +126,107 @@ export function Timeline({
   }, [anchor]);
 
   /**
-   * The next page. Called from the sentinel's observer rather than from an
-   * effect body, so it may set state as it goes.
+   * How much scroll height the next render has to make up for.
+   *
+   * Set immediately before a future page is added and consumed by the layout
+   * effect below. A ref rather than state on purpose: it must be readable in
+   * the same commit that renders the new rows, and a state update would
+   * schedule another render after the jump had already been painted.
    */
-  const loadMore = useCallback(async () => {
-    if (cursor === null) return;
+  const anchorHeight = useRef<number | null>(null);
+
+  /**
+   * Put the scroll position back where it was before rows appeared above it.
+   *
+   * `useLayoutEffect`, not `useEffect`: this has to run after the DOM has the
+   * new rows but before the browser paints, which is exactly the gap a layout
+   * effect fills. In a plain effect the reader sees the content jump and then
+   * jump back.
+   */
+  useLayoutEffect(() => {
+    const before = anchorHeight.current;
+    if (before === null) return;
+
+    anchorHeight.current = null;
+    window.scrollBy(0, document.documentElement.scrollHeight - before);
+  });
+
+  const loadPast = useCallback(async () => {
+    if (pastCursor === null) return;
 
     setLoading(true);
     try {
-      const page = await fetchTimeline({ anchor, direction: 'past', cursor });
-      setVerses((current) => [...current, ...page.verses]);
-      setCursor(page.nextCursor);
-      setExhausted(page.nextCursor === null);
+      const page = await fetchTimeline({
+        anchor,
+        direction: 'past',
+        cursor: pastCursor,
+        limit: PAGE,
+      });
+      // Appended below the fold — nothing moves, so no anchoring needed.
+      setPast((current) => [...current, ...page.verses]);
+      setPastCursor(page.nextCursor);
+      setPastDone(page.nextCursor === null);
     } catch (cause) {
       if (cause instanceof NotSignedIn) clearTokens();
       else setError(cause instanceof Error ? cause.message : 'Could not load more.');
     } finally {
       setLoading(false);
     }
-  }, [anchor, cursor]);
+  }, [anchor, pastCursor]);
+
+  const loadFuture = useCallback(async () => {
+    if (futureCursor === null) return;
+
+    setLoading(true);
+    try {
+      const page = await fetchTimeline({
+        anchor,
+        direction: 'future',
+        cursor: futureCursor,
+        limit: PAGE,
+      });
+
+      // Measured here rather than in the layout effect: by the time that runs
+      // the rows are already in the document and the old height is gone.
+      if (page.verses.length > 0) {
+        anchorHeight.current = document.documentElement.scrollHeight;
+      }
+
+      setFuture((current) => [...current, ...page.verses]);
+      setFutureCursor(page.nextCursor);
+      setFutureDone(page.nextCursor === null);
+    } catch (cause) {
+      if (cause instanceof NotSignedIn) clearTokens();
+      else setError(cause instanceof Error ? cause.message : 'Could not load more.');
+    } finally {
+      setLoading(false);
+    }
+  }, [anchor, futureCursor]);
+
+  /**
+   * The column, top to bottom: farthest future first, then today, then back
+   * into the past.
+   */
+  const verses = useMemo(() => [...future].reverse().concat(past), [future, past]);
 
   const sections = useMemo(() => groupIntoSections(verses, anchor), [verses, anchor]);
+
+  /**
+   * Where the future stops and the past begins, as a section index.
+   *
+   * Found by membership rather than by comparing dates: a section can hold
+   * both halves at once — anything written for later today is "future" and
+   * anything from this morning is "past", and they group under the same
+   * heading. Marking the first section that contains *any* past verse puts
+   * the centre above that shared heading, which is where a reader opening the
+   * app expects today to start.
+   */
+  const boundary = useMemo(() => {
+    const pastIds = new Set(past.map((verse) => verse.id));
+    return sections.findIndex((section) =>
+      section.verses.some((verse) => pastIds.has(verse.id)),
+    );
+  }, [sections, past]);
 
   // Report the section currently under the header.
   const headingsRef = useRef(new Map<string, HTMLElement>());
@@ -144,24 +266,86 @@ export function Timeline({
     return () => observer.disconnect();
   }, [sections, onDateChange]);
 
-  // Load the next page when the sentinel approaches.
-  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  /**
+   * One sentinel at each end, watched by the same effect.
+   *
+   * `loading` gates both because the two share it: firing the future loader
+   * while a past page is in flight would interleave two writes to the scroll
+   * position, and the anchor measurement of the second would include the rows
+   * the first had already added.
+   */
+  const pastSentinel = useRef<HTMLDivElement | null>(null);
+  const futureSentinel = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel || exhausted || loading) return;
+    if (loading) return;
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) void loadMore();
-      },
-      // Start fetching before the sentinel is visible, so the next page is
-      // usually there by the time the reader arrives.
-      { rootMargin: '400px' },
-    );
+    const watch = (element: HTMLElement | null, load: () => void) => {
+      if (!element) return undefined;
 
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [cursor, exhausted, loading, loadMore]);
+      const observer = new IntersectionObserver(
+        (entries) => {
+          if (entries.some((e) => e.isIntersecting)) load();
+        },
+        // Start fetching before the sentinel is visible, so the next page is
+        // usually there by the time the reader arrives.
+        { rootMargin: '400px' },
+      );
+      observer.observe(element);
+      return observer;
+    };
+
+    const observers = [
+      pastDone ? undefined : watch(pastSentinel.current, () => void loadPast()),
+      futureDone ? undefined : watch(futureSentinel.current, () => void loadFuture()),
+    ];
+
+    return () => {
+      for (const observer of observers) observer?.disconnect();
+    };
+  }, [pastCursor, futureCursor, pastDone, futureDone, loading, loadPast, loadFuture]);
+
+  /**
+   * Open on today, not on the far edge of the future.
+   *
+   * With rows above it, the natural scroll position (the top of the document)
+   * is the furthest-away thing the reader has — the opposite of a timeline
+   * "centred on today". This scrolls to the boundary between the two halves
+   * once, on the first render that has content.
+   *
+   * Keyed on `anchor` so replacing it after a write re-centres, and guarded by
+   * a ref so an incoming future page does not yank the reader back to today
+   * while they are reading forward.
+   */
+  const todayRef = useRef<HTMLDivElement | null>(null);
+  const centred = useRef<Date | null>(null);
+  useLayoutEffect(() => {
+    if (loading || centred.current === anchor) return;
+    const today = todayRef.current;
+    if (!today) return;
+
+    centred.current = anchor;
+
+    /*
+     * Offset by the sticky header, rather than `scrollIntoView({block:
+     * 'start'})`.
+     *
+     * That aligns to the top of the *viewport*, which the fixed date header
+     * covers — the first section's heading lands underneath the glass and
+     * reads as half a word. The header is measured rather than assumed: its
+     * height comes from tokens and a hardcoded 72 here would drift the moment
+     * one of them changed.
+     *
+     * `auto`, never `smooth`: this is where the page should already have
+     * been, not a movement the reader should watch happen.
+     */
+    const header = document.querySelector('.date-header');
+    const clearance = header ? header.getBoundingClientRect().height : 0;
+
+    window.scrollTo({
+      top: today.getBoundingClientRect().top + window.scrollY - clearance,
+      behavior: 'auto',
+    });
+  }, [loading, anchor]);
 
   if (error) {
     return (
@@ -181,32 +365,52 @@ export function Timeline({
 
   return (
     <div className="timeline">
-      {sections.map((section) => (
-        <section key={section.key} aria-labelledby={`h-${section.key}`}>
-          <h2
-            id={`h-${section.key}`}
-            className="section-date"
-            data-section={section.key}
-            ref={(element) => {
-              if (element) headingsRef.current.set(section.key, element);
-              else headingsRef.current.delete(section.key);
-            }}
-          >
-            {section.label}
-          </h2>
+      {futureDone && future.length > 0 ? (
+        <p className="notice end">That is as far ahead as you have written.</p>
+      ) : null}
 
-          <ul className="verses">
-            {section.verses.map((verse) => (
-              <VerseRow key={verse.id} verse={verse} onOpen={onOpen} />
-            ))}
-          </ul>
-        </section>
+      <div ref={futureSentinel} aria-hidden="true" />
+
+      {sections.map((section, index) => (
+        <Fragment key={section.key}>
+          {/*
+            The centre mark, between the last future section and the first
+            past one. It is what the opening scroll lands on, and the only
+            reason it is an element at all — there is nothing to show, because
+            "today" is already the label of the section right below it.
+          */}
+          {index === boundary ? <div ref={todayRef} aria-hidden="true" /> : null}
+
+          <section aria-labelledby={`h-${section.key}`}>
+            <h2
+              id={`h-${section.key}`}
+              className="section-date"
+              data-section={section.key}
+              ref={(element) => {
+                if (element) headingsRef.current.set(section.key, element);
+                else headingsRef.current.delete(section.key);
+              }}
+            >
+              {section.label}
+            </h2>
+
+            <ul className="verses">
+              {section.verses.map((verse) => (
+                <VerseRow key={verse.id} verse={verse} onOpen={onOpen} />
+              ))}
+            </ul>
+          </section>
+        </Fragment>
       ))}
 
-      <div ref={sentinelRef} aria-hidden="true" />
+      {/* No past at all: the mark still has to exist, or the opening scroll
+          has nothing to find and the reader starts at the far future. */}
+      {boundary === -1 ? <div ref={todayRef} aria-hidden="true" /> : null}
+
+      <div ref={pastSentinel} aria-hidden="true" />
 
       {loading ? <p className="notice">Loading…</p> : null}
-      {exhausted && verses.length > 0 ? (
+      {pastDone && past.length > 0 ? (
         <p className="notice end">That is the beginning.</p>
       ) : null}
     </div>
