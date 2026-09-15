@@ -437,6 +437,37 @@ ScheduledNotification { id, userId, verseId?, fireAt, kind, payload, status, att
 - Rate-limited to one export per user per 24h.
 - Doubles as GDPR portability (§8.7) — one implementation, two requirements.
 
+**The other direction (Phase 9).** `POST /v1/privacy/import` reads an
+`agnte.export.v1` document back in. It is the foundation Phase 9's v1 migration
+stands on: rather than a bespoke pipeline from v1's database, the migration is a
+converter script that emits this format, and anything else that can emit it can
+become a timeline too.
+
+- **Every row goes through the domain's constructors** — `parseTagName`,
+  `parsePlacement`, `parseProperties`, `createVerse` — never a direct insert. An
+  import is the one write path whose data did not come from the app, so it is
+  the last one that should be exempt from the rules.
+- **Refused rows are reported, not dropped.** The response lists what was
+  refused and why. A visibility the document names but this version does not
+  know is refused rather than defaulted: the two plausible defaults are
+  "private" (silently changing what someone exported) and "inherit" (silently
+  widening it), and the second is a disclosure.
+- **A document is not trusted about whose tags it names.** Tag ids are checked
+  against the importing account; since tag visibility drives verse visibility
+  (§2), a hand-edited file filing a verse into a stranger's tag would be a
+  disclosure route rather than untidy data.
+- **Idempotent by content, not by an idempotency key**, so "run it, fix the
+  file, run it again" is the natural way to use it. Tags match on name, which is
+  their natural key. Verses have none, so they match on id: a file's id is kept
+  when it is free, and when it is already held — importing a friend's export, or
+  a v1 id that is not a UUID at all — the row is written under an id *derived*
+  from the owner and that id (`derivedUuidv7`). A random replacement would be a
+  different id on every run and would duplicate the whole timeline on the
+  second.
+- **Media is not imported**, and cannot be by this route: the export carries
+  photos as expiring links rather than bytes. The response says so rather than
+  leaving it to be discovered from a timeline of empty tiles.
+
 ### 8.6 Rate limiting
 
 Two layers:

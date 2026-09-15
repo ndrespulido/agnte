@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 /**
  * UUIDv7 (RFC 9562), generated wherever the entity is created.
@@ -112,6 +112,61 @@ export function timestampOf(id: string): number {
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export const isUuidV7 = (value: string): boolean => UUID_V7.test(value);
+
+const UUID_ANY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Any UUID, whatever version minted it.
+ *
+ * Narrower than `isUuidV7` on purpose: this is the question "can Postgres cast
+ * this to `uuid`", which is what a value read out of a file has to answer
+ * before it reaches a query. A v4 from somewhere else is a perfectly good
+ * primary key; it just did not come from here.
+ */
+export const isUuid = (value: string): boolean => UUID_ANY.test(value);
+
+/**
+ * A UUIDv7 derived from a namespace and a source string rather than minted.
+ *
+ * The one place this is for: importing rows whose ids are already taken. A
+ * random replacement would be a different id on every run, so importing the
+ * same file twice would write a second copy instead of recognising the first.
+ * Deriving it means the same source id, imported into the same account, always
+ * lands on the same row — which is what makes an import idempotent without a
+ * table of what-became-what.
+ *
+ * The random half is `sha256(namespace + source)` — stable, and not reversible
+ * into the namespace by someone holding the source id. The timestamp half is
+ * copied from the source when the source is itself a UUIDv7, so an imported
+ * timeline keeps the id order it had at home; a source id of any other shape
+ * has no timestamp to keep and takes hash bytes there too.
+ *
+ * Not a UUIDv5. That is the standard answer for "deterministic id", but it
+ * would be the one id in the system that does not sort by time, and the
+ * ordering is load-bearing (see above).
+ */
+export function derivedUuidv7(namespace: string, source: string): string {
+  const bytes = createHash('sha256')
+    .update(`${namespace}:${source}`)
+    .digest()
+    .subarray(0, 16);
+
+  if (isUuidV7(source)) {
+    Buffer.from(source.replace(/-/g, '').slice(0, 12), 'hex').copy(bytes, 0);
+  }
+
+  bytes[6] = (bytes[6]! & 0x0f) | 0x70;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+
+  const hex = bytes.toString('hex');
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20, 32),
+  ].join('-');
+}
 
 /** Test seam: forget the monotonic state between cases. */
 export function resetIdStateForTests(): void {

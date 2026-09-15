@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { isUuidV7, resetIdStateForTests, timestampOf, uuidv7 } from '@/shared/kernel/id';
+import {
+  derivedUuidv7,
+  isUuid,
+  isUuidV7,
+  resetIdStateForTests,
+  timestampOf,
+  uuidv7,
+} from '@/shared/kernel/id';
 
 beforeEach(resetIdStateForTests);
 
@@ -92,5 +99,64 @@ describe('isUuidV7', () => {
     ['uppercase', '0194F3A0-0000-7000-8000-000000000000'],
   ])('rejects %s', (_label, value) => {
     expect(isUuidV7(value)).toBe(false);
+  });
+});
+
+describe('isUuid', () => {
+  it('accepts any version, and either case', () => {
+    expect(isUuid(uuidv7())).toBe(true);
+    expect(isUuid('9f1c8a2e-4b6d-4c3a-8f21-0b3d5e7a9c11')).toBe(true);
+    expect(isUuid('9F1C8A2E-4B6D-4C3A-8F21-0B3D5E7A9C11')).toBe(true);
+  });
+
+  it.each([
+    ['an empty string', ''],
+    ['a v1-style id', 'clh3x8k2p0000qwer1234asdf'],
+    ['a uuid with a missing group', '9f1c8a2e-4b6d-4c3a-0b3d5e7a9c11'],
+    ["postgres' own idea of a cast", "'x'::uuid"],
+  ])('rejects %s', (_label, value) => {
+    expect(isUuid(value)).toBe(false);
+  });
+});
+
+/**
+ * The property the import rests on: same inputs, same id, every time. Without
+ * it a second import of the same file writes a second copy of every row it
+ * could not import under its original id.
+ */
+describe('derivedUuidv7', () => {
+  const owner = '0194f3a0-1111-7000-8000-000000000001';
+  const other = '0194f3a0-1111-7000-8000-000000000002';
+  const source = '0194f3a0-2222-7000-8000-0000000000aa';
+
+  it('is stable for the same namespace and source', () => {
+    expect(derivedUuidv7(owner, source)).toBe(derivedUuidv7(owner, source));
+  });
+
+  it('differs per namespace, so two accounts importing one file do not collide', () => {
+    expect(derivedUuidv7(owner, source)).not.toBe(derivedUuidv7(other, source));
+  });
+
+  it('differs per source', () => {
+    expect(derivedUuidv7(owner, source)).not.toBe(derivedUuidv7(owner, `${source}x`));
+  });
+
+  it('is a well-formed UUIDv7', () => {
+    expect(isUuidV7(derivedUuidv7(owner, source))).toBe(true);
+    expect(isUuidV7(derivedUuidv7(owner, 'clh3x8k2p0000qwer1234asdf'))).toBe(true);
+  });
+
+  /**
+   * An imported timeline keeps the order it had at home. Ids are the tiebreak
+   * in the timeline's index, so a derived id that landed at a random point in
+   * time would shuffle rows that share a date.
+   */
+  it('keeps the source timestamp when the source is a UUIDv7', () => {
+    const at = Date.UTC(2026, 4, 17, 9, 30);
+    expect(timestampOf(derivedUuidv7(owner, uuidv7(at)))).toBe(at);
+  });
+
+  it('never returns the source id itself', () => {
+    expect(derivedUuidv7(owner, source)).not.toBe(source);
   });
 });
