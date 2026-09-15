@@ -19,9 +19,16 @@ export function SignIn({
   onSignedIn: () => void;
   /** False in every preview, where Google cannot register the redirect URI. */
   googleEnabled: boolean;
-  /** A message from a sign-in attempt that started before this screen — an
-   * OAuth return that failed on the way back. */
-  notice?: string | null;
+  /**
+   * A message from something that happened before this screen: an OAuth
+   * return that failed on the way back, or an email verification link that
+   * was just redeemed.
+   *
+   * Carries its own tone because those two are not the same news, and the
+   * single red line this used to render made "your account is ready" look
+   * like a failure.
+   */
+  notice?: { text: string; tone: 'error' | 'success' } | null;
 }) {
   const [mode, setMode] = useState<'sign-in' | 'register' | 'forgot'>('sign-in');
   const [email, setEmail] = useState('');
@@ -114,8 +121,11 @@ export function SignIn({
         )}
 
         {(error ?? notice) ? (
-          <p className="notice error" role="alert">
-            {error ?? notice}
+          <p
+            className={`notice ${error || notice?.tone === 'error' ? 'error' : 'success'}`}
+            role={error || notice?.tone === 'error' ? 'alert' : 'status'}
+          >
+            {error ?? notice?.text}
           </p>
         ) : null}
 

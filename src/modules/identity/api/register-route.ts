@@ -116,7 +116,11 @@ export async function handleRegister(request: Request): Promise<Response> {
       clock: systemClock,
       verificationUrl: (token) =>
         `${baseUrl(request, config.APP_BASE_URL)}/v1/auth/verify-email?token=${encodeURIComponent(token)}`,
-      signInUrl: `${baseUrl(request, config.APP_BASE_URL)}/sign-in`,
+      // The origin itself, not `/sign-in`: there is no such route. The app
+      // is served at the root and shows the sign-in screen when signed out
+      // (src/app/page.tsx), so the only link that works is the root — the
+      // same mistake `/reset-password` made, found the same way.
+      signInUrl: `${baseUrl(request, config.APP_BASE_URL)}/`,
     });
 
     if (!result.ok) {

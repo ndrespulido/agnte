@@ -44,15 +44,15 @@ export function ResetPassword() {
     const found = new URLSearchParams(window.location.search).get('token');
 
     /*
-     * A deliberate, scoped exception to react-hooks/set-state-in-effect.
+     * Runs once — the dependency list is empty and the ref above guards it —
+     * so it cannot cascade.
      *
-     * The rule guards against cascading renders, and this cannot cascade: the
-     * dependency list is empty, so it runs exactly once. The alternatives are
-     * both worse — a lazy `useState` initialiser would have to touch `window`
-     * during server rendering, and gating on a "mounted" flag is the same
-     * setState in an effect with an extra render on top.
+     * This used to carry an eslint-disable for react-hooks/set-state-in-effect.
+     * It no longer needs one: the rule fires on a setState whose argument is a
+     * freshly built object (which can never bail out of a re-render), and a
+     * string is not that. The directive became an unused-directive warning,
+     * which is why it is gone rather than kept for safety.
      */
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setToken(found);
 
     if (found) {
