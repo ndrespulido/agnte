@@ -9,7 +9,14 @@ FROM node:22-slim
 # pg_dump refuses to dump a server newer than itself, so the client has to lead
 # the server, not trail it. Pinned to a major rather than "latest" so an upgrade
 # is a deliberate edit here.
-ARG PG_MAJOR=17
+#
+# 17 trailed a Neon server that had moved to 18.6, and every nightly run failed
+# with "aborting because of server version mismatch" for six nights before
+# anyone looked. The pin is still right — an unannounced client upgrade is its
+# own hazard — but note what the pin costs: when Neon takes a major, this line
+# is the thing that has to move, and nothing in the system says so. Check it
+# against `SHOW server_version` when a backup starts failing.
+ARG PG_MAJOR=18
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
   && install -d /usr/share/postgresql-common/pgdg \
