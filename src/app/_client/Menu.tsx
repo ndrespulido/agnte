@@ -19,11 +19,13 @@ import { useEffect } from 'react';
  */
 export function Menu({
   onTags,
+  onReminders,
   onPassword,
   onSignOut,
   onClose,
 }: {
   onTags: () => void;
+  onReminders: () => void;
   onPassword: () => void;
   onSignOut: () => void;
   onClose: () => void;
@@ -49,6 +51,11 @@ export function Menu({
           <li>
             <button type="button" className="menu-row" onClick={onTags}>
               Tags
+            </button>
+          </li>
+          <li>
+            <button type="button" className="menu-row" onClick={onReminders}>
+              Reminders
             </button>
           </li>
           <li>

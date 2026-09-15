@@ -237,3 +237,51 @@ export function timeLabel(placement: Placement): string | null {
 
   return `${String(at.getUTCHours()).padStart(2, '0')}:${String(at.getUTCMinutes()).padStart(2, '0')}`;
 }
+
+/**
+ * The same conversion as `toDateTimeInput`, but in the browser's own zone.
+ *
+ * Reminders are the one place the display layer's UTC convention is not
+ * survivable. A verse rendered an hour off is cosmetic and the timeline has
+ * always done it; a reminder is a promise to interrupt someone at a particular
+ * moment, and "17:00" that fires at 19:00 because the person is in Madrid in
+ * July is not a rendering quirk, it is the feature failing.
+ *
+ * So these two deliberately disagree with their UTC siblings above, and the
+ * disagreement is contained to the reminder form. Quiet hours are already
+ * zone-aware for the same reason (modules/notifications/domain/quiet-hours.ts);
+ * having the fire time be UTC while the window around it was local would be an
+ * inconsistency *inside one feature*, which is worse than one between two.
+ */
+export function toLocalDateTimeInput(iso: string | null): string {
+  if (iso === null) return '';
+
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return '';
+
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}` +
+    `T${pad(at.getHours())}:${pad(at.getMinutes())}`
+  );
+}
+
+/** Reads a `datetime-local` value as local wall-clock time. */
+export function fromLocalDateTimeInput(value: string): string | null {
+  if (value === '') return null;
+  // `new Date("2026-09-15T17:00")` — no trailing Z — is parsed as local time by
+  // every engine, which is exactly what a `datetime-local` value means.
+  const at = new Date(value);
+  return Number.isNaN(at.getTime()) ? null : at.toISOString();
+}
+
+/** A reminder's moment, in the reader's own zone: "15 September 2026, 17:00". */
+export function localMomentLabel(iso: string): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return '';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return (
+    `${at.getDate()} ${MONTHS[at.getMonth()]} ${at.getFullYear()}, ` +
+    `${pad(at.getHours())}:${pad(at.getMinutes())}`
+  );
+}

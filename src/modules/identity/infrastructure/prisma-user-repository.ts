@@ -12,6 +12,7 @@ interface UserRow {
   password_hash: string;
   display_name: string | null;
   email_verified_at: Date | null;
+  erasure_requested_at: Date | null;
   created_at: Date;
   updated_at: Date;
   version: number;
@@ -23,6 +24,7 @@ const toUser = (row: UserRow): User => ({
   passwordHash: row.password_hash,
   displayName: row.display_name,
   emailVerifiedAt: row.email_verified_at,
+  erasureRequestedAt: row.erasure_requested_at,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   version: row.version,

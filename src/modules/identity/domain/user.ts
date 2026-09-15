@@ -25,6 +25,16 @@ export interface User {
    */
   readonly emailVerifiedAt: Date | null;
 
+  /**
+   * Set when this account has been marked for erasure (§8.7).
+   *
+   * The credential path refuses a marked account, so the thirty-day grace
+   * window is a chance to *recover* an account rather than a period of
+   * continued use — otherwise "delete my account" would leave a working login
+   * for a month, which is not what anyone asking means.
+   */
+  readonly erasureRequestedAt: Date | null;
+
   readonly createdAt: Date;
   readonly updatedAt: Date;
 
@@ -61,6 +71,9 @@ export function createVerifiedUser(input: {
     passwordHash: input.passwordHash,
     displayName: input.displayName ?? null,
     emailVerifiedAt: now,
+    // A new account is never mid-erasure; the column exists for the accounts
+    // that later ask to be.
+    erasureRequestedAt: null,
     createdAt: now,
     updatedAt: now,
     version: 0,

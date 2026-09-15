@@ -53,6 +53,23 @@ export async function login(
     return err(invalidCredentials());
   }
 
+  /*
+   * An account marked for erasure cannot be signed into (§8.7).
+   *
+   * Same error and same cost as a wrong password, for the same reason the
+   * Google-only branch below uses them: saying "this account is being deleted"
+   * would confirm the address exists, and returning early would say it faster
+   * than any wording could.
+   *
+   * The thirty-day window is a chance to recover an account through support,
+   * not a month of continued use — "delete my account" leaving a working login
+   * behind is not what anyone asking means.
+   */
+  if (user.erasureRequestedAt !== null) {
+    await deps.hasher.burnVerificationTime();
+    return err(invalidCredentials());
+  }
+
   if (user.passwordHash === null) {
     // A Google-only account. Same error and same cost as a wrong password:
     // answering "this account uses Google" would confirm the address exists and

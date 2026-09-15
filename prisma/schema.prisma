@@ -105,6 +105,17 @@ model User {
   /// Null until the address is proven. Nothing but verification sets it.
   emailVerifiedAt DateTime? @map("email_verified_at") @db.Timestamptz(3)
 
+  /// When this account was marked for erasure (§8.7).
+  ///
+  /// Set by DELETE /v1/me, which also publishes `user.erasure_requested` so
+  /// each module purges its own data. The row itself survives a grace window —
+  /// thirty days — before the sweep removes it, because erasure is
+  /// irreversible and occasionally regretted.
+  ///
+  /// A marked account cannot sign in: the credential path checks this, so the
+  /// window is a chance to recover an account, not a period of continued use.
+  erasureRequestedAt DateTime? @map("erasure_requested_at") @db.Timestamptz(3)
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -650,4 +661,150 @@ model DeepTimeEvent {
   @@index([timelineYears, id])
   @@map("deep_time_event")
   @@schema("insights")
+}
+
+/// A reminder waiting to fire (§8.4).
+///
+/// The row *is* the queue: Cloud Scheduler ticks every five minutes and the
+/// dispatcher claims due rows with `FOR UPDATE SKIP LOCKED`, which is what
+/// makes two concurrent instances safe without a lock table or a broker.
+///
+/// No cross-schema foreign key to `verse.verse` or `identity.user` — `userId`
+/// and `verseId` are plain UUIDs, for the same reason every other module's
+/// owner column is (§1.1).
+model ScheduledNotification {
+  /// Client-generated UUIDv7 (§2).
+  id String @id @db.Uuid
+
+  userId String @map("user_id") @db.Uuid
+
+  /// What this reminds you about, if anything. Null for a standalone reminder
+  /// — the timeline is not the only reason to want a nudge.
+  verseId String? @map("verse_id") @db.Uuid
+
+  /// When it should go out next. Advanced on dispatch for a recurring rule
+  /// rather than materialising a year of rows (§8.4).
+  fireAt DateTime @map("fire_at") @db.Timestamptz(3)
+
+  /// The occurrence this row is currently waiting to send. Recurrence counts
+  /// from the anchor, so this is also what lets COUNT be honoured without
+  /// replaying history (domain/recurrence.ts).
+  startAt DateTime @map("start_at") @db.Timestamptz(3)
+  occurrences Int @default(0)
+
+  /// RRULE, or null for a one-off. Parsed by domain/recurrence.ts, which
+  /// refuses anything it does not implement rather than ignoring it.
+  recurrence String?
+
+  /// pending -> sent, or -> failed after the attempt limit. A string with a
+  /// CHECK rather than an enum, like Media.status and for the same reason.
+  status String @default("pending")
+
+  /// What to say. Free-form so a reminder is not forced into a shape the
+  /// domain would then have to keep in step with the verse it points at.
+  title String
+  body String?
+
+  /// How many delivery attempts have been made. Bounded in the dispatcher so
+  /// a permanently undeliverable reminder stops rather than retrying nightly
+  /// forever.
+  attempts Int @default(0)
+  lastError String? @map("last_error")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  version Int @default(0)
+
+  @@index([status, fireAt])
+  @@index([userId])
+  @@map("scheduled_notification")
+  @@schema("notifications")
+}
+
+/// Per-user delivery settings: where to send, and when not to.
+///
+/// One row per user, created on demand. Absent means "no quiet hours and no
+/// push" — which is the correct default for someone who has never opened the
+/// settings, and keeps the dispatcher from having to distinguish "never
+/// configured" from "configured to nothing".
+model NotificationPreference {
+  userId String @id @map("user_id") @db.Uuid
+
+  /// Local wall-clock minutes from midnight, plus the zone they are local to.
+  /// Never a UTC window and never a stored offset — see domain/quiet-hours.ts
+  /// for why that distinction is the whole feature.
+  quietStartMinute Int? @map("quiet_start_minute")
+  quietEndMinute Int? @map("quiet_end_minute")
+  timeZone String? @map("time_zone")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  version Int @default(0)
+
+  @@map("notification_preference")
+  @@schema("notifications")
+}
+
+/// One row per (event, handler) that has run to completion (§1.2).
+///
+/// A redelivery finds the row and does nothing. This is where "handlers must
+/// be idempotent from day one" is enforced rather than trusted — the bus skips
+/// a handler that has already run, so a handler author cannot forget.
+model EventHandled {
+  eventId String @map("event_id") @db.Uuid
+  handler String
+  handledAt DateTime @default(now()) @map("handled_at") @db.Timestamptz(3)
+
+  @@id([eventId, handler])
+  @@map("event_handled")
+  @@schema("platform")
+}
+
+/// A handler that failed its retries (§1.2).
+///
+/// Keeps the whole event rather than only the error: the payload is what a
+/// retry needs, and an event whose body was discarded can be investigated but
+/// never replayed.
+model EventDeadLetter {
+  id String @id @db.Uuid
+  eventId String @map("event_id") @db.Uuid
+  eventName String @map("event_name")
+  handler String
+  payload Json
+  attempts Int @default(0)
+  lastError String @map("last_error")
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([eventId, handler])
+  @@index([createdAt])
+  @@map("event_dead_letter")
+  @@schema("platform")
+}
+
+/// One data-export request (§8.5).
+///
+/// The row is the rate limit as well as the record: one export per user per
+/// 24h, answered by asking when this person last requested one rather than by
+/// a second mechanism that could disagree.
+model ExportRequest {
+  id String @id @db.Uuid
+  userId String @map("user_id") @db.Uuid
+
+  /// pending -> ready, or -> failed.
+  status String @default("pending")
+
+  /// Where the finished export sits. Never returned to a caller — they get a
+  /// short-lived signed URL, like media (§8.3).
+  storageKey String? @map("storage_key")
+  error String?
+
+  requestedAt DateTime @default(now()) @map("requested_at") @db.Timestamptz(3)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([userId, requestedAt(sort: Desc)])
+  @@map("export_request")
+  @@schema("privacy")
 }

@@ -25,6 +25,16 @@ export type { Authenticated } from './api/authenticate';
 export { IdentityErrorCode } from './domain/errors';
 export { MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH } from './domain/password';
 export { MAX_EMAIL_LENGTH } from './domain/email';
+export { contactEmailFor } from './application/contact';
+
+export {
+  ERASURE_GRACE_MS,
+  erasableUsers,
+  hardDeleteUser,
+  isMarkedForErasure,
+  markForErasure,
+} from './application/erasure';
+
 export type { User } from './domain/user';
 export { isVerified } from './domain/user';
 export { prunePendingRegistrations } from './infrastructure/prisma-pending-registration-repository';

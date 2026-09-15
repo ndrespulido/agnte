@@ -415,6 +415,24 @@ ScheduledNotification { id, userId, verseId?, fireAt, kind, payload, status, att
 - `POST /v1/privacy/export` → Cloud Task → worker assembles JSON (all verses,
   tags, properties, shares) + original media into a ZIP in R2 → emails a signed
   URL valid 24h.
+
+> **Built differently, deliberately (Phase 8).** Two deviations, both recorded
+> here because the reasoning is the useful part.
+>
+> **Media travels as signed links, not bytes in a ZIP.** Assembling a
+> multi-gigabyte archive inside a Cloud Run request means streaming a ZIP into a
+> multipart upload with bounded memory, and realistically a Cloud Run Job rather
+> than a request, since a large export outlives a request deadline. A manifest of
+> 24-hour signed URLs hands over the same files with none of that machinery. The
+> cost, stated plainly: the links expire, so this is an export someone must act
+> on within the window rather than an archive they can file away.
+>
+> **The email carries a link to the app, not a signed URL.** A signed link in an
+> email is a capability held by anyone who reads that mailbox or any system that
+> scans it, and this file is the whole of someone's timeline — medical notes and
+> financial screenshots included. `GET /v1/privacy/export/download` authenticates
+> instead, looks the row up by the authenticated user, and never accepts or
+> returns a storage key. One sign-in, one fewer class of exposure.
 - Async because media can run to gigabytes.
 - Rate-limited to one export per user per 24h.
 - Doubles as GDPR portability (§8.7) — one implementation, two requirements.
@@ -449,6 +467,22 @@ obligations, and erasure in particular is far cheaper to design in now.
 **Right to erasure** — `DELETE /v1/me` → soft-delete → `user.erasure_requested`
 event → each module purges its own data (exactly what module boundaries buy you)
 → media purged from R2 → hard delete after a 30-day grace window.
+
+> **Implementation note, added when erasure was built (Phase 8).** Anonymization
+> is not implemented, because it currently has nothing to act on: `contribute`
+> is an open decision, the application layer refuses contribute writes, and so
+> no Verse can exist that one person wrote onto another person's tag. Erasure
+> deletes what you own.
+>
+> Whoever lands `contribute` must land anonymization with it, and should know
+> about a gap that implementing it surfaced: `canRead` grants access by
+> ownership, by `public`, or by an explicit share row — and a tag's *owner* is
+> not a grantee of their own tag. Anonymizing a Verse's `ownerId` would
+> therefore make it readable by **nobody**, which is functionally the deletion
+> the rule exists to prevent. The options are a share row granted at
+> anonymization, a transfer of ownership to the tag owner, or a change to the
+> visibility rule itself — the last being the most safety-critical function in
+> this system, and the last resort.
 
 > **Decided:** if you contributed Verses to someone else's shared trip tag,
 > erasure **anonymizes** them rather than deleting them — the Verse keeps its

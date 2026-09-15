@@ -9,6 +9,7 @@ import { ChangePassword } from './ChangePassword';
 import { Tags } from './Tags';
 import { Dashboard } from './Dashboard';
 import { Menu } from './Menu';
+import { Reminders } from './Reminders';
 import {
   completeGoogleSignIn,
   getServerSessionSnapshot,
@@ -130,6 +131,7 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
    */
   const [menuOpen, setMenuOpen] = useState(false);
   const [browsingTags, setBrowsingTags] = useState(false);
+  const [browsingReminders, setBrowsingReminders] = useState(false);
   const [dashboardTagId, setDashboardTagId] = useState<string | null>(null);
 
   const onDateChange = useCallback((label: string) => setDateLabel(label), []);
@@ -171,6 +173,10 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
             setMenuOpen(false);
             setBrowsingTags(true);
           }}
+          onReminders={() => {
+            setMenuOpen(false);
+            setBrowsingReminders(true);
+          }}
           onPassword={() => {
             setMenuOpen(false);
             setChangingPassword(true);
@@ -182,6 +188,10 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
 
       {changingPassword ? (
         <ChangePassword onClose={() => setChangingPassword(false)} />
+      ) : null}
+
+      {browsingReminders ? (
+        <Reminders onClose={() => setBrowsingReminders(false)} />
       ) : null}
 
       {browsingTags ? (

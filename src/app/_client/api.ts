@@ -374,3 +374,78 @@ export interface DashboardView {
 
 export const fetchTagDashboard = (tagId: string): Promise<DashboardView> =>
   authedFetch(`/v1/tags/${tagId}/dashboard`).then((r) => json<DashboardView>(r));
+
+/**
+ * Reminders (§8.4).
+ *
+ * `recurrence` is an RRULE string. The server parses a documented subset and
+ * refuses what it does not implement, so an unsupported rule fails here with a
+ * message rather than silently firing on the wrong day.
+ */
+export interface ReminderView {
+  id: string;
+  verseId: string | null;
+  fireAt: string;
+  title: string;
+  body: string | null;
+  recurrence: string | null;
+  status: 'pending' | 'sent' | 'failed';
+  occurrences: number;
+  attempts: number;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+}
+
+export const fetchReminders = (): Promise<ReminderView[]> =>
+  authedFetch('/v1/reminders')
+    .then((r) => json<{ reminders: ReminderView[] }>(r))
+    .then((body) => body.reminders);
+
+export const createReminder = (input: {
+  fireAt: string;
+  title: string;
+  body?: string | null;
+  recurrence?: string | null;
+  verseId?: string | null;
+}): Promise<ReminderView> =>
+  authedFetch('/v1/reminders', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      // A retry underneath the app must not set the same reminder twice.
+      'idempotency-key': crypto.randomUUID(),
+    },
+    body: JSON.stringify(input),
+  }).then((r) => json<ReminderView>(r));
+
+export interface QuietHoursView {
+  startMinute: number;
+  endMinute: number;
+  timeZone: string;
+}
+
+export const fetchQuietHours = (): Promise<QuietHoursView | null> =>
+  authedFetch('/v1/notifications/preferences')
+    .then((r) => json<{ quietHours: QuietHoursView | null }>(r))
+    .then((body) => body.quietHours);
+
+export const saveQuietHours = (
+  quiet: QuietHoursView | null,
+): Promise<QuietHoursView | null> =>
+  authedFetch('/v1/notifications/preferences', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(
+      quiet
+        ? {
+            quietStartMinute: quiet.startMinute,
+            quietEndMinute: quiet.endMinute,
+            timeZone: quiet.timeZone,
+          }
+        : { quietStartMinute: null, quietEndMinute: null, timeZone: null },
+    ),
+  })
+    .then((r) => json<{ quietHours: QuietHoursView | null }>(r))
+    .then((body) => body.quietHours);
