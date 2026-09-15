@@ -207,6 +207,42 @@ const checks: Check[] = [
     },
   },
   {
+    name: 'place-suggestions',
+    run: async () => {
+      const config = loadConfig();
+
+      /*
+       * Reported, never exercised — and here that is a harder rule than it is
+       * for email or access-tokens above.
+       *
+       * Those are merely pointless to exercise on every poll. This one is
+       * *billed*: Places is the single metered dependency in the system
+       * (shared/infra/places.ts), and a health endpoint Cloud Run polls would
+       * turn a status page into a standing charge. So this reports whether the
+       * key is mounted and nothing more.
+       *
+       * Which is still worth reporting, because without it "suggestions do not
+       * appear" has two indistinguishable causes: no key reached the container,
+       * or Google is rejecting the key that did. The client cannot tell them
+       * apart by design — it swallows every failure so a location field never
+       * puts an error in front of someone mid-sentence — so the answer has to
+       * come from somewhere, and guessing cost a day the last time a swallowed
+       * failure had no check behind it.
+       */
+      if (!config.GOOGLE_PLACES_API_KEY) {
+        return {
+          status: 'not-configured' as const,
+          detail: 'GOOGLE_PLACES_API_KEY is not set; the location field stays plain text',
+        };
+      }
+
+      return {
+        status: 'ok' as const,
+        detail: 'key present (not called — Places is metered)',
+      };
+    },
+  },
+  {
     name: 'deferred-jobs',
     run: async () => {
       const config = loadConfig();

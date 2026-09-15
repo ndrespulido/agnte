@@ -27,6 +27,7 @@ describe('runChecks', () => {
       'email',
       'access-tokens',
       'google-sign-in',
+      'place-suggestions',
       'deferred-jobs',
     ]);
     expect(results.every((r) => typeof r.durationMs === 'number')).toBe(true);
@@ -72,6 +73,35 @@ describe('runChecks', () => {
     expect(jobs?.detail).toContain('thumbnails will not generate');
     expect(jobs?.detail).toContain('GCP_PROJECT_ID');
     expect(jobs?.detail).toContain('INTERNAL_TASKS_SECRET');
+  });
+  /**
+   * The state production is in whenever the key has not been mounted — and the
+   * one worth naming, because the client swallows the failure by design and
+   * the field just quietly stays plain text.
+   */
+  it('names the variable when place suggestions are switched off', async () => {
+    delete process.env.GOOGLE_PLACES_API_KEY;
+    resetConfigForTests();
+
+    const places = (await runChecks()).find((r) => r.name === 'place-suggestions');
+
+    expect(places?.status).toBe('not-configured');
+    expect(places?.detail).toContain('GOOGLE_PLACES_API_KEY');
+  });
+
+  /**
+   * Deliberately asserts that the check does *not* prove suggestions work: a
+   * mounted key Google rejects still reads ok here, and saying so in a test is
+   * what stops the next person treating this as an end-to-end signal.
+   */
+  it('reports a mounted key without spending money to prove it works', async () => {
+    process.env.GOOGLE_PLACES_API_KEY = 'a-key';
+    resetConfigForTests();
+
+    const places = (await runChecks()).find((r) => r.name === 'place-suggestions');
+
+    expect(places?.status).toBe('ok');
+    expect(places?.detail).toContain('not called');
   });
 });
 
