@@ -1207,3 +1207,43 @@ button.danger {
 .dot[data-status='stale'] {
   background: var(--pending);
 }
+
+.reminder-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+/* Two time inputs side by side, stacking when there is not room for both. */
+.quiet-range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+}
+
+.quiet-range .field {
+  flex: 1;
+  min-width: 8rem;
+}
+
+/* Two lines per reminder: the title, then when and how often beneath it. One
+   row would wrap mid-date at phone width, which reads as a broken layout. */
+.reminder-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.reminder-rows li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xxs, 2px);
+  padding: var(--space-sm) 0;
+  border-bottom: var(--hairline) solid var(--color-rule);
+}
+
+.reminder-title {
+  font-variant-numeric: tabular-nums;
+}
