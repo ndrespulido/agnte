@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   deepTimeLabel,
   fromDateTimeInput,
+  splitTagNames,
   headerLabel,
   placementOf,
   sectionKey,
@@ -161,5 +162,41 @@ describe('the datetime-local pair', () => {
   it('answers empty rather than throwing on something unparseable', () => {
     expect(toDateTimeInput('not a date')).toBe('');
     expect(fromDateTimeInput('not a date')).toBe(null);
+  });
+});
+
+/**
+ * The new-tag field takes several names at once. A comma is safe as the
+ * separator because the verse domain's `parseTagName` rejects one inside a
+ * name, so no tag can contain the character this splits on.
+ */
+describe('splitTagNames', () => {
+  it('splits a comma-separated field and keeps what was typed', () => {
+    expect(splitTagNames('.barcelona, .restaurant, .expenses')).toEqual([
+      '.barcelona',
+      '.restaurant',
+      '.expenses',
+    ]);
+  });
+
+  it('still handles the single-name case', () => {
+    expect(splitTagNames('.movies')).toEqual(['.movies']);
+  });
+
+  it('drops empty pieces from stray or trailing commas', () => {
+    // Typing a trailing comma is what happens when you are about to add
+    // another and change your mind.
+    expect(splitTagNames('.a,,  , .b,')).toEqual(['.a', '.b']);
+  });
+
+  it('treats the same name twice as once, however it is written', () => {
+    // Normalised the way the domain does, so these are one tag — and creating
+    // it twice in one save is an error the person did not make.
+    expect(splitTagNames('.Trip, trip, ..TRIP')).toEqual(['.Trip']);
+  });
+
+  it('finds no name in a field of only dots and commas', () => {
+    expect(splitTagNames('.,..,  ,')).toEqual([]);
+    expect(splitTagNames('')).toEqual([]);
   });
 });

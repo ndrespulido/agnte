@@ -12,7 +12,7 @@ import {
   type VerseView,
 } from './api';
 import { downscaleImage } from './downscale';
-import { fromDateTimeInput, toDateTimeInput } from './format';
+import { fromDateTimeInput, splitTagNames, toDateTimeInput } from './format';
 
 /**
  * The sheet that writes a Verse — one component for both creating and
@@ -172,9 +172,18 @@ export function VerseSheet({
 
     try {
       let tagIds = [...selected];
+      const created: TagView[] = [];
 
-      const wanted = newTag.trim();
-      if (wanted.length > 0) {
+      /**
+       * The new-tag field takes several at once, separated by commas.
+       *
+       * A trip is `.barcelona, .restaurant, .expenses` in one thought, and
+       * saving three times to record one meal is three round trips and three
+       * chances to lose the rest of the sheet. A comma cannot appear in a tag
+       * name — `parseTagName` rejects it — so it is free to use as the
+       * separator.
+       */
+      for (const wanted of splitTagNames(newTag)) {
         /**
          * Typing the name of a tag that already exists selects it, rather
          * than failing the save.
@@ -188,18 +197,24 @@ export function VerseSheet({
          * and `restaurant` find it too.
          */
         const normalised = wanted.replace(/^\.+/, '').toLowerCase();
-        const existing = tags.find((tag) => tag.name === normalised);
+        const existing =
+          tags.find((tag) => tag.name === normalised) ??
+          // Also what this loop created a moment ago: typing the same name
+          // twice in one field must not try to create it twice.
+          created.find((tag) => tag.name === normalised);
 
         if (existing) {
           if (!tagIds.includes(existing.id)) tagIds = [...tagIds, existing.id];
-          setNewTag('');
-        } else {
-          const created = await createTag(wanted);
-          tagIds = [...tagIds, created.id];
-          setTags((current) => [...current, created]);
-          setNewTag('');
+          continue;
         }
+
+        const made = await createTag(wanted);
+        created.push(made);
+        tagIds = [...tagIds, made.id];
       }
+
+      if (created.length > 0) setTags((current) => [...current, ...created]);
+      setNewTag('');
 
       if (tagIds.length === 0) {
         setError('A verse needs at least one tag.');
@@ -409,7 +424,7 @@ export function VerseSheet({
           <input
             value={newTag}
             onChange={(event) => setNewTag(event.target.value)}
-            placeholder="or a new one, like .barcelona-trip"
+            placeholder="or new ones: .barcelona, .restaurant"
             aria-label="New tag"
           />
         </fieldset>
