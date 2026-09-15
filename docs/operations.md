@@ -29,6 +29,7 @@ Everything below is a one-time setup step. Per-deploy infrastructure lives in
 | Retention sweep | Daily Cloud Scheduler job → `/internal/prune` | 4.10 | ☐ |
 | R2 CORS | Bucket CORS rule so the browser's presigned upload isn't blocked | 4.11 | ☐ |
 | Custom domain | Cloud Run Domain Mapping, Cloudflare-proxied, `APP_BASE_URL` pinned | 4.12 | ☑ |
+| Place suggestions | Places API key for the location field, production only | 6.2 | ☐ key not valid |
 
 **This table is a note, not a source of truth, and it has been wrong twice.**
 Both times the same way: a ☐ against something the *code* for was already
@@ -1138,6 +1139,88 @@ whatever origin actually served the page, so `agnte.app` satisfies them the
 same way the `.run.app` URL always did. No code checks a hardcoded hostname
 anywhere in `src/` — the only two things that needed to learn about a second
 origin were the deploy workflow's `APP_BASE_URL` and R2's CORS rule, above.
+
+---
+
+## 2l. Place suggestions (Google Places)
+
+The location field's autocomplete. Optional everywhere: unset means the
+field stays plain text, which is the correct state locally and in every
+preview. It is the **only metered dependency in the system** — Places bills
+per request against a monthly credit — so it is deliberately absent from
+anything but production.
+
+### Creating or rotating the key
+
+```bash
+gcloud services enable places.googleapis.com --project=agnte-prod
+
+gcloud services api-keys create --display-name="agnte places" \
+  --api-target=service=places.googleapis.com --project=agnte-prod
+```
+
+Restricted to the Places service. It is **not** restricted by IP or
+referrer, and cannot usefully be: the call is made server-side from Cloud
+Run, which has no static egress IP without a NAT gateway, and
+architecture.md §3.1 rules out a NAT gateway. The API-target restriction is
+therefore the whole of the key's protection, which is why it must never be
+printed.
+
+Then store it — and this is the step that has gone wrong twice:
+
+```bash
+gcloud services api-keys list --project=agnte-prod \
+  --format='table(uid,displayName,restrictions.apiTargets[0].service)'
+
+gcloud services api-keys get-key-string <UID> --project=agnte-prod \
+  --format='value(keyString)' | tr -d '\n' \
+  | gcloud secrets versions add agnte-google-places-api-key --data-file=- --project=agnte-prod
+```
+
+Two traps, both of which fail quietly:
+
+- **`create` does not give you the key string.** It returns a long-running
+  *operation*, and the key sits under that operation's `response`, so
+  `--format='value(keyString)'` on the create resolves to nothing. Piping
+  that into `secrets versions add` fails with "Secret Payload cannot be
+  empty" — or, worse, succeeds against a stale version and leaves the old
+  key in place. `get-key-string` is a plain GET on the key resource and is
+  the only reliable way to read it.
+- **`tr -d '\n'` is load-bearing.** gcloud terminates its output with a
+  newline, Secret Manager stores the payload byte for byte, and Cloud Run
+  mounts it byte for byte. A newline is illegal in an HTTP header value, so
+  the app's `fetch` throws before the request leaves — while reading the
+  same secret back in a shell looks perfect, because command substitution
+  strips trailing newlines. `shared/infra/places.ts` now trims the key as a
+  second line of defence, but do not rely on that.
+
+### After storing it
+
+Secrets resolve at **revision-creation time**, so a new secret version
+changes nothing until a new revision exists. Re-run the Deploy production
+workflow. Rotating the key without redeploying leaves the container holding
+a key that no longer exists, and Google answers `API_KEY_INVALID` with the
+message "API key expired".
+
+### Checking it
+
+`/v1/health` reports `place-suggestions`, which says only whether a key was
+mounted — calling Places on every health poll would be a standing charge.
+To prove the key itself works, ask Google directly:
+
+```bash
+KEY=$(gcloud secrets versions access latest --secret=agnte-google-places-api-key --project=agnte-prod)
+curl -sS -X POST https://places.googleapis.com/v1/places:autocomplete \
+  -H "content-type: application/json" -H "x-goog-api-key: $KEY" \
+  -H "x-goog-fieldmask: suggestions.placePrediction.text" \
+  -d '{"input":"barcelona"}' | head -c 400
+unset KEY
+```
+
+This matters more here than elsewhere because the client swallows every
+Places failure by design — an optional field should degrade to plain text
+rather than put an error in front of someone mid-sentence — so a broken key
+is indistinguishable from "nowhere matches that" in the UI.
 
 ---
 
