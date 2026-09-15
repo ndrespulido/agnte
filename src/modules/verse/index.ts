@@ -13,6 +13,8 @@
 
 export { handleSearch } from './api/search-routes';
 
+export { handleTagDashboard } from './api/dashboard-routes';
+
 export {
   handleListTagShares,
   handleRevokeTagShare,

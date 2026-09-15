@@ -104,6 +104,25 @@ export function headerLabel(placement: Placement, now: Date): string {
   }
 }
 
+/**
+ * A plain calendar day, always with its year: "12 Mar 2026".
+ *
+ * Unlike `headerLabel`, nothing here is relative to now. A dashboard's span
+ * reads "5 Jan 2020 — 15 Jan 2099", and "Today" in the middle of a range would
+ * be meaningless — a span needs two fixed points, not one fixed and one
+ * relative. The year is always shown for the same reason: the two ends of a
+ * span are frequently in different years, and dropping it from one of them
+ * makes the range unreadable.
+ *
+ * UTC, like every other formatter here. That is a known bug in the display
+ * layer rather than a choice — it predates this screen — but a dashboard that
+ * disagreed with the timeline above it about which day something happened
+ * would be worse than one that is consistently off.
+ */
+export function dayLabel(at: Date): string {
+  return `${at.getUTCDate()} ${MONTHS[at.getUTCMonth()]} ${at.getUTCFullYear()}`;
+}
+
 /** Whole calendar days between two instants, in UTC. */
 function calendarDaysBetween(from: Date, to: Date): number {
   const startOf = (d: Date) =>
