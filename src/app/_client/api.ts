@@ -322,3 +322,55 @@ export async function uploadImage(image: {
 
   return confirmed.id;
 }
+
+/**
+ * A tag's dashboard — the "query it like a database" half of the pitch.
+ *
+ * Every number here was computed over rows the server had already filtered to
+ * what this viewer may see, which is why the aggregation happens in the app and
+ * not in SQL (see the module's domain/summary.ts).
+ */
+export interface PropertySummaryView {
+  key: string;
+  verseCount: number;
+  /** How many of those values were numbers. Below `verseCount` means `sum` is partial. */
+  numericCount: number;
+  sum: number | null;
+}
+
+export interface CoTagView {
+  id: string;
+  name: string;
+  label: string;
+  count: number;
+}
+
+export interface DashboardView {
+  tag: {
+    id: string;
+    name: string;
+    label: string;
+    visibility: 'private' | 'shared' | 'public';
+    vertical: string | null;
+    suggestedProperties: string[];
+  };
+  summary: {
+    verseCount: number;
+    firstEvent: string | null;
+    lastEvent: string | null;
+    undatedCount: number;
+    deepTimeCount: number;
+    ratedCount: number;
+    averageRating: number | null;
+    ratingHistogram: number[];
+    withMediaCount: number;
+    mediaCount: number;
+    coTags: CoTagView[];
+    properties: PropertySummaryView[];
+  };
+  /** The tag holds more verses than one dashboard reads; the numbers are partial. */
+  truncated: boolean;
+}
+
+export const fetchTagDashboard = (tagId: string): Promise<DashboardView> =>
+  authedFetch(`/v1/tags/${tagId}/dashboard`).then((r) => json<DashboardView>(r));

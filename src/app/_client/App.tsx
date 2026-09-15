@@ -6,6 +6,9 @@ import { SignIn } from './SignIn';
 import { Timeline } from './Timeline';
 import { VerseDetail } from './VerseDetail';
 import { ChangePassword } from './ChangePassword';
+import { Tags } from './Tags';
+import { Dashboard } from './Dashboard';
+import { Menu } from './Menu';
 import {
   completeGoogleSignIn,
   getServerSessionSnapshot,
@@ -116,6 +119,19 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
   const [openVerseId, setOpenVerseId] = useState<string | null>(null);
   const [changingPassword, setChangingPassword] = useState(false);
 
+  /**
+   * The tag list, and the dashboard reached from it.
+   *
+   * Two pieces of state rather than one route, and stacked rather than
+   * swapped: closing a dashboard returns to the list it was opened from, which
+   * is what someone comparing two tags expects. Overlays for the same reason
+   * VerseDetail is one — the timeline behind keeps its scroll position and its
+   * loaded pages.
+   */
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [browsingTags, setBrowsingTags] = useState(false);
+  const [dashboardTagId, setDashboardTagId] = useState<string | null>(null);
+
   const onDateChange = useCallback((label: string) => setDateLabel(label), []);
   const onOpen = useCallback((verseId: string) => setOpenVerseId(verseId), []);
 
@@ -136,12 +152,10 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
         <button
           type="button"
           className="quiet sign-out"
-          onClick={() => setChangingPassword(true)}
+          onClick={() => setMenuOpen(true)}
+          aria-label="Menu"
         >
-          Password
-        </button>
-        <button type="button" className="quiet sign-out" onClick={() => void signOut()}>
-          Sign out
+          Menu
         </button>
       </header>
 
@@ -151,8 +165,35 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
 
       <QuickAdd onAdded={() => setAnchor(new Date())} />
 
+      {menuOpen ? (
+        <Menu
+          onTags={() => {
+            setMenuOpen(false);
+            setBrowsingTags(true);
+          }}
+          onPassword={() => {
+            setMenuOpen(false);
+            setChangingPassword(true);
+          }}
+          onSignOut={() => void signOut()}
+          onClose={() => setMenuOpen(false)}
+        />
+      ) : null}
+
       {changingPassword ? (
         <ChangePassword onClose={() => setChangingPassword(false)} />
+      ) : null}
+
+      {browsingTags ? (
+        <Tags
+          onOpen={setDashboardTagId}
+          onClose={() => setBrowsingTags(false)}
+          covered={dashboardTagId !== null}
+        />
+      ) : null}
+
+      {dashboardTagId !== null ? (
+        <Dashboard tagId={dashboardTagId} onClose={() => setDashboardTagId(null)} />
       ) : null}
 
       {openVerseId !== null ? (

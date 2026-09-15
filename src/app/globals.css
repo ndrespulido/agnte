@@ -988,3 +988,213 @@ button.danger {
   text-decoration: none;
   font-size: var(--text-body);
 }
+
+/* ---------------------------------------------------------------------------
+ * Tag list and dashboard (Phase 6).
+ *
+ * Numbers and hairline rules, not charts. The design direction is a 1990s paper
+ * agenda, and the one bar chart here — the rating distribution — is drawn as
+ * eleven ruled rows rather than as a graphic, so it reads the same way the rest
+ * of the app does.
+ * ------------------------------------------------------------------------- */
+
+.dashboard-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-large);
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--tracking-display);
+  color: var(--color-accent-text);
+}
+
+.dashboard-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.dashboard-section h3 {
+  margin: 0;
+  font-size: var(--text-small);
+  font-weight: var(--weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-ink-soft);
+}
+
+/* A quieter aside beside a figure: "from 9 of 12", a shortcut, a count. */
+.quiet-note {
+  color: var(--color-ink-faint);
+  font-size: var(--text-small);
+  font-weight: var(--weight-regular);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.figures {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.figure {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-md);
+  padding: var(--space-sm) 0;
+  border-bottom: var(--hairline) solid var(--color-rule);
+}
+
+.figure dt {
+  color: var(--color-ink-soft);
+  font-size: var(--text-small);
+  flex: none;
+}
+
+.figure dd {
+  margin: 0;
+  /* Flex items default to min-width:auto, which lets a long span push the row
+     wider than a phone viewport — the same trap the status page hit. */
+  min-width: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.bars {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xxs, 2px);
+}
+
+.bars li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--text-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.bar-label {
+  flex: none;
+  width: 1.25rem;
+  text-align: right;
+  color: var(--color-ink-soft);
+}
+
+.bar-track {
+  flex: 1;
+  min-width: 0;
+  height: 0.5rem;
+  background: var(--color-rule);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: inherit;
+}
+
+.bar-count {
+  flex: none;
+  width: 1.5rem;
+  color: var(--color-ink-faint);
+}
+
+.co-tags,
+.tag-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.co-tags li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-md);
+  padding: var(--space-sm) 0;
+  border-bottom: var(--hairline) solid var(--color-rule);
+}
+
+/* The whole row is the target — a tag name alone is a small tap area on a
+   phone, and this list exists to be tapped. */
+.tag-row {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-md);
+  padding: var(--space-md) 0;
+  border: none;
+  border-bottom: var(--hairline) solid var(--color-rule);
+  background: none;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+
+/*
+ * The date must never wrap.
+ *
+ * The header is `position: fixed` and `.app-main` clears it with a padding
+ * computed from tokens, so the two silently disagree the moment the date takes
+ * a second line — which it did, at phone width, with a long date and two
+ * buttons beside it. Ellipsis rather than wrapping: a clipped date is legible
+ * and keeps the layout honest, where a wrapped one hides the top of the
+ * timeline behind the header.
+ */
+.date-label {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /*
+   * Shrinks before it truncates.
+   *
+   * At the flat 28px token, "Monday 1 March 2027" does not fit beside the menu
+   * button on a 390px screen, and the ellipsis above ate the year — which is
+   * the one part of the date a reader scrolled years from today most needs.
+   * Scaling with the viewport keeps the whole date to the last few pixels, and
+   * the token remains the ceiling, so nothing grows beyond the designed size on
+   * a wider screen. The full 28px is reached by about 430px.
+   *
+   * Not a complete fix, and worth knowing: the longest dates this can produce —
+   * "Wednesday 30 September 2027" is half again as long as "Monday 1 March
+   * 2027" — still reach the ellipsis on the narrowest phones. Clipping is at
+   * least graceful, and the section heading for that same day always carries
+   * the date in full a few pixels below.
+   */
+  font-size: min(var(--text-date), 6.2vw);
+}
+
+.menu-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-row {
+  width: 100%;
+  padding: var(--space-md) 0;
+  border: none;
+  border-bottom: var(--hairline) solid var(--color-rule);
+  background: none;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
