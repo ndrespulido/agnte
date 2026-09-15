@@ -651,3 +651,85 @@ model DeepTimeEvent {
   @@map("deep_time_event")
   @@schema("insights")
 }
+
+/// A reminder waiting to fire (§8.4).
+///
+/// The row *is* the queue: Cloud Scheduler ticks every five minutes and the
+/// dispatcher claims due rows with `FOR UPDATE SKIP LOCKED`, which is what
+/// makes two concurrent instances safe without a lock table or a broker.
+///
+/// No cross-schema foreign key to `verse.verse` or `identity.user` — `userId`
+/// and `verseId` are plain UUIDs, for the same reason every other module's
+/// owner column is (§1.1).
+model ScheduledNotification {
+  /// Client-generated UUIDv7 (§2).
+  id String @id @db.Uuid
+
+  userId String @map("user_id") @db.Uuid
+
+  /// What this reminds you about, if anything. Null for a standalone reminder
+  /// — the timeline is not the only reason to want a nudge.
+  verseId String? @map("verse_id") @db.Uuid
+
+  /// When it should go out next. Advanced on dispatch for a recurring rule
+  /// rather than materialising a year of rows (§8.4).
+  fireAt DateTime @map("fire_at") @db.Timestamptz(3)
+
+  /// The occurrence this row is currently waiting to send. Recurrence counts
+  /// from the anchor, so this is also what lets COUNT be honoured without
+  /// replaying history (domain/recurrence.ts).
+  startAt DateTime @map("start_at") @db.Timestamptz(3)
+  occurrences Int @default(0)
+
+  /// RRULE, or null for a one-off. Parsed by domain/recurrence.ts, which
+  /// refuses anything it does not implement rather than ignoring it.
+  recurrence String?
+
+  /// pending -> sent, or -> failed after the attempt limit. A string with a
+  /// CHECK rather than an enum, like Media.status and for the same reason.
+  status String @default("pending")
+
+  /// What to say. Free-form so a reminder is not forced into a shape the
+  /// domain would then have to keep in step with the verse it points at.
+  title String
+  body String?
+
+  /// How many delivery attempts have been made. Bounded in the dispatcher so
+  /// a permanently undeliverable reminder stops rather than retrying nightly
+  /// forever.
+  attempts Int @default(0)
+  lastError String? @map("last_error")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  version Int @default(0)
+
+  @@index([status, fireAt])
+  @@index([userId])
+  @@map("scheduled_notification")
+  @@schema("notifications")
+}
+
+/// Per-user delivery settings: where to send, and when not to.
+///
+/// One row per user, created on demand. Absent means "no quiet hours and no
+/// push" — which is the correct default for someone who has never opened the
+/// settings, and keeps the dispatcher from having to distinguish "never
+/// configured" from "configured to nothing".
+model NotificationPreference {
+  userId String @id @map("user_id") @db.Uuid
+
+  /// Local wall-clock minutes from midnight, plus the zone they are local to.
+  /// Never a UTC window and never a stored offset — see domain/quiet-hours.ts
+  /// for why that distinction is the whole feature.
+  quietStartMinute Int? @map("quiet_start_minute")
+  quietEndMinute Int? @map("quiet_end_minute")
+  timeZone String? @map("time_zone")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  version Int @default(0)
+
+  @@map("notification_preference")
+  @@schema("notifications")
+}
