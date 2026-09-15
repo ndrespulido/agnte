@@ -3,6 +3,7 @@ import { loadConfig } from './config';
 import { getDatabase, MIGRATED_SCHEMAS, shippedMigrations } from './database';
 import { getEmailTransport } from './email';
 import { getObjectStorage } from './object-storage';
+import { BACKUP_STALE_AFTER_MS, backupFreshness } from './backup-freshness';
 
 /**
  * Dependency checks.
@@ -13,7 +14,20 @@ import { getObjectStorage } from './object-storage';
  * dependencies land — Neon in 0.4, R2 in 0.5.
  */
 
-export type CheckStatus = 'ok' | 'failed' | 'not-configured';
+/**
+ * `stale` is a dependency that is wired correctly and producing nothing useful.
+ *
+ * Its own status rather than `failed`, and the distinction is load-bearing: the
+ * deploy smoke test gates promotion on this endpoint reporting ok, so a stale
+ * backup marked `failed` would block deploying the very fix for it — the same
+ * trap the email check documents. `isHealthy` treats only `failed` as fatal, so
+ * this shows up red on the status page without stopping the pipeline.
+ *
+ * Not `not-configured` either: that means "this was never wired up", which is a
+ * legitimate state for a preview. A backup that has not run in four days is not
+ * a configuration choice.
+ */
+export type CheckStatus = 'ok' | 'failed' | 'not-configured' | 'stale';
 
 export interface CheckResult {
   name: string;
@@ -204,6 +218,52 @@ const checks: Check[] = [
       }
 
       return { status: 'ok' as const, detail: 'configured' };
+    },
+  },
+  {
+    name: 'backups',
+    run: async () => {
+      const config = loadConfig();
+
+      /*
+       * Six consecutive nightly backups failed and nothing reported it. This is
+       * the thing that would have said so on day one.
+       *
+       * Production only. Backups run against the production database and write
+       * to the bucket root; a preview has none by design, and a red check on
+       * every preview is noise that teaches people to ignore this row.
+       */
+      if (config.APP_ENV !== 'production') {
+        return {
+          status: 'not-configured' as const,
+          detail: 'backups run in production only',
+        };
+      }
+
+      const freshness = await backupFreshness(new Date());
+      if (!freshness) {
+        return { status: 'not-configured' as const, detail: 'R2 is not configured' };
+      }
+
+      const hours = (at: Date) => Math.round((Date.now() - at.getTime()) / 3_600_000);
+
+      if (!freshness.stale) {
+        return {
+          status: 'ok' as const,
+          detail: freshness.newest
+            ? `newest ${hours(freshness.newest)}h old`
+            : 'a backup newer than the cutoff exists',
+        };
+      }
+
+      return {
+        status: 'stale' as const,
+        detail: freshness.newest
+          ? `newest backup is ${hours(freshness.newest)}h old, past the ${Math.round(
+              BACKUP_STALE_AFTER_MS / 3_600_000,
+            )}h limit`
+          : 'no backup found at all',
+      };
     },
   },
   {
