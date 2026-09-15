@@ -27,6 +27,7 @@ describe('runChecks', () => {
       'email',
       'access-tokens',
       'google-sign-in',
+      'backups',
       'place-suggestions',
       'deferred-jobs',
     ]);
@@ -103,11 +104,34 @@ describe('runChecks', () => {
     expect(places?.status).toBe('ok');
     expect(places?.detail).toContain('not called');
   });
+
+  it('does not check backups outside production', async () => {
+    const backups = (await runChecks()).find((r) => r.name === 'backups');
+
+    // A preview has no backups by design, and R2 is not even reachable from a
+    // local run. Reporting red everywhere would teach someone to ignore the row
+    // that exists precisely to be noticed.
+    expect(backups?.status).toBe('not-configured');
+    expect(backups?.detail).toContain('production only');
+  });
 });
 
 describe('isHealthy', () => {
   it('treats a not-yet-wired dependency as healthy', () => {
     expect(isHealthy([result('ok'), result('not-configured')])).toBe(true);
+  });
+
+  /**
+   * The reason `stale` is its own status rather than `failed`.
+   *
+   * The production deploy's smoke test gates promotion on this endpoint
+   * reporting ok. If a backup that had not run marked the app unhealthy, the
+   * deploy carrying the fix for it would be the one thing that could not ship —
+   * the same trap the email check documents. Red on the status page, not red in
+   * the pipeline.
+   */
+  it('does not let a stale backup block a deploy', () => {
+    expect(isHealthy([result('ok'), result('stale')])).toBe(true);
   });
 
   it('treats a broken dependency as unhealthy', () => {

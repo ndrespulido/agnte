@@ -641,7 +641,27 @@ The pin stays deliberate — an unannounced client upgrade is its own hazard —
 but be clear about what it costs: nothing in the system notices when Neon
 moves, so this is discovered by someone reading execution logs.
 
-### Nothing tells you when a backup fails
+### What tells you when a backup fails
+
+`/v1/health` reports a `backups` row: the age of the newest object under
+`backups/`, going `stale` past 36 hours (the job runs daily at 03:17 UTC, so
+one missed night shows and normal jitter does not).
+
+`stale` is its own status, not `failed`, and the distinction is deliberate. The
+production deploy's smoke test gates promotion on this endpoint reporting ok —
+so a stale backup marked `failed` would block deploying the very fix for it.
+Red on the status page, not red in the pipeline.
+
+The row reads `not-configured` outside production, because backups run against
+the production database and write to the bucket root; a preview has none by
+design, and a red row on every preview teaches people to ignore the row.
+
+It reads the bucket directly rather than through the app's object-storage
+adapter, which prefixes keys with `R2_PREFIX` so previews can share a bucket.
+Through the adapter, a preview would look under `pr-21/backups/` and report a
+missing backup that was never meant to exist.
+
+### What used to tell you nothing
 
 The six executions that failed on the version mismatch above were scheduled,
 ran, exited 1, and were never reported anywhere. Cloud Scheduler treats a
@@ -651,8 +671,9 @@ reports the database and R2 but says nothing about whether anything was ever
 written to R2. A backup nobody is checking is architecture.md §8.8's "guess"
 in the most literal sense.
 
-Until something reports it, check by hand after any change to the job, and
-periodically:
+The check above now reports it. Still worth running by hand after any change to
+the job, because exit 0 and a fresh object prove the dump was *written*, not
+that it contains anything:
 
 ```bash
 gcloud run jobs executions list --job=agnte-backup \

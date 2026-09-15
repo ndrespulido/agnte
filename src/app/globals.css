@@ -1198,3 +1198,12 @@ button.danger {
   cursor: pointer;
   border-radius: var(--radius-sm);
 }
+
+/*
+ * A dependency that is wired and producing nothing useful — a backup that has
+ * not run. Amber rather than red: it is real and it is not a reason to stop a
+ * deploy, which is exactly what the status distinguishes.
+ */
+.dot[data-status='stale'] {
+  background: var(--pending);
+}
