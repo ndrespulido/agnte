@@ -733,3 +733,41 @@ model NotificationPreference {
   @@map("notification_preference")
   @@schema("notifications")
 }
+
+/// One row per (event, handler) that has run to completion (§1.2).
+///
+/// A redelivery finds the row and does nothing. This is where "handlers must
+/// be idempotent from day one" is enforced rather than trusted — the bus skips
+/// a handler that has already run, so a handler author cannot forget.
+model EventHandled {
+  eventId String @map("event_id") @db.Uuid
+  handler String
+  handledAt DateTime @default(now()) @map("handled_at") @db.Timestamptz(3)
+
+  @@id([eventId, handler])
+  @@map("event_handled")
+  @@schema("platform")
+}
+
+/// A handler that failed its retries (§1.2).
+///
+/// Keeps the whole event rather than only the error: the payload is what a
+/// retry needs, and an event whose body was discarded can be investigated but
+/// never replayed.
+model EventDeadLetter {
+  id String @id @db.Uuid
+  eventId String @map("event_id") @db.Uuid
+  eventName String @map("event_name")
+  handler String
+  payload Json
+  attempts Int @default(0)
+  lastError String @map("last_error")
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([eventId, handler])
+  @@index([createdAt])
+  @@map("event_dead_letter")
+  @@schema("platform")
+}

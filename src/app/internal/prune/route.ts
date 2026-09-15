@@ -9,6 +9,7 @@ import {
   pruneRefreshTokens,
 } from '@/modules/identity';
 import { prunePendingMedia, requeueStalledThumbnails } from '@/modules/media';
+import { retryDeadLetters } from '@/shared/events';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -64,8 +65,19 @@ export async function POST(request: Request): Promise<Response> {
    */
   const requeued = { thumbnails: await requeueStalledThumbnails(now) };
 
+  /*
+   * Dead-lettered event handlers get another go here.
+   *
+   * A handler that failed during an outage is otherwise waiting for someone to
+   * notice — and the events that go through this bus are erasure requests
+   * (§8.7), so "waiting for someone to notice" means a module still holding
+   * data a person asked to have deleted. The sweep already runs daily and is
+   * already the place where things nobody is watching get picked up.
+   */
+  const recovered = { eventHandlers: await retryDeadLetters() };
+
   return Response.json(
-    { swept, requeued, at: now.toISOString() },
+    { swept, requeued, recovered, at: now.toISOString() },
     { status: 200, headers: { 'cache-control': 'no-store' } },
   );
 }
