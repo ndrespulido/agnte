@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { register, signIn } from './session';
+import { forgotPassword, register, signIn } from './session';
 
 /**
  * Sign in, or start registering.
@@ -23,7 +23,7 @@ export function SignIn({
    * OAuth return that failed on the way back. */
   notice?: string | null;
 }) {
-  const [mode, setMode] = useState<'sign-in' | 'register'>('sign-in');
+  const [mode, setMode] = useState<'sign-in' | 'register' | 'forgot'>('sign-in');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -39,6 +39,9 @@ export function SignIn({
       if (mode === 'sign-in') {
         await signIn(email, password);
         onSignedIn();
+      } else if (mode === 'forgot') {
+        await forgotPassword(email);
+        setSent(true);
       } else {
         await register(email, password);
         setSent(true);
@@ -55,7 +58,20 @@ export function SignIn({
       <div className="auth">
         <h1>Check your email</h1>
         <p className="lede">
-          There is a link waiting at {email}. The account exists once you click it.
+          {mode === 'forgot'
+            ? `If ${email} has an account, a reset link is on its way.`
+            : `There is a link waiting at ${email}. The account exists once you click it.`}
+        </p>
+        {/*
+          Said plainly rather than left to be discovered. A verification mail
+          from a young sending domain lands in spam often enough that its
+          absence reads as a broken app, and someone who does not find it
+          simply gives up — which is the one outcome this screen cannot
+          recover from.
+        */}
+        <p className="notice">
+          If it is not there in a minute, look in spam or junk — and mark it as not spam,
+          so the next one arrives properly.
         </p>
       </div>
     );
@@ -78,19 +94,24 @@ export function SignIn({
           />
         </label>
 
-        <label className="field">
-          <span>Password</span>
-          <input
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'}
-            // Matches MIN_PASSWORD_LENGTH. The server is the authority; this
-            // only saves a round trip.
-            minLength={12}
-            required
-          />
-        </label>
+        {/* Nothing to ask for when the whole point is that they cannot
+            remember it. `required` has to go with it, or the form refuses to
+            submit over a field nobody can see. */}
+        {mode === 'forgot' ? null : (
+          <label className="field">
+            <span>Password</span>
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'}
+              // Matches MIN_PASSWORD_LENGTH. The server is the authority; this
+              // only saves a round trip.
+              minLength={12}
+              required
+            />
+          </label>
+        )}
 
         {(error ?? notice) ? (
           <p className="notice error" role="alert">
@@ -99,7 +120,13 @@ export function SignIn({
         ) : null}
 
         <button type="submit" className="primary" disabled={busy}>
-          {busy ? 'Working…' : mode === 'sign-in' ? 'Sign in' : 'Create account'}
+          {busy
+            ? 'Working…'
+            : mode === 'sign-in'
+              ? 'Sign in'
+              : mode === 'forgot'
+                ? 'Send a reset link'
+                : 'Create account'}
         </button>
       </form>
 
@@ -126,6 +153,21 @@ export function SignIn({
       >
         {mode === 'sign-in' ? 'Create an account' : 'I already have an account'}
       </button>
+
+      {/* Only from sign-in. Offering it while registering would be noise, and
+          from the forgot screen itself it would be a link to where you are. */}
+      {mode === 'sign-in' ? (
+        <button
+          type="button"
+          className="quiet"
+          onClick={() => {
+            setMode('forgot');
+            setError(null);
+          }}
+        >
+          I forgot my password
+        </button>
+      ) : null}
     </div>
   );
 }

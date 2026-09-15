@@ -278,3 +278,65 @@ export async function signOut(): Promise<void> {
     body: JSON.stringify({ refreshToken: tokens.refreshToken }),
   }).catch(() => undefined);
 }
+
+/**
+ * Ask for a reset link.
+ *
+ * Always resolves, whatever the server says, because the server always answers
+ * 202: telling an anonymous caller whether an address has an account is an
+ * enumeration leak, and a client that surfaced the difference would reopen it
+ * from the other side.
+ */
+export async function forgotPassword(email: string): Promise<void> {
+  await fetch('/v1/auth/forgot-password', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+}
+
+/** Redeem a reset link. Unauthenticated by nature — the token is the proof. */
+export async function resetPassword(token: string, password: string): Promise<void> {
+  const response = await fetch('/v1/auth/reset-password', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ token, password }),
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: { message?: string };
+    } | null;
+    throw new Error(body?.error?.message ?? 'That reset link did not work.');
+  }
+}
+
+/**
+ * Change the password of the signed-in account.
+ *
+ * Every session ends, this one included (see the use case for why), so the
+ * tokens are cleared here rather than left to expire — the alternative is an
+ * access token that keeps working for up to fifteen minutes and then fails
+ * mid-action with no explanation.
+ */
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<number> {
+  const response = await authedFetch('/v1/auth/change-password', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: { message?: string };
+    } | null;
+    throw new Error(body?.error?.message ?? 'Could not change the password.');
+  }
+
+  const body = (await response.json()) as { sessionsRevoked: number };
+  clearTokens();
+  return body.sessionsRevoked;
+}

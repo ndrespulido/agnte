@@ -10,6 +10,7 @@ export { handleRegister } from './api/register-route';
 export { handleVerifyEmail } from './api/verify-email-route';
 export { handleLogin, handleLogout, handleRefresh } from './api/session-routes';
 export { handleForgotPassword, handleResetPassword } from './api/password-reset-routes';
+export { handleChangePassword } from './api/change-password-route';
 export { handleMe } from './api/me-route';
 export {
   handleGoogleStart,
