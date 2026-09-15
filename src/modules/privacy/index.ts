@@ -7,6 +7,7 @@
  */
 export { handleEraseMe } from './api/erasure-route';
 export { handleDownloadExport } from './api/download-route';
+export { handleImport } from './api/import-route';
 export {
   handleBuildExport,
   handleExportStatus,

@@ -17,6 +17,8 @@ export { handleTagDashboard } from './api/dashboard-routes';
 
 export { purgeForUser } from './application/purge';
 export { exportForUser } from './application/export';
+export { importForUser } from './application/import';
+export type { ImportSummary } from './application/import';
 
 export {
   handleListTagShares,
