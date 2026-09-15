@@ -105,6 +105,17 @@ model User {
   /// Null until the address is proven. Nothing but verification sets it.
   emailVerifiedAt DateTime? @map("email_verified_at") @db.Timestamptz(3)
 
+  /// When this account was marked for erasure (§8.7).
+  ///
+  /// Set by DELETE /v1/me, which also publishes `user.erasure_requested` so
+  /// each module purges its own data. The row itself survives a grace window —
+  /// thirty days — before the sweep removes it, because erasure is
+  /// irreversible and occasionally regretted.
+  ///
+  /// A marked account cannot sign in: the credential path checks this, so the
+  /// window is a chance to recover an account, not a period of continued use.
+  erasureRequestedAt DateTime? @map("erasure_requested_at") @db.Timestamptz(3)
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 

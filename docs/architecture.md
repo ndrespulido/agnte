@@ -450,6 +450,22 @@ obligations, and erasure in particular is far cheaper to design in now.
 event → each module purges its own data (exactly what module boundaries buy you)
 → media purged from R2 → hard delete after a 30-day grace window.
 
+> **Implementation note, added when erasure was built (Phase 8).** Anonymization
+> is not implemented, because it currently has nothing to act on: `contribute`
+> is an open decision, the application layer refuses contribute writes, and so
+> no Verse can exist that one person wrote onto another person's tag. Erasure
+> deletes what you own.
+>
+> Whoever lands `contribute` must land anonymization with it, and should know
+> about a gap that implementing it surfaced: `canRead` grants access by
+> ownership, by `public`, or by an explicit share row — and a tag's *owner* is
+> not a grantee of their own tag. Anonymizing a Verse's `ownerId` would
+> therefore make it readable by **nobody**, which is functionally the deletion
+> the rule exists to prevent. The options are a share row granted at
+> anonymization, a transfer of ownership to the tag owner, or a change to the
+> visibility rule itself — the last being the most safety-critical function in
+> this system, and the last resort.
+
 > **Decided:** if you contributed Verses to someone else's shared trip tag,
 > erasure **anonymizes** them rather than deleting them — the Verse keeps its
 > content and loses all attribution. Deleting would let one person destroy

@@ -10,6 +10,7 @@ import {
 } from '@/modules/identity';
 import { prunePendingMedia, requeueStalledThumbnails } from '@/modules/media';
 import { retryDeadLetters } from '@/shared/events';
+import { registerErasureHandlers, sweepErasures } from '@/modules/privacy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -76,8 +77,23 @@ export async function POST(request: Request): Promise<Response> {
    */
   const recovered = { eventHandlers: await retryDeadLetters() };
 
+  /*
+   * Accounts whose thirty-day grace window has closed (§8.7).
+   *
+   * Here rather than on its own schedule because it is the same shape as every
+   * other pruner: a daily pass over rows whose time has come. The sweep
+   * republishes the erasure event before deleting anything, so a module that
+   * dead-lettered a month ago is not the reason data outlives the account it
+   * belonged to.
+   *
+   * Registered on this path too: the tick and the sweep are different entry
+   * points and neither can rely on the other having run first.
+   */
+  registerErasureHandlers();
+  const erased = { accounts: await sweepErasures(now) };
+
   return Response.json(
-    { swept, requeued, recovered, at: now.toISOString() },
+    { swept, requeued, recovered, erased, at: now.toISOString() },
     { status: 200, headers: { 'cache-control': 'no-store' } },
   );
 }

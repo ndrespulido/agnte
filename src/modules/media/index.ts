@@ -21,5 +21,6 @@ export {
 } from './api/media-routes';
 export { ownedMediaIds, resolveMediaForVerse } from './application/verse-integration';
 export { prunePendingMedia } from './application/prune-media';
+export { purgeForUser } from './application/purge';
 export { requeueStalledThumbnails } from './application/requeue-stalled-thumbnails';
 export type { MediaSummaryForVerse } from './application/verse-integration';
