@@ -22,6 +22,7 @@ export {
 export { handleNotificationsTick } from './api/tick-route';
 
 export { purgeForUser } from './application/purge';
+export { exportForUser } from './application/export';
 
 export { MAX_ATTEMPTS, MAX_PER_TICK } from './application/dispatch';
 export type { TickResult } from './application/dispatch';

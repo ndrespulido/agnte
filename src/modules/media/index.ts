@@ -22,5 +22,6 @@ export {
 export { ownedMediaIds, resolveMediaForVerse } from './application/verse-integration';
 export { prunePendingMedia } from './application/prune-media';
 export { purgeForUser } from './application/purge';
+export { exportForUser, EXPORT_LINK_TTL_SECONDS } from './application/export';
 export { requeueStalledThumbnails } from './application/requeue-stalled-thumbnails';
 export type { MediaSummaryForVerse } from './application/verse-integration';

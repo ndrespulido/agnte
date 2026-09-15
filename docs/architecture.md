@@ -415,6 +415,24 @@ ScheduledNotification { id, userId, verseId?, fireAt, kind, payload, status, att
 - `POST /v1/privacy/export` → Cloud Task → worker assembles JSON (all verses,
   tags, properties, shares) + original media into a ZIP in R2 → emails a signed
   URL valid 24h.
+
+> **Built differently, deliberately (Phase 8).** Two deviations, both recorded
+> here because the reasoning is the useful part.
+>
+> **Media travels as signed links, not bytes in a ZIP.** Assembling a
+> multi-gigabyte archive inside a Cloud Run request means streaming a ZIP into a
+> multipart upload with bounded memory, and realistically a Cloud Run Job rather
+> than a request, since a large export outlives a request deadline. A manifest of
+> 24-hour signed URLs hands over the same files with none of that machinery. The
+> cost, stated plainly: the links expire, so this is an export someone must act
+> on within the window rather than an archive they can file away.
+>
+> **The email carries a link to the app, not a signed URL.** A signed link in an
+> email is a capability held by anyone who reads that mailbox or any system that
+> scans it, and this file is the whole of someone's timeline — medical notes and
+> financial screenshots included. `GET /v1/privacy/export/download` authenticates
+> instead, looks the row up by the authenticated user, and never accepts or
+> returns a storage key. One sign-in, one fewer class of exposure.
 - Async because media can run to gigabytes.
 - Rate-limited to one export per user per 24h.
 - Doubles as GDPR portability (§8.7) — one implementation, two requirements.

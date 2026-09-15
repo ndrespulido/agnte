@@ -6,6 +6,13 @@
  * the sweep, never another module's data.
  */
 export { handleEraseMe } from './api/erasure-route';
+export { handleDownloadExport } from './api/download-route';
+export {
+  handleBuildExport,
+  handleExportStatus,
+  handleRequestExport,
+} from './api/export-routes';
+export { EXPORT_COOLDOWN_MS, buildExport, requestExport } from './application/export';
 export {
   ERASURE_GRACE_MS,
   registerErasureHandlers,

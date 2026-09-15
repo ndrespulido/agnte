@@ -782,3 +782,29 @@ model EventDeadLetter {
   @@map("event_dead_letter")
   @@schema("platform")
 }
+
+/// One data-export request (§8.5).
+///
+/// The row is the rate limit as well as the record: one export per user per
+/// 24h, answered by asking when this person last requested one rather than by
+/// a second mechanism that could disagree.
+model ExportRequest {
+  id String @id @db.Uuid
+  userId String @map("user_id") @db.Uuid
+
+  /// pending -> ready, or -> failed.
+  status String @default("pending")
+
+  /// Where the finished export sits. Never returned to a caller — they get a
+  /// short-lived signed URL, like media (§8.3).
+  storageKey String? @map("storage_key")
+  error String?
+
+  requestedAt DateTime @default(now()) @map("requested_at") @db.Timestamptz(3)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([userId, requestedAt(sort: Desc)])
+  @@map("export_request")
+  @@schema("privacy")
+}
