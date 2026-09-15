@@ -537,6 +537,73 @@ a {
 }
 
 /*
+ * The location field's suggestions.
+ *
+ * Absolutely positioned so the sheet does not jump taller the moment
+ * suggestions arrive — the field is mid-sentence when they appear, and
+ * everything below it moving is worse than the help is worth.
+ */
+.location-field {
+  position: relative;
+}
+
+.location-field > label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  margin: var(--space-xxs) 0 0;
+  padding: 0;
+  list-style: none;
+  background: var(--color-paper);
+  border: var(--hairline) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 8%);
+}
+
+.suggestions button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xxs);
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  min-height: var(--size-min-tap-target);
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: var(--color-ink);
+}
+
+.suggestions li + li button {
+  border-top: var(--hairline) solid var(--color-rule);
+}
+
+.suggestions button:hover,
+.suggestions button:focus-visible {
+  background: var(--color-paper-raised);
+}
+
+.suggestion-primary {
+  font-size: var(--text-body);
+}
+
+.suggestion-secondary {
+  font-size: var(--text-small);
+  color: var(--color-ink-soft);
+}
+
+/*
  * Two controls on one line — start/end dates, rating/visibility.
  *
  * `minmax(0, 1fr)` rather than `1fr`: a date input has a wide intrinsic

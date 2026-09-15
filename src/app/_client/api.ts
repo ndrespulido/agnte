@@ -149,6 +149,40 @@ export function fetchDeepTime(options: {
   );
 }
 
+export interface PlaceSuggestion {
+  description: string;
+  primary: string;
+  secondary: string | null;
+}
+
+/**
+ * Place suggestions for the location field.
+ *
+ * Answers an empty list rather than throwing when suggestions are switched
+ * off (501) or the provider is unreachable (502). A location field is a
+ * convenience on an optional field — it should degrade to plain text, not put
+ * an error in front of someone mid-sentence.
+ */
+let placesDisabled = false;
+
+export async function fetchPlaces(query: string): Promise<PlaceSuggestion[]> {
+  // Asked once, answered for the session. Suggestions being switched off is a
+  // deployment fact, not a per-request one — and without this the field logs a
+  // failed request on every debounce for the whole time someone is typing.
+  if (placesDisabled) return [];
+
+  const response = await authedFetch(`/v1/places?q=${encodeURIComponent(query)}`);
+
+  if (response.status === 501) {
+    placesDisabled = true;
+    return [];
+  }
+  if (!response.ok) return [];
+
+  const body = (await response.json()) as { suggestions?: PlaceSuggestion[] };
+  return body.suggestions ?? [];
+}
+
 export const fetchVerse = (id: string): Promise<VerseView> =>
   authedFetch(`/v1/verses/${id}`).then((r) => json<VerseView>(r));
 
