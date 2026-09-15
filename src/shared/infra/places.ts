@@ -73,7 +73,23 @@ export class PlacesNotConfigured extends Error {}
  * stops suggesting is indistinguishable from one whose provider is down.
  */
 export async function suggestPlaces(query: string): Promise<PlaceSuggestion[]> {
-  const key = loadConfig().GOOGLE_PLACES_API_KEY;
+  /*
+   * Trimmed, and not defensively — a trailing newline here is a *likely*
+   * value, not a far-fetched one.
+   *
+   * The key is stored in Secret Manager and mounted as an environment
+   * variable, which preserves the payload's bytes exactly. Every natural way
+   * to create that payload adds a newline: `gcloud ... --format=value(...)`
+   * ends its output with one, and piping it straight into
+   * `gcloud secrets versions add --data-file=-` stores it.
+   *
+   * What makes it worth a line of code rather than a note in a runbook is how
+   * it fails. A newline is illegal in an HTTP header value, so `fetch` throws
+   * before the request leaves — while every way of checking the secret by hand
+   * passes, because shell command substitution strips trailing newlines. The
+   * result is a key that works in a terminal and only fails inside the app.
+   */
+  const key = loadConfig().GOOGLE_PLACES_API_KEY?.trim();
   if (!key) throw new PlacesNotConfigured('GOOGLE_PLACES_API_KEY is not set');
 
   const input = query.trim();

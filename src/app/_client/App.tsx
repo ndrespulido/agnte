@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { QuickAdd } from './QuickAdd';
 import { SignIn } from './SignIn';
 import { Timeline } from './Timeline';
@@ -32,6 +32,55 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
   );
 
   const [googleError, setGoogleError] = useState<string | null>(null);
+
+  /**
+   * What the email verification link left behind.
+   *
+   * That link is a `/v1/...` API route, and until it learned to redirect, a
+   * person clicking it landed on raw JSON. It now sends a browser back here
+   * with a flag, and this is what turns the flag into a sentence.
+   */
+  const [verifyNotice, setVerifyNotice] = useState<{
+    text: string;
+    tone: 'error' | 'success';
+  } | null>(null);
+
+  /**
+   * The same guard ResetPassword documents, for the same reason: this effect
+   * strips the query string, so Strict Mode's second run in development would
+   * read an already-cleaned URL and wipe the message it just set.
+   */
+  const readParams = useRef(false);
+
+  useEffect(() => {
+    if (readParams.current) return;
+    readParams.current = true;
+
+    const params = new URLSearchParams(window.location.search);
+    const verified = params.get('verified');
+    const failed = params.get('verifyError');
+    if (!verified && !failed) return;
+
+    // Scoped exception to react-hooks/set-state-in-effect, as in
+    // ResetPassword: the dependency list is empty, so this runs once and
+    // cannot cascade, and a lazy initialiser would have to touch `window`
+    // during server rendering.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setVerifyNotice(
+      verified
+        ? { text: 'Email confirmed. Sign in to start.', tone: 'success' }
+        : {
+            text:
+              failed === 'expired'
+                ? 'That confirmation link has expired. Register again to get a new one.'
+                : 'That confirmation link is not valid. Check you copied the whole address.',
+            tone: 'error',
+          },
+    );
+
+    // Out of the address bar, so a refresh does not re-announce it.
+    window.history.replaceState({}, '', window.location.pathname);
+  }, []);
 
   /**
    * If this load is the redirect back from Google, finish the sign-in.
@@ -76,7 +125,7 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
       <SignIn
         onSignedIn={() => undefined}
         googleEnabled={googleEnabled}
-        notice={googleError}
+        notice={googleError ? { text: googleError, tone: 'error' } : verifyNotice}
       />
     );
 

@@ -71,6 +71,33 @@ describe('place suggestions', () => {
     expect(init.headers['x-goog-api-key']).toBe('test-key');
   });
 
+  /*
+   * The failure this guards against looked like a broken app and was a stray
+   * byte: a newline is illegal in an HTTP header value, so `fetch` throws
+   * before the request is sent — while checking the same secret in a shell
+   * passes, because command substitution strips trailing newlines. Every
+   * ordinary way of writing this secret (`gcloud ... --format=value(keyString)`
+   * piped into `gcloud secrets versions add`) produces one.
+   */
+  it('survives a key stored with the trailing newline gcloud writes', async () => {
+    process.env.GOOGLE_PLACES_API_KEY = 'test-key\n';
+    resetConfigForTests();
+
+    const fetchMock = answerWith({ suggestions: [] });
+    vi.stubGlobal('fetch', fetchMock);
+    await suggestPlaces('Barcelona');
+
+    const init = fetchMock.mock.calls[0]?.[1] as { headers: Record<string, string> };
+    expect(init.headers['x-goog-api-key']).toBe('test-key');
+  });
+
+  it('treats a key of nothing but whitespace as no key at all', async () => {
+    process.env.GOOGLE_PLACES_API_KEY = '   \n';
+    resetConfigForTests();
+
+    await expect(suggestPlaces('Barcelona')).rejects.toThrow(/GOOGLE_PLACES_API_KEY/);
+  });
+
   it('flattens what Google answers into what the field shows', async () => {
     process.env.GOOGLE_PLACES_API_KEY = 'test-key';
     resetConfigForTests();

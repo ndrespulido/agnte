@@ -826,6 +826,13 @@ button.quiet {
   text-align: left;
 }
 
+/* Same shape as .notice.error, so confirmation and failure sit in the same
+   place on the form and only the colour differs. */
+.notice.success {
+  color: var(--color-ok);
+  text-align: left;
+}
+
 /*
  * Delete, once it has been asked for a second time.
  *

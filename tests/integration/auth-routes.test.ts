@@ -54,6 +54,15 @@ const verify = (token: string) =>
     ),
   );
 
+/** The same call as `verify`, but shaped like a mail client following a link. */
+const verifyInBrowser = (token: string) =>
+  handleVerifyEmail(
+    new Request(
+      `https://agnte.test/v1/auth/verify-email?token=${encodeURIComponent(token)}`,
+      { headers: { accept: 'text/html,application/xhtml+xml,application/xml;q=0.9' } },
+    ),
+  );
+
 const PASSWORD = 'a sufficiently long password';
 
 describe.skipIf(!DATABASE_URL)('auth routes', () => {
@@ -130,6 +139,10 @@ describe.skipIf(!DATABASE_URL)('auth routes', () => {
     expect(again.status).toBe(202);
     expect(await again.json()).toMatchObject({ status: 'accepted' });
     expect(emailed.at(-1)).toContain('already exists');
+    // The link in that email pointed at /sign-in, which has never existed —
+    // the same 404 /reset-password used to be. The app is served at the root.
+    expect(emailed.at(-1)).toContain('https://agnte.test/');
+    expect(emailed.at(-1)).not.toContain('/sign-in');
   });
 
   it('rejects a short password with 422 and a machine-readable code', async () => {
@@ -223,6 +236,62 @@ describe.skipIf(!DATABASE_URL)('auth routes', () => {
       new Request('https://agnte.test/v1/auth/verify-email'),
     );
     expect(response.status).toBe(400);
+  });
+
+  /*
+   * The link in the email is clicked by a person, not by a program, and until
+   * this existed they landed on `{"status":"verified",...}` — a correct
+   * response to a request they never knowingly made.
+   */
+  it('sends a browser to the app instead of answering with JSON', async () => {
+    await register({ email: 'a@example.com', password: PASSWORD });
+    const response = await verifyInBrowser(tokenFromLastEmail());
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe('https://agnte.test/?verified=1');
+  });
+
+  it('sends a browser back with a reason when the link is not good', async () => {
+    const response = await verifyInBrowser('not-a-real-token');
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe(
+      'https://agnte.test/?verifyError=invalid',
+    );
+  });
+
+  it('sends a browser back with a reason when there is no token at all', async () => {
+    const response = await handleVerifyEmail(
+      new Request('https://agnte.test/v1/auth/verify-email', {
+        headers: { accept: 'text/html' },
+      }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe(
+      'https://agnte.test/?verifyError=invalid',
+    );
+  });
+
+  /*
+   * The case that makes the negotiation worth testing rather than assuming.
+   * `curl` and most HTTP clients send a wildcard Accept; if that counted as a
+   * browser, every scripted caller — and the planned native client — would
+   * start getting redirects instead of the documented body.
+   */
+  it('still answers JSON to a client that sends a wildcard Accept', async () => {
+    await register({ email: 'b@example.com', password: PASSWORD });
+    const token = tokenFromLastEmail();
+
+    const response = await handleVerifyEmail(
+      new Request(
+        `https://agnte.test/v1/auth/verify-email?token=${encodeURIComponent(token)}`,
+        { headers: { accept: '*/*' } },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: 'verified' });
   });
 
   it('answers 503 rather than accepting a registration it cannot email', async () => {
