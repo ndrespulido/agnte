@@ -1,18 +1,20 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import {
   createTag,
   createVerse,
+  fetchPlaces,
   fetchTags,
   updateVerse,
   uploadImage,
   VersionConflict,
+  type PlaceSuggestion,
   type TagView,
   type VerseView,
 } from './api';
 import { downscaleImage } from './downscale';
-import { fromDateTimeInput, toDateTimeInput } from './format';
+import { fromDateTimeInput, splitTagNames, toDateTimeInput } from './format';
 
 /**
  * The sheet that writes a Verse — one component for both creating and
@@ -172,9 +174,18 @@ export function VerseSheet({
 
     try {
       let tagIds = [...selected];
+      const created: TagView[] = [];
 
-      const wanted = newTag.trim();
-      if (wanted.length > 0) {
+      /**
+       * The new-tag field takes several at once, separated by commas.
+       *
+       * A trip is `.barcelona, .restaurant, .expenses` in one thought, and
+       * saving three times to record one meal is three round trips and three
+       * chances to lose the rest of the sheet. A comma cannot appear in a tag
+       * name — `parseTagName` rejects it — so it is free to use as the
+       * separator.
+       */
+      for (const wanted of splitTagNames(newTag)) {
         /**
          * Typing the name of a tag that already exists selects it, rather
          * than failing the save.
@@ -188,18 +199,24 @@ export function VerseSheet({
          * and `restaurant` find it too.
          */
         const normalised = wanted.replace(/^\.+/, '').toLowerCase();
-        const existing = tags.find((tag) => tag.name === normalised);
+        const existing =
+          tags.find((tag) => tag.name === normalised) ??
+          // Also what this loop created a moment ago: typing the same name
+          // twice in one field must not try to create it twice.
+          created.find((tag) => tag.name === normalised);
 
         if (existing) {
           if (!tagIds.includes(existing.id)) tagIds = [...tagIds, existing.id];
-          setNewTag('');
-        } else {
-          const created = await createTag(wanted);
-          tagIds = [...tagIds, created.id];
-          setTags((current) => [...current, created]);
-          setNewTag('');
+          continue;
         }
+
+        const made = await createTag(wanted);
+        created.push(made);
+        tagIds = [...tagIds, made.id];
       }
+
+      if (created.length > 0) setTags((current) => [...current, ...created]);
+      setNewTag('');
 
       if (tagIds.length === 0) {
         setError('A verse needs at least one tag.');
@@ -274,14 +291,7 @@ export function VerseSheet({
           />
         </label>
 
-        <label className="field">
-          <span>Where</span>
-          <input
-            value={location}
-            onChange={(event) => setLocation(event.target.value)}
-            placeholder="Optional"
-          />
-        </label>
+        <LocationField value={location} onChange={setLocation} />
 
         <fieldset className="field">
           <legend>When</legend>
@@ -409,7 +419,7 @@ export function VerseSheet({
           <input
             value={newTag}
             onChange={(event) => setNewTag(event.target.value)}
-            placeholder="or a new one, like .barcelona-trip"
+            placeholder="or new ones: .barcelona, .restaurant"
             aria-label="New tag"
           />
         </fieldset>
@@ -439,6 +449,137 @@ export function VerseSheet({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The location field, with suggestions.
+ *
+ * Every request here costs money (shared/infra/places.ts is the only metered
+ * dependency in the system), so the restraint is deliberate and lives on this
+ * side as well as the server's:
+ *
+ *   - nothing is asked below MIN_QUERY_LENGTH,
+ *   - keystrokes are debounced, so typing "barcelona" is one request rather
+ *     than nine,
+ *   - and choosing a suggestion stops the next lookup, rather than letting the
+ *     text it just filled in trigger a search for itself.
+ *
+ * Suggestions never block typing. The field is a plain text input that happens
+ * to offer help — with no key configured, or the provider down, `fetchPlaces`
+ * answers an empty list and this is exactly the field it was before.
+ */
+const SUGGEST_DEBOUNCE_MS = 350;
+const MIN_QUERY_LENGTH = 3;
+
+function LocationField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
+  const [open, setOpen] = useState(false);
+
+  /**
+   * Set when a suggestion is chosen, to skip exactly one lookup.
+   *
+   * Without it, filling the field from a suggestion looks like typing to the
+   * effect below, which immediately asks Google about the text Google just
+   * gave us — a guaranteed wasted request on every single selection.
+   */
+  const justChose = useRef(false);
+
+  // Stable across renders, and unique if this field is ever used twice on one
+  // screen — which `aria-controls` requires to point anywhere meaningful.
+  const listId = useId();
+
+  useEffect(() => {
+    if (justChose.current) {
+      justChose.current = false;
+      return;
+    }
+
+    let cancelled = false;
+
+    /*
+     * The short-query case is handled inside the timer rather than by
+     * returning early above, so that clearing the list is never a synchronous
+     * setState in an effect body — which cascades an extra render before
+     * paint, and which the lint rule rightly refuses.
+     */
+    const timer = setTimeout(() => {
+      if (value.trim().length < MIN_QUERY_LENGTH) {
+        setSuggestions([]);
+        setOpen(false);
+        return;
+      }
+
+      void fetchPlaces(value).then((found) => {
+        if (cancelled) return;
+        setSuggestions(found);
+        setOpen(found.length > 0);
+      });
+    }, SUGGEST_DEBOUNCE_MS);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [value]);
+
+  const choose = (suggestion: PlaceSuggestion) => {
+    justChose.current = true;
+    onChange(suggestion.description);
+    setSuggestions([]);
+    setOpen(false);
+  };
+
+  return (
+    <div className="field location-field">
+      <label>
+        <span>Where</span>
+        <input
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onFocus={() => setOpen(suggestions.length > 0)}
+          placeholder="Optional"
+          // The browser's own history dropdown would sit on top of this one.
+          autoComplete="off"
+          role="combobox"
+          aria-expanded={open}
+          aria-controls={listId}
+          aria-autocomplete="list"
+        />
+      </label>
+
+      {open && suggestions.length > 0 ? (
+        <ul className="suggestions" role="listbox" id={listId}>
+          {suggestions.map((suggestion) => (
+            <li key={suggestion.description}>
+              {/*
+                onMouseDown, not onClick: the input's blur fires first
+                otherwise and closes the list before the click lands, which
+                reads as a suggestion that cannot be picked.
+              */}
+              <button
+                type="button"
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  choose(suggestion);
+                }}
+              >
+                <span className="suggestion-primary">{suggestion.primary}</span>
+                {suggestion.secondary ? (
+                  <span className="suggestion-secondary">{suggestion.secondary}</span>
+                ) : null}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }

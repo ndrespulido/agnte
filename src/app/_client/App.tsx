@@ -5,6 +5,7 @@ import { QuickAdd } from './QuickAdd';
 import { SignIn } from './SignIn';
 import { Timeline } from './Timeline';
 import { VerseDetail } from './VerseDetail';
+import { ChangePassword } from './ChangePassword';
 import {
   completeGoogleSignIn,
   getServerSessionSnapshot,
@@ -64,6 +65,7 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
    * a page at a time on the way back.
    */
   const [openVerseId, setOpenVerseId] = useState<string | null>(null);
+  const [changingPassword, setChangingPassword] = useState(false);
 
   const onDateChange = useCallback((label: string) => setDateLabel(label), []);
   const onOpen = useCallback((verseId: string) => setOpenVerseId(verseId), []);
@@ -82,6 +84,13 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
     <>
       <header className="date-header">
         <h1 className="date-label">{dateLabel}</h1>
+        <button
+          type="button"
+          className="quiet sign-out"
+          onClick={() => setChangingPassword(true)}
+        >
+          Password
+        </button>
         <button type="button" className="quiet sign-out" onClick={() => void signOut()}>
           Sign out
         </button>
@@ -92,6 +101,10 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
       </main>
 
       <QuickAdd onAdded={() => setAnchor(new Date())} />
+
+      {changingPassword ? (
+        <ChangePassword onClose={() => setChangingPassword(false)} />
+      ) : null}
 
       {openVerseId !== null ? (
         <VerseDetail

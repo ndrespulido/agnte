@@ -383,6 +383,42 @@ a {
   background: var(--color-paper-raised);
 }
 
+/*
+ * The shared catalogue, past the end of a person's own record.
+ *
+ * Set back rather than boxed off: it is the same column continuing, and a
+ * panel around it would read as a different feature rather than as history
+ * the scroll has arrived at.
+ */
+.catalogue {
+  margin-top: var(--space-xl);
+  color: var(--color-ink-soft);
+}
+
+.catalogue-seam {
+  margin: 0 0 var(--space-lg);
+  padding-top: var(--space-lg);
+  border-top: var(--hairline) solid var(--color-rule);
+  font-size: var(--text-small);
+  color: var(--color-ink-faint);
+}
+
+/* Deep time reads as words, not a clock, so it needs the room the tabular
+   time column does not give it. */
+.catalogue .verse {
+  grid-template-columns: 1fr;
+  gap: var(--space-xxs);
+}
+
+.catalogue .verse-time {
+  font-variant-numeric: normal;
+  color: var(--color-ink-faint);
+}
+
+.catalogue .verse-body {
+  grid-column: 1;
+}
+
 .verse-tags {
   margin: 0;
   display: flex;
@@ -498,6 +534,73 @@ a {
   padding: var(--space-sm);
   /* 16px prevents iOS zooming the whole page on focus. */
   min-height: var(--size-min-tap-target);
+}
+
+/*
+ * The location field's suggestions.
+ *
+ * Absolutely positioned so the sheet does not jump taller the moment
+ * suggestions arrive — the field is mid-sentence when they appear, and
+ * everything below it moving is worse than the help is worth.
+ */
+.location-field {
+  position: relative;
+}
+
+.location-field > label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  margin: var(--space-xxs) 0 0;
+  padding: 0;
+  list-style: none;
+  background: var(--color-paper);
+  border: var(--hairline) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 8%);
+}
+
+.suggestions button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xxs);
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  min-height: var(--size-min-tap-target);
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: var(--color-ink);
+}
+
+.suggestions li + li button {
+  border-top: var(--hairline) solid var(--color-rule);
+}
+
+.suggestions button:hover,
+.suggestions button:focus-visible {
+  background: var(--color-paper-raised);
+}
+
+.suggestion-primary {
+  font-size: var(--text-body);
+}
+
+.suggestion-secondary {
+  font-size: var(--text-small);
+  color: var(--color-ink-soft);
 }
 
 /*

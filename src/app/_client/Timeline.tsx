@@ -9,9 +9,14 @@ import {
   useRef,
   useState,
 } from 'react';
-import { fetchTimeline, type VerseView } from './api';
+import {
+  fetchDeepTime,
+  fetchTimeline,
+  type DeepTimeEventView,
+  type VerseView,
+} from './api';
 import { clearTokens, NotSignedIn } from './session';
-import { headerLabel, placementOf, sectionKey, timeLabel } from './format';
+import { deepTimeLabel, headerLabel, placementOf, sectionKey, timeLabel } from './format';
 
 /**
  * The timeline: today in the middle, the future above it, the past below.
@@ -151,8 +156,79 @@ export function Timeline({
     window.scrollBy(0, document.documentElement.scrollHeight - before);
   });
 
+  /**
+   * The shared catalogue, which the past runs into once a person's own past
+   * runs out.
+   *
+   * Held separately from `past` rather than appended to it, because these are
+   * not verses: they have no id to open, no tags, no owner, and the same
+   * thirty-two entries for everybody. Flattening them into the same array
+   * would mean every place that touches a row having to ask which kind it is.
+   */
+  const [catalogue, setCatalogue] = useState<DeepTimeEventView[]>([]);
+  const [catalogueCursor, setCatalogueCursor] = useState<string | null>(null);
+  const [catalogueDone, setCatalogueDone] = useState(false);
+
+  /**
+   * Where the catalogue was entered, frozen at the first page.
+   *
+   * The cursor carries the position from then on, so recomputing this per page
+   * would be a second, competing pagination — which is exactly what it was at
+   * first, and the browser showed it immediately as React complaining about
+   * duplicate keys while the same entries arrived over and over.
+   */
+  const catalogueFrom = useRef<number | null>(null);
+
+  /**
+   * Captured at the moment a person's own past runs out, which is both the
+   * semantically right instant and the only one where `past` is final.
+   *
+   * Doing this inside the loader instead would mean listing `past` in its
+   * dependencies, rebuilding the callback on every page and resubscribing the
+   * sentinel's observer mid-scroll — half of how the duplicate loads happened.
+   */
+  useEffect(() => {
+    if (pastDone && catalogueFrom.current === null) {
+      catalogueFrom.current = oldestVerseYears(past.at(-1)) ?? 0;
+    }
+  }, [pastDone, past]);
+
+  /**
+   * Guards against a second load starting before the first has finished.
+   *
+   * `loading` cannot do this job: `setLoading(true)` does not take effect
+   * until the next render, and the sentinel's observer can fire twice inside
+   * one frame while a fast scroll passes it. A ref changes now.
+   */
+  const inFlight = useRef(false);
+
+  const loadCatalogue = useCallback(async () => {
+    if (catalogueDone || inFlight.current) return;
+
+    inFlight.current = true;
+    setLoading(true);
+    try {
+      const page = await fetchDeepTime({
+        before: catalogueFrom.current ?? 0,
+        cursor: catalogueCursor,
+        limit: PAGE,
+      });
+      setCatalogue((current) => [...current, ...page.events]);
+      setCatalogueCursor(page.nextCursor);
+      setCatalogueDone(page.nextCursor === null);
+    } catch (cause) {
+      if (cause instanceof NotSignedIn) clearTokens();
+      else setError(cause instanceof Error ? cause.message : 'Could not load more.');
+    } finally {
+      inFlight.current = false;
+      setLoading(false);
+    }
+  }, [catalogueCursor, catalogueDone]);
+
   const loadPast = useCallback(async () => {
-    if (pastCursor === null) return;
+    // Past first, then history. The catalogue is what comes after a life, not
+    // instead of one.
+    if (pastCursor === null) return loadCatalogue();
 
     setLoading(true);
     try {
@@ -172,7 +248,7 @@ export function Timeline({
     } finally {
       setLoading(false);
     }
-  }, [anchor, pastCursor]);
+  }, [anchor, pastCursor, loadCatalogue]);
 
   const loadFuture = useCallback(async () => {
     if (futureCursor === null) return;
@@ -228,7 +304,27 @@ export function Timeline({
     );
   }, [sections, past]);
 
-  // Report the section currently under the header.
+  /**
+   * Everything that can name the sticky header, in document order.
+   *
+   * Sections and catalogue entries both, because the header's whole claim is
+   * that it says where you are — and scrolling into deep time while it still
+   * reads "Yesterday" is not a stale header, it is a wrong one. A catalogue
+   * entry names itself ("13.8 billion years ago"), which is the only sensible
+   * label for a row whose date is a magnitude rather than a day.
+   */
+  const anchors = useMemo(
+    () => [
+      ...sections.map((section) => ({ key: section.key, label: section.label })),
+      ...catalogue.map((event) => ({
+        key: event.id,
+        label: deepTimeLabel(event.timelineYears),
+      })),
+    ],
+    [sections, catalogue],
+  );
+
+  // Report whatever is currently under the header.
   const headingsRef = useRef(new Map<string, HTMLElement>());
   useEffect(() => {
     const visible = new Set<string>();
@@ -245,11 +341,11 @@ export function Timeline({
         // The topmost section still in the band under the header wins. Taking
         // the first *entry* instead would depend on callback order, which is
         // not the document order and drifts as you scroll fast.
-        const ordered = sections.map((s) => s.key).filter((key) => visible.has(key));
+        const ordered = anchors.map((a) => a.key).filter((key) => visible.has(key));
         const current = ordered[0];
         if (current) {
-          const section = sections.find((s) => s.key === current);
-          if (section) onDateChange(section.label);
+          const anchor = anchors.find((a) => a.key === current);
+          if (anchor) onDateChange(anchor.label);
         }
       },
       {
@@ -264,7 +360,7 @@ export function Timeline({
 
     for (const element of headingsRef.current.values()) observer.observe(element);
     return () => observer.disconnect();
-  }, [sections, onDateChange]);
+  }, [anchors, onDateChange]);
 
   /**
    * One sentinel at each end, watched by the same effect.
@@ -295,14 +391,27 @@ export function Timeline({
     };
 
     const observers = [
-      pastDone ? undefined : watch(pastSentinel.current, () => void loadPast()),
+      // Only truly finished once the catalogue is too — `loadPast` hands over
+      // to it when a person's own past runs out.
+      pastDone && catalogueDone
+        ? undefined
+        : watch(pastSentinel.current, () => void loadPast()),
       futureDone ? undefined : watch(futureSentinel.current, () => void loadFuture()),
     ];
 
     return () => {
       for (const observer of observers) observer?.disconnect();
     };
-  }, [pastCursor, futureCursor, pastDone, futureDone, loading, loadPast, loadFuture]);
+  }, [
+    pastCursor,
+    futureCursor,
+    pastDone,
+    futureDone,
+    catalogueDone,
+    loading,
+    loadPast,
+    loadFuture,
+  ]);
 
   /**
    * Open on today, not on the far edge of the future.
@@ -409,12 +518,64 @@ export function Timeline({
 
       <div ref={pastSentinel} aria-hidden="true" />
 
+      {catalogue.length > 0 ? (
+        <section className="catalogue" aria-label="Before your own record">
+          {/*
+            The seam. Worth marking rather than letting the scroll slide from
+            a person's own life into the history of the universe with nothing
+            said — these rows are not theirs, cannot be opened, and did not
+            happen to them.
+          */}
+          <p className="catalogue-seam">Before your own record</p>
+
+          <ul className="verses">
+            {catalogue.map((event) => (
+              <li className="verse" key={event.id}>
+                <span
+                  className="verse-time"
+                  data-section={event.id}
+                  ref={(element) => {
+                    if (element) headingsRef.current.set(event.id, element);
+                    else headingsRef.current.delete(event.id);
+                  }}
+                >
+                  {deepTimeLabel(event.timelineYears)}
+                </span>
+                <div className="verse-body">
+                  <p className="verse-xp">{event.title}</p>
+                  {event.detail ? <p className="verse-meta">{event.detail}</p> : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       {loading ? <p className="notice">Loading…</p> : null}
-      {pastDone && past.length > 0 ? (
+      {catalogueDone && catalogue.length > 0 ? (
         <p className="notice end">That is the beginning.</p>
       ) : null}
     </div>
   );
+}
+
+/**
+ * A Verse's position on the shared axis, as the catalogue understands it.
+ *
+ * The same arithmetic `verse.timeline_years` uses — years from 2000-01-01
+ * over a Julian year — repeated here rather than fetched, because the client
+ * needs it only to say "older than this" and a round trip to learn a number
+ * it can compute is a round trip for nothing.
+ */
+const JULIAN_YEAR_MS = 31_557_600_000;
+const MILLENNIUM = Date.UTC(2000, 0, 1);
+
+function oldestVerseYears(verse: VerseView | undefined): number | null {
+  if (!verse) return null;
+  if (verse.deepTimeYears !== null) return verse.deepTimeYears;
+
+  const at = new Date(verse.eventStart ?? verse.createdAt).getTime();
+  return Number.isNaN(at) ? null : (at - MILLENNIUM) / JULIAN_YEAR_MS;
 }
 
 function VerseRow({

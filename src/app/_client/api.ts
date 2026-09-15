@@ -110,6 +110,79 @@ export const createVerse = (input: NewVerse): Promise<VerseView> =>
     body: JSON.stringify(input),
   }).then((r) => json<VerseView>(r));
 
+/**
+ * The shared deep-time catalogue: what the past runs into once a person's own
+ * past runs out (CLAUDE.md).
+ *
+ * A second request rather than something the timeline folds in, because it is
+ * a different module's data with a different lifetime — identical for every
+ * user, cacheable for an hour, and owned by nobody. Merging it server-side
+ * would mean a cross-schema read that architecture.md §1.1 forbids.
+ */
+export interface DeepTimeEventView {
+  id: string;
+  slug: string;
+  timelineYears: number;
+  title: string;
+  detail: string | null;
+  category: string;
+}
+
+export interface CataloguePage {
+  events: DeepTimeEventView[];
+  nextCursor: string | null;
+}
+
+export function fetchDeepTime(options: {
+  before: number;
+  cursor?: string | null;
+  limit?: number;
+}): Promise<CataloguePage> {
+  const params = new URLSearchParams({
+    before: String(options.before),
+    limit: String(options.limit ?? 10),
+  });
+  if (options.cursor) params.set('cursor', options.cursor);
+
+  return authedFetch(`/v1/deep-time?${params.toString()}`).then((r) =>
+    json<CataloguePage>(r),
+  );
+}
+
+export interface PlaceSuggestion {
+  description: string;
+  primary: string;
+  secondary: string | null;
+}
+
+/**
+ * Place suggestions for the location field.
+ *
+ * Answers an empty list rather than throwing when suggestions are switched
+ * off (501) or the provider is unreachable (502). A location field is a
+ * convenience on an optional field — it should degrade to plain text, not put
+ * an error in front of someone mid-sentence.
+ */
+let placesDisabled = false;
+
+export async function fetchPlaces(query: string): Promise<PlaceSuggestion[]> {
+  // Asked once, answered for the session. Suggestions being switched off is a
+  // deployment fact, not a per-request one — and without this the field logs a
+  // failed request on every debounce for the whole time someone is typing.
+  if (placesDisabled) return [];
+
+  const response = await authedFetch(`/v1/places?q=${encodeURIComponent(query)}`);
+
+  if (response.status === 501) {
+    placesDisabled = true;
+    return [];
+  }
+  if (!response.ok) return [];
+
+  const body = (await response.json()) as { suggestions?: PlaceSuggestion[] };
+  return body.suggestions ?? [];
+}
+
 export const fetchVerse = (id: string): Promise<VerseView> =>
   authedFetch(`/v1/verses/${id}`).then((r) => json<VerseView>(r));
 

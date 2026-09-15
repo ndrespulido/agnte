@@ -206,6 +206,58 @@ const checks: Check[] = [
       return { status: 'ok' as const, detail: 'configured' };
     },
   },
+  {
+    name: 'deferred-jobs',
+    run: async () => {
+      const config = loadConfig();
+
+      /*
+       * This check exists because of a real, day-long outage that nothing
+       * reported.
+       *
+       * The Cloud Tasks API was never enabled on the project, so every
+       * `enqueueThumbnailJob` threw and `confirmUpload` swallowed it by design
+       * — an upload whose bytes landed should not fail because a convenience
+       * behind it did. The consequence was that every photo uploaded showed a
+       * blank tile forever, while this endpoint reported six checks, all ok.
+       *
+       * Reported rather than exercised, like email and access-tokens above:
+       * enqueueing a real job on every health poll would be a job to run.
+       * What is checked is the thing that was actually missing — the
+       * configuration `getDeferredJobs` requires before it will build a queue
+       * at all.
+       */
+      const missing = (
+        [
+          ['GCP_PROJECT_ID', config.GCP_PROJECT_ID],
+          ['GCP_REGION', config.GCP_REGION],
+          ['APP_BASE_URL', config.APP_BASE_URL],
+          ['INTERNAL_TASKS_SECRET', config.INTERNAL_TASKS_SECRET],
+        ] as const
+      )
+        .filter(([, value]) => !value)
+        .map(([name]) => name);
+
+      // Locally there is no Cloud Tasks and none is wanted: the in-process
+      // queue runs the job body directly (architecture.md §7.1), which is a
+      // working thumbnail pipeline, not a missing one.
+      if (config.APP_ENV === 'local') {
+        return { status: 'ok' as const, detail: 'in-process queue' };
+      }
+
+      if (missing.length > 0) {
+        return {
+          status: 'not-configured' as const,
+          detail: `thumbnails will not generate; unset: ${missing.join(', ')}`,
+        };
+      }
+
+      return {
+        status: 'ok' as const,
+        detail: `cloud tasks, ${config.CLOUD_TASKS_QUEUE}`,
+      };
+    },
+  },
 ];
 
 export async function runChecks(): Promise<CheckResult[]> {

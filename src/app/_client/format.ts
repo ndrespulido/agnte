@@ -141,6 +141,37 @@ const round = (value: number): string => {
 };
 
 /**
+ * The new-tag field, split into the names it holds.
+ *
+ * A comma is safe as the separator because `parseTagName` in the verse domain
+ * rejects one inside a name, so no tag can ever contain the character this
+ * splits on.
+ *
+ * Duplicates are removed here rather than left to the caller — `.a, .A` and
+ * `.a, a` are the same tag, normalised the way the domain normalises
+ * (leading dots stripped, lowercased), and creating it twice in one save is
+ * an error the person did not make.
+ */
+export function splitTagNames(input: string): string[] {
+  const seen = new Set<string>();
+  const names: string[] = [];
+
+  for (const part of input.split(',')) {
+    const name = part.trim();
+    if (name === '') continue;
+
+    const normalised = name.replace(/^\.+/, '').toLowerCase();
+    // A field of nothing but dots and commas has no name in it.
+    if (normalised === '' || seen.has(normalised)) continue;
+
+    seen.add(normalised);
+    names.push(name);
+  }
+
+  return names;
+}
+
+/**
  * An ISO instant as an `<input type="datetime-local">` value, and back.
  *
  * Both halves work in UTC, deliberately, because everything else on this

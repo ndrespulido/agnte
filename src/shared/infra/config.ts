@@ -83,6 +83,22 @@ const schema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().min(1).optional(),
 
   /**
+   * Google Places, for the location field's suggestions.
+   *
+   * Deliberately its own key rather than reusing the sign-in credentials: it
+   * is a different product with different scoping, and — unlike everything
+   * else in this file — it is *metered*. Places autocomplete is billed per
+   * request against a monthly credit, so this is the one dependency here that
+   * can turn typing into money (architecture.md §3.1 otherwise holds the whole
+   * system at zero).
+   *
+   * Unset means the location field stays plain text and `/v1/places` answers
+   * that it is not configured, which is the correct state locally and in every
+   * preview: neither should be spending the production budget on suggestions.
+   */
+  GOOGLE_PLACES_API_KEY: z.string().min(1).optional(),
+
+  /**
    * Deferred work (architecture.md §1.3): Cloud Tasks in a deployed
    * environment, an in-process loopback locally.
    *

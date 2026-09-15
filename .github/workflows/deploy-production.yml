@@ -164,6 +164,21 @@ jobs:
             echo "::warning::No internal tasks secret; thumbnails will not generate. Run ./infra/set-secrets.sh"
           fi
 
+          # Place suggestions for the location field.
+          #
+          # The one *metered* dependency in this system — Places bills per
+          # request, where everything else here is fixed-cost or free by
+          # construction (architecture.md §3.1). Mounted conditionally like the
+          # rest, which means the default state of every environment that has
+          # not deliberately opted in is "no suggestions", not "spending".
+          #
+          # Previews in particular must never get this: a per-pull-request
+          # environment quietly billing the production budget is exactly the
+          # kind of leak §3.1 exists to prevent.
+          if gcloud secrets describe agnte-google-places-api-key >/dev/null 2>&1; then
+            SECRETS="${SECRETS},GOOGLE_PLACES_API_KEY=agnte-google-places-api-key:latest"
+          fi
+
           # Production only. Google will not accept a wildcard redirect URI, so
           # a preview's per-pull-request URL cannot be registered in advance —
           # previews use the email and password path and report Google sign-in

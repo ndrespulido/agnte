@@ -60,8 +60,13 @@ bold "Building the backup image"
 # infra/backup as the context, not the repository root: three files instead of
 # a gigabyte, and it sidesteps the root .dockerignore, which excludes `infra`
 # for the web image's benefit.
+#
+# No --file: `gcloud builds submit` has no such flag, and with the context set
+# to infra/backup the Dockerfile is already at its root, which is exactly where
+# --tag looks. It was here, wrong, until the first time this script was
+# actually run.
 gcloud builds submit --project="${PROJECT_ID}" --region="${REGION}" \
-  --tag="${IMAGE}" --file=infra/backup/Dockerfile infra/backup \
+  --tag="${IMAGE}" infra/backup \
   || {
     echo
     echo "  Cloud Build failed. If it reports the API is not enabled:"
