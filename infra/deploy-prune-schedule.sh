@@ -80,13 +80,29 @@ bold "Scheduling the daily sweep"
 SECRET_VALUE=$(gcloud secrets versions access latest \
   --secret=agnte-internal-tasks-secret --project="${PROJECT_ID}")
 
+# gcloud echoes its entire argument list back when it rejects a flag, and one
+# of those arguments is the shared secret. That is how the secret ended up in
+# a terminal the first time this script's update path was wrong — a usage
+# error, not a breach, but the value was just as exposed either way.
+#
+# So the scheduler calls go through here: stderr is captured rather than
+# inherited, and the secret is replaced before anything is printed. There is
+# no --headers-from-file on `gcloud scheduler`, so passing it in argv is
+# unavoidable; keeping it out of the *output* is not.
+run_redacted() {
+  local err
+  if ! err=$("$@" 2>&1 >/dev/null); then
+    printf '%s\n' "${err//${SECRET_VALUE}/<redacted>}" >&2
+    exit 1
+  fi
+}
+
 FLAGS=(
   --location="${REGION}"
   --schedule="${SCHEDULE}"
   --time-zone="UTC"
   --uri="${SERVICE_URL}/internal/prune"
   --http-method=POST
-  --headers="Authorization=Bearer ${SECRET_VALUE}"
   # One a day, and a failure is not urgent — the next run sweeps whatever this
   # one missed. Three attempts is enough to ride out a cold start.
   --max-retry-attempts=3
@@ -94,11 +110,23 @@ FLAGS=(
   --project="${PROJECT_ID}"
 )
 
+# The header flag is spelled differently on the two subcommands, and the
+# difference is not cosmetic: `create http` takes --headers, while
+# `update http` rejects it outright and wants --update-headers (it also has
+# --remove-headers and --clear-headers, which is why it cannot reuse the
+# plain name — "set these" and "merge these in" are different operations).
+#
+# Found the hard way: this script worked the first time and failed every time
+# after, because the first run created the job and every later run updated it.
+# A bug that only appears on the second invocation is exactly the kind a
+# re-runnable script has to be tested against twice.
 if gcloud scheduler jobs describe "${JOB}" --location="${REGION}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
-  gcloud scheduler jobs update http "${JOB}" "${FLAGS[@]}" --quiet >/dev/null
+  run_redacted gcloud scheduler jobs update http "${JOB}" "${FLAGS[@]}" \
+    --update-headers="Authorization=Bearer ${SECRET_VALUE}" --quiet
   note "updated: ${SCHEDULE} UTC"
 else
-  gcloud scheduler jobs create http "${JOB}" "${FLAGS[@]}" --quiet >/dev/null
+  run_redacted gcloud scheduler jobs create http "${JOB}" "${FLAGS[@]}" \
+    --headers="Authorization=Bearer ${SECRET_VALUE}" --quiet
   note "created: ${SCHEDULE} UTC"
 fi
 
