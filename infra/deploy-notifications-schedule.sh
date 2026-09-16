@@ -154,9 +154,17 @@ cat <<DONE
 
       gcloud scheduler jobs run ${JOB} --location=${REGION} --project=${PROJECT_ID}
 
-    Then read what it swept:
+    A 200 means the tick is reachable and the shared secret matches. The
+    response carries the counts — claimed, sent, deferred, failed, rescheduled
+    — and "claimed: 0" is the correct answer when nothing is due yet.
+
+    Then read what it dispatched:
 
       gcloud run services logs read ${SERVICE} --region=${REGION} \\
         --project=${PROJECT_ID} | grep internal/notifications
+
+    Reminders are only proven end to end once one has actually arrived: set one
+    a few minutes out and wait for the email. Until then this has shown that
+    the tick runs, not that anything gets delivered.
 
 DONE
