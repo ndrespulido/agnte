@@ -21,12 +21,14 @@ export function Menu({
   onTags,
   onReminders,
   onPassword,
+  onYourData,
   onSignOut,
   onClose,
 }: {
   onTags: () => void;
   onReminders: () => void;
   onPassword: () => void;
+  onYourData: () => void;
   onSignOut: () => void;
   onClose: () => void;
 }) {
@@ -61,6 +63,15 @@ export function Menu({
           <li>
             <button type="button" className="menu-row" onClick={onPassword}>
               Password
+            </button>
+          </li>
+          <li>
+            {/* Above Sign out, below the everyday rows: it is where someone
+                goes looking for "what happens to what I wrote", and it is not
+                something to put a thumb's width from the thing you tap when
+                you are done. */}
+            <button type="button" className="menu-row" onClick={onYourData}>
+              Your data
             </button>
           </li>
           <li>

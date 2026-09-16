@@ -480,3 +480,99 @@ export const saveQuietHours = (
   })
     .then((r) => json<{ quietHours: QuietHoursView | null }>(r))
     .then((body) => body.quietHours);
+
+/* -------------------------------------------------------------------------
+ * Privacy: a copy of everything, reading one back, and leaving (§8.5, §8.7).
+ * ---------------------------------------------------------------------- */
+
+export interface ExportStatusView {
+  id: string;
+  /** pending → ready, or failed. Built by a Cloud Task, not by the request. */
+  status: 'pending' | 'ready' | 'failed' | string;
+  requestedAt: string;
+  completedAt: string | null;
+  error: string | null;
+}
+
+/** The last export request, or null if one was never made. */
+export const fetchExportStatus = (): Promise<ExportStatusView | null> =>
+  authedFetch('/v1/privacy/export').then((r) => json<ExportStatusView | null>(r));
+
+export interface ExportRequested {
+  id: string;
+  /**
+   * False when deferred work is not configured, which means the row exists and
+   * nothing will ever build it. Surfaced rather than swallowed: waiting for an
+   * export that is not coming is the silent failure §8.5 calls out.
+   */
+  queued: boolean;
+  warning?: string;
+}
+
+/**
+ * Asks for a copy of everything.
+ *
+ * A 429 here is not the shared rate limiter — it is the one-per-24h rule in
+ * §8.6, expressed in the export table. Told apart because the two deserve
+ * different words: "you already asked today" is a fact about the request, not
+ * about traffic.
+ */
+export class ExportTooSoon extends Error {}
+
+export async function requestExport(): Promise<ExportRequested> {
+  const response = await authedFetch('/v1/privacy/export', { method: 'POST' });
+
+  if (response.status === 429) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: { message?: string };
+    } | null;
+    throw new ExportTooSoon(
+      body?.error?.message ?? 'You can ask for one copy a day. Try again tomorrow.',
+    );
+  }
+
+  return json<ExportRequested>(response);
+}
+
+/**
+ * Downloads the finished export.
+ *
+ * Fetched with the access token and handed to the browser as a blob rather than
+ * linked to directly: the endpoint authenticates (§8.5's deviation — no signed
+ * URL in an email), and an `<a href>` carries no Authorization header.
+ */
+export async function downloadExport(): Promise<{ blob: Blob; filename: string }> {
+  const response = await authedFetch('/v1/privacy/export/download');
+  if (!response.ok) await json<unknown>(response);
+
+  return { blob: await response.blob(), filename: 'agnte-export.json' };
+}
+
+export interface ImportSummaryView {
+  tags: number;
+  verses: number;
+  skipped: number;
+  rejected: { what: string; why: string }[];
+  mediaImported: false;
+  note: string;
+}
+
+/** Reads an `agnte.export.v1` document back in. Never batched or retried here. */
+export const importDocument = (document: unknown): Promise<ImportSummaryView> =>
+  authedFetch('/v1/privacy/import', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(document),
+  }).then((r) => json<ImportSummaryView>(r));
+
+export interface ErasureView {
+  status: string;
+  modulesPurged: number;
+  /** Not zero means a module could not purge; the sweep retries before removal. */
+  modulesFailed: number;
+  alreadyRequested: boolean;
+}
+
+/** Asks for the account to be erased. 202: marked now, removed after the grace window. */
+export const eraseAccount = (): Promise<ErasureView> =>
+  authedFetch('/v1/me', { method: 'DELETE' }).then((r) => json<ErasureView>(r));

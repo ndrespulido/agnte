@@ -517,6 +517,17 @@ ScheduledNotification { id, userId, verseId?, fireAt, kind, payload, status, att
 > financial screenshots included. `GET /v1/privacy/export/download` authenticates
 > instead, looks the row up by the authenticated user, and never accepts or
 > returns a storage key. One sign-in, one fewer class of exposure.
+**Reachable from the app (built after the service worker).** Export, import and
+erasure were API-only until a "Your data" sheet in the menu gave them a way in.
+For the first two that was an inconvenience; for erasure it was closer to a
+defect, since a right you can only exercise with `curl` and a bearer token is
+not one most people hold. The sheet asks for a copy, downloads it (fetched with
+the token and handed over as a blob — the endpoint authenticates, so an `<a
+href>` would 401), reads a document back in and lists every refused row with its
+reason, and deletes the account behind a two-step confirmation that says what
+actually happens. Signing out from it clears the service worker's caches, so an
+erased account leaves no cached timeline on the device.
+
 - Async because media can run to gigabytes.
 - Rate-limited to one export per user per 24h.
 - Doubles as GDPR portability (§8.7) — one implementation, two requirements.
@@ -598,6 +609,18 @@ event → each module purges its own data (exactly what module boundaries buy yo
 > anonymization, a transfer of ownership to the tag owner, or a change to the
 > visibility rule itself — the last being the most safety-critical function in
 > this system, and the last resort.
+
+> **Correction, found while building the erasure UI.** This section and the
+> build order both describe the thirty days as a grace window — "the window in
+> which they can still change their mind". That is not what the code does, and
+> the code is right: `requestErasure` marks the account *and publishes the
+> event*, so every module purges its data immediately. Only the identity row
+> waits thirty days. There is no cancel endpoint and no way back from the app.
+>
+> This matters because the UI has to say something true. It now reads "this
+> deletes your verses, tags, photos and reminders now, not in 30 days", and
+> points at the export first. Anyone reinstating a genuine grace period has to
+> defer the purge, not just the row.
 
 > **Decided:** if you contributed Verses to someone else's shared trip tag,
 > erasure **anonymizes** them rather than deleting them — the Verse keeps its
