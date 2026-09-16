@@ -141,6 +141,8 @@ export class PrismaTagRepository implements TagRepository {
       const constraint = constraintName(error) ?? '';
       if (constraint.includes('shortcut')) return { kind: 'shortcut-taken' };
       if (constraint.includes('name')) return { kind: 'name-taken' };
+      // The primary key: a client chose an id that is already taken.
+      if (constraint.includes('pkey')) return { kind: 'id-taken' };
 
       // A unique violation on this table that names neither index is a
       // constraint nobody here knows about. Re-throwing beats guessing: a wrong

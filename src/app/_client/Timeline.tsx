@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import {
   fetchDeepTime,
@@ -16,7 +17,22 @@ import {
   type VerseView,
 } from './api';
 import { clearTokens, NotSignedIn } from './session';
-import { deepTimeLabel, headerLabel, placementOf, sectionKey, timeLabel } from './format';
+import {
+  deepTimeLabel,
+  headerLabel,
+  placementOf,
+  sectionKey,
+  timeLabel,
+  timelinePosition,
+} from './format';
+import { withPending, type TimelineVerse } from './pending';
+import {
+  discard,
+  outboxSnapshot,
+  retryNow,
+  serverOutboxSnapshot,
+  subscribeToOutbox,
+} from './sync';
 
 /**
  * The timeline: today in the middle, the future above it, the past below.
@@ -43,11 +59,26 @@ import { deepTimeLabel, headerLabel, placementOf, sectionKey, timeLabel } from '
 interface Section {
   key: string;
   label: string;
-  verses: VerseView[];
+  verses: TimelineVerse[];
 }
 
 /** How many rows each direction loads at a time. */
 const PAGE = 10;
+
+/**
+ * Why the timeline could not load, in words a person can use.
+ *
+ * A thrown `fetch` is "Failed to fetch", which is the browser talking to a
+ * developer. Offline is the expected state in this app rather than an
+ * exceptional one (§8.1), so it gets a sentence that says what is true and what
+ * happens next — and specifically that nothing they write is being lost.
+ */
+function reasonFor(cause: unknown): string {
+  if (cause instanceof TypeError) {
+    return 'Cannot reach the server. Anything you write is kept here and sent when you are back.';
+  }
+  return cause instanceof Error ? cause.message : 'Could not load the timeline.';
+}
 
 export function Timeline({
   onDateChange,
@@ -119,7 +150,7 @@ export function Timeline({
           clearTokens();
           return;
         }
-        setError(cause instanceof Error ? cause.message : 'Could not load the timeline.');
+        setError(reasonFor(cause));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -218,7 +249,7 @@ export function Timeline({
       setCatalogueDone(page.nextCursor === null);
     } catch (cause) {
       if (cause instanceof NotSignedIn) clearTokens();
-      else setError(cause instanceof Error ? cause.message : 'Could not load more.');
+      else setError(reasonFor(cause));
     } finally {
       inFlight.current = false;
       setLoading(false);
@@ -244,7 +275,7 @@ export function Timeline({
       setPastDone(page.nextCursor === null);
     } catch (cause) {
       if (cause instanceof NotSignedIn) clearTokens();
-      else setError(cause instanceof Error ? cause.message : 'Could not load more.');
+      else setError(reasonFor(cause));
     } finally {
       setLoading(false);
     }
@@ -273,7 +304,7 @@ export function Timeline({
       setFutureDone(page.nextCursor === null);
     } catch (cause) {
       if (cause instanceof NotSignedIn) clearTokens();
-      else setError(cause instanceof Error ? cause.message : 'Could not load more.');
+      else setError(reasonFor(cause));
     } finally {
       setLoading(false);
     }
@@ -283,7 +314,32 @@ export function Timeline({
    * The column, top to bottom: farthest future first, then today, then back
    * into the past.
    */
-  const verses = useMemo(() => [...future].reverse().concat(past), [future, past]);
+  /**
+   * What the outbox is still holding (§8.1).
+   *
+   * Read through `useSyncExternalStore` for the same reason the session is:
+   * the queue changes outside React — a drain completing, a retry timer
+   * firing — and an effect that polled it would show a verse as unsent for a
+   * frame after it had landed.
+   */
+  const queued = useSyncExternalStore(
+    subscribeToOutbox,
+    outboxSnapshot,
+    serverOutboxSnapshot,
+  );
+
+  /**
+   * The server's rows with the queue laid over them.
+   *
+   * `withPending` re-sorts the whole column rather than splicing, because a
+   * queued verse can be placed anywhere — a flight booked for next year goes
+   * into the future half, not next to the row being written. The sort key is
+   * the one the server orders by, so nothing moves when the write lands.
+   */
+  const verses = useMemo(
+    () => withPending([...future].reverse().concat(past), queued),
+    [future, past, queued],
+  );
 
   const sections = useMemo(() => groupIntoSections(verses, anchor), [verses, anchor]);
 
@@ -299,10 +355,23 @@ export function Timeline({
    */
   const boundary = useMemo(() => {
     const pastIds = new Set(past.map((verse) => verse.id));
+    // A queued verse is in neither page, so membership alone cannot place it.
+    // Its position against the anchor can: written for now or earlier, it
+    // belongs below the centre mark, which is where the reader is looking.
+    const anchorPosition = timelinePosition({
+      eventStart: anchor.toISOString(),
+      deepTimeYears: null,
+      createdAt: anchor.toISOString(),
+    });
+
     return sections.findIndex((section) =>
-      section.verses.some((verse) => pastIds.has(verse.id)),
+      section.verses.some(
+        (verse) =>
+          pastIds.has(verse.id) ||
+          (verse.pending !== null && timelinePosition(verse) <= anchorPosition),
+      ),
     );
-  }, [sections, past]);
+  }, [sections, past, anchor]);
 
   /**
    * Everything that can name the sticky header, in document order.
@@ -456,7 +525,16 @@ export function Timeline({
     });
   }, [loading, anchor]);
 
-  if (error) {
+  /**
+   * A failed load replaces the column only when there is nothing to replace it
+   * with.
+   *
+   * The first version of this returned the error unconditionally, which meant
+   * a verse written with no signal — the case §8.1 exists for — was queued
+   * correctly, stored correctly, and then hidden behind "Failed to fetch".
+   * Found by opening the app offline rather than by reading it.
+   */
+  if (error && verses.length === 0) {
     return (
       <p className="notice" role="alert">
         {error}
@@ -474,6 +552,14 @@ export function Timeline({
 
   return (
     <div className="timeline">
+      {/* Above the column rather than instead of it: what is on screen is
+          this browser's own copy, and saying so is the point. */}
+      {error ? (
+        <p className="notice" role="alert">
+          {error}
+        </p>
+      ) : null}
+
       {futureDone && future.length > 0 ? (
         <p className="notice end">That is as far ahead as you have written.</p>
       ) : null}
@@ -578,18 +664,43 @@ function oldestVerseYears(verse: VerseView | undefined): number | null {
   return Number.isNaN(at) ? null : (at - MILLENNIUM) / JULIAN_YEAR_MS;
 }
 
+/**
+ * How a queued write reads on the row.
+ *
+ * Short, and in the words a person would use: the reader is not thinking about
+ * a queue. The blocked column is the half that matters — a row that has stopped
+ * trying must not still say "Saving", which is what it did when this was keyed
+ * on the kind alone. Caught by looking at the screen rather than at the map.
+ */
+const PENDING_LABEL = {
+  new: { queued: 'Saving', blocked: 'Not saved' },
+  edited: { queued: 'Saving the change', blocked: 'Change not saved' },
+  // Only ever shown blocked: a delete that is still queued takes the row away.
+  deleting: { queued: 'Deleting', blocked: 'Not deleted' },
+} as const;
+
 function VerseRow({
   verse,
   onOpen,
 }: {
-  verse: VerseView;
+  verse: TimelineVerse;
   onOpen: (verseId: string) => void;
 }) {
   const placement = placementOf(verse);
   const time = timeLabel(placement);
+  const pending = verse.pending;
 
   return (
-    <li className="verse">
+    <li
+      className={pending ? `verse pending${pending.blocked ? ' blocked' : ''}` : 'verse'}
+      /*
+        `aria-busy` rather than only a visual treatment: a row that is on its
+        way is a state, and a screen reader that only ever hears the text has
+        no way to tell a saved verse from one that is not saved yet — which is
+        precisely the thing §8.1 says must never be silent.
+      */
+      aria-busy={pending !== null && !pending.blocked}
+    >
       {time ? <span className="verse-time">{time}</span> : null}
 
       {/*
@@ -625,6 +736,37 @@ function VerseRow({
               </div>
             ))}
           </dl>
+        ) : null}
+
+        {pending ? (
+          <p className="verse-pending">
+            <span className="pending-label">
+              {PENDING_LABEL[pending.kind][pending.blocked ? 'blocked' : 'queued']}
+            </span>
+            {pending.blocked ? (
+              <>
+                {/* The server's own words. A queue that swallowed the reason
+                    would leave the only person who can fix it guessing. */}
+                <span className="pending-reason">
+                  {pending.reason ?? 'It did not go through.'}
+                </span>
+                <button
+                  type="button"
+                  className="quiet"
+                  onClick={() => void retryNow(pending.entryId)}
+                >
+                  Try again
+                </button>
+                <button
+                  type="button"
+                  className="quiet"
+                  onClick={() => void discard(pending.entryId)}
+                >
+                  Discard
+                </button>
+              </>
+            ) : null}
+          </p>
         ) : null}
 
         <p className="verse-tags">
@@ -682,7 +824,7 @@ function VerseMedia({ verse }: { verse: VerseView }) {
   );
 }
 
-function groupIntoSections(verses: readonly VerseView[], now: Date): Section[] {
+function groupIntoSections(verses: readonly TimelineVerse[], now: Date): Section[] {
   const sections: Section[] = [];
 
   for (const verse of verses) {

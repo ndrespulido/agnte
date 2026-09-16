@@ -42,7 +42,11 @@ export interface TagRepository {
 }
 
 export type CreateTagOutcome =
-  { kind: 'created' } | { kind: 'name-taken' } | { kind: 'shortcut-taken' };
+  | { kind: 'created' }
+  | { kind: 'name-taken' }
+  | { kind: 'shortcut-taken' }
+  /** The client-minted id is already a row. See `tagIdTaken` for why it is not a crash. */
+  | { kind: 'id-taken' };
 
 export type UpdateTagOutcome =
   | { kind: 'updated' }

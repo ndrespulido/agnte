@@ -11,6 +11,7 @@ import {
 import type { TagRepository } from '../domain/ports';
 import {
   tagAlreadyExists,
+  tagIdTaken,
   tagNameInvalid,
   tagShortcutTaken,
   visibilityInvalid,
@@ -18,6 +19,8 @@ import {
 import { isVisibility, type Visibility } from '../domain/visibility';
 
 export interface CreateTagInput {
+  /** The caller's own id, for a tag created offline (§8.1). */
+  id?: string | undefined;
   ownerId: string;
   name: string;
   displayName?: string | null | undefined;
@@ -82,6 +85,7 @@ export async function createTagFor(
   }
 
   const tag = createTag({
+    ...(input.id === undefined ? {} : { id: input.id }),
     ownerId: input.ownerId,
     name: name.value,
     displayName: input.displayName ?? null,
@@ -94,6 +98,7 @@ export async function createTagFor(
   const outcome = await deps.tags.create(tag);
 
   if (outcome.kind === 'name-taken') return err(tagAlreadyExists(name.value));
+  if (outcome.kind === 'id-taken') return err(tagIdTaken());
 
   if (outcome.kind === 'shortcut-taken') {
     // An explicitly requested shortcut that is taken is an error the user can

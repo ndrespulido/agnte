@@ -1247,3 +1247,90 @@ button.danger {
 .reminder-title {
   font-variant-numeric: tabular-nums;
 }
+
+/*
+ * A verse the outbox is still holding (architecture.md §8.1).
+ *
+ * > The UI must show pending state honestly — a Verse that hasn't synced
+ * > should look different from one that has.
+ *
+ * A hairline in the margin and a softened body, rather than a badge: the row
+ * still has to be readable as the thing that was written, and a badge on the
+ * content competes with the tags for the same corner. The rule sits in the
+ * time column's gutter where nothing else lives, so it costs no layout.
+ *
+ * Amber while it is on its way, red once it has stopped trying. The softening
+ * is lifted in the red case on purpose — a row that needs attention should not
+ * also be the faintest thing on screen.
+ */
+.verse.pending::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.15rem;
+  bottom: 0.15rem;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--pending);
+}
+
+.verse.pending .verse-body {
+  opacity: 0.72;
+}
+
+.verse.pending.blocked::before {
+  background: var(--failed);
+}
+
+.verse.pending.blocked .verse-body {
+  opacity: 1;
+}
+
+/*
+ * Above the stretched open button, not under it.
+ *
+ * `.verse-open` covers the whole row so a tap anywhere opens the verse. Try
+ * again and Discard live inside that area, so without a stacking context the
+ * row would swallow both clicks and open the verse instead — the sort of bug
+ * that only shows up when someone is already having a bad time.
+ */
+.verse-pending {
+  position: relative;
+  z-index: 1;
+  margin: 0 0 var(--space-xs);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-sm);
+  font-size: var(--text-micro);
+  color: var(--ink-soft);
+}
+
+.pending-label {
+  color: var(--pending);
+  letter-spacing: 0.02em;
+}
+
+.verse.pending.blocked .pending-label {
+  color: var(--failed);
+}
+
+.pending-reason {
+  /* The server's own words, and they can be a sentence. */
+  flex: 1 1 100%;
+}
+
+/* 150–200ms, ease-out, and silent when asked to be (CLAUDE.md). A slow pulse
+   rather than a spinner: it says "still going" without claiming progress it
+   cannot measure. */
+@media (prefers-reduced-motion: no-preference) {
+  .verse.pending:not(.blocked)::before {
+    animation: pending-pulse 1.8s ease-in-out infinite;
+  }
+}
+
+@keyframes pending-pulse {
+  50% {
+    opacity: 0.4;
+  }
+}

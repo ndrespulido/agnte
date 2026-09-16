@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { deleteVerse, fetchVerse, VersionConflict, type VerseView } from './api';
+import { deleteVerse, fetchVerse, type VerseView } from './api';
 import { VerseSheet } from './VerseSheet';
 import { deepTimeLabel, headerLabel, placementOf, timeLabel } from './format';
 
@@ -71,11 +71,7 @@ export function VerseDetail({
       onClose();
     } catch (cause) {
       setConfirmingDelete(false);
-      setError(
-        cause instanceof VersionConflict || cause instanceof Error
-          ? cause.message
-          : 'Could not delete it.',
-      );
+      setError(cause instanceof Error ? cause.message : 'Could not delete it.');
     }
   }
 
