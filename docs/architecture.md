@@ -396,17 +396,54 @@ that holds their memories.
 >
 > **Not built, and each is a real gap rather than a detail:**
 >
-> - **No service worker, so there is no read cache and no cold start offline.**
->   Writes queue and survive a reload *if the document loads*; opening the app
->   with no signal at all is still the browser's own error page. This is the
->   next piece, and it is also the Web Push transport (§8.4), so it earns its
->   place twice.
+> - ~~**No service worker.**~~ Built next — see below.
 > - **Media is still online-only.** A photo added with no signal fails its
 >   upload and the verse saves without it, rather than the file being held in
 >   IndexedDB and attached on reconnect.
 > - **No 30-day retention of a losing version.** A conflict blocks the entry and
 >   shows what the server said; resolving it is retry or discard, and nothing is
 >   kept behind.
+>
+> **The service worker, built after the outbox.** `public/sw.js`, hand-written,
+> no build plugin. The app now opens and shows a recent timeline with no signal
+> at all; previously a cold start offline was the browser's own error page.
+>
+> - **Runtime caching, not a build-time precache manifest.** The usual setup
+>   generates a list of every built asset and installs it on first run, which
+>   needs a plugin, a manifest to keep in step with Turbopack's output, and a
+>   download of the whole app before anyone asked for any of it. This caches
+>   what was actually fetched, as it is fetched. The cost, stated rather than
+>   hidden: a browser that has never loaded the app online cannot open it
+>   offline, because there is nothing to serve.
+> - **Four strategies.** `/_next/static/*` cache-first (content-hashed, so a hit
+>   is always correct); the document network-first; `/v1/timeline` network-first;
+>   everything else untouched. Writes are never intercepted — the outbox owns
+>   those, and a worker replaying them too would be a second queue with its own
+>   idea of the order.
+> - **The timeline's cache key drops `anchor`.** The app anchors on `new Date()`
+>   every time it opens, so keyed on the URL as sent every request would be a new
+>   key: entries written and never read, a cache that fills up and answers
+>   nothing. `direction` and `cursor` still separate the pages.
+> - **Only `ok` responses are stored.** A cached 401 would be served for as long
+>   as the entry lived, so an expired token would keep signing someone out with
+>   no network involved and no way to recover.
+> - **Signing out deletes every cache.** Not housekeeping: the caches hold pages
+>   of a timeline in plaintext on disk, keyed only by URL and readable from a
+>   devtools panel. This app holds medical notes and financial screenshots, so
+>   leaving them for whoever opens the browser next is not an option. Both routes
+>   are taken — a message to the worker, and `caches.delete` from the page for
+>   when no worker is controlling the document yet.
+> - **`worker-src 'self'` had to be added to the CSP.** `worker-src` falls back
+>   to `script-src`, which carries `strict-dynamic`, which tells the browser to
+>   ignore host allowlists — `'self'` included. Without the explicit directive
+>   the registration fails silently and takes the whole offline app with it.
+>
+> Still not built, in the worker: **thumbnails are not cached**. They are signed
+> R2 URLs, so cross-origin and opaque, and an opaque response is padded against
+> the storage quota (~7MB each in some browsers) — enough of a reason to do it
+> deliberately rather than in passing. A photo verse read offline shows its text
+> and an empty tile. And there is **no `push` handler**: the worker is the Web
+> Push transport §8.4 needs, but nothing sends to it yet.
 > - **A conflict no longer lands in the editor.** It used to be thrown while the
 >   sheet was open, which put the message where the change had been typed. It now
 >   surfaces on the row, because the sheet no longer waits for the network — the

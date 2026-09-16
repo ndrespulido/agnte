@@ -64,6 +64,31 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [{ source: '/timeline', destination: '/', permanent: true }];
   },
+
+  /**
+   * The service worker's own headers.
+   *
+   * `Cache-Control: no-store` is the one that matters. A service worker is the
+   * one file a browser will happily serve from its HTTP cache for a day, and a
+   * stale copy of it is not a stale asset — it is stale *routing*, which keeps
+   * serving stale assets after they have been replaced. Browsers now cap the
+   * worker's own freshness at 24h, but saying it costs a line and removes the
+   * question.
+   *
+   * The explicit content type is belt and braces: `/sw.js` comes out of
+   * `public/`, and a worker served as anything but JavaScript is refused.
+   */
+  async headers() {
+    return [
+      {
+        source: '/sw.js',
+        headers: [
+          { key: 'content-type', value: 'application/javascript; charset=utf-8' },
+          { key: 'cache-control', value: 'no-store, must-revalidate' },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
