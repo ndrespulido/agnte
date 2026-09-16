@@ -1,6 +1,9 @@
 'use client';
 
+import { uuidv7 } from '@/shared/kernel/id';
 import { authedFetch } from './session';
+import { tagLabelOf, type TagLabel } from './outbox';
+import { enqueue, outboxSnapshot } from './sync';
 
 /** The API's verse shape, as the routes actually return it. */
 export interface VerseView {
@@ -74,17 +77,55 @@ export function fetchTimeline(options: {
   );
 }
 
-export const fetchTags = (): Promise<TagView[]> =>
-  authedFetch('/v1/tags')
-    .then((r) => json<{ tags: TagView[] }>(r))
-    .then((body) => body.tags);
+/**
+ * Every tag, including the ones still in the outbox.
+ *
+ * Merged here rather than in each component so there is one answer to "what
+ * tags do I have". Without it a tag created with no signal disappears from the
+ * list on the next reload and reappears when it syncs, which reads as data
+ * loss — and would let someone create it a second time, which the server would
+ * then refuse as a duplicate name, blocking the queue behind it.
+ *
+ * Queued tags come last and the sort in the callers puts them back in place;
+ * a server row of the same id wins, because it is the one with the real
+ * shortcut and visibility on it.
+ */
+export async function fetchTags(): Promise<TagView[]> {
+  const body = await authedFetch('/v1/tags').then((r) => json<{ tags: TagView[] }>(r));
 
-export const createTag = (name: string): Promise<TagView> =>
-  authedFetch('/v1/tags', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name }),
-  }).then((r) => json<TagView>(r));
+  const byId = new Map(body.tags.map((tag) => [tag.id, tag]));
+  for (const entry of outboxSnapshot()) {
+    if (entry.op.kind !== 'create-tag') continue;
+    if (!byId.has(entry.op.tagId)) byId.set(entry.op.tagId, tagLabelOf(entry.op));
+  }
+
+  return [...byId.values()];
+}
+
+/**
+ * Creates a tag by queueing it (§8.1), answering with the tag it will become.
+ *
+ * The id is minted here rather than by the server, which is what makes the
+ * answer immediate and what lets a verse queued a moment later already name the
+ * tag. Everything else is the server's to fill in: `shortcut` in particular is
+ * chosen there, against the shortcuts already taken, so the local copy says
+ * null rather than guessing at a letter that may go to a different tag.
+ */
+export function createTag(name: string): Promise<TagView> {
+  const tagId = uuidv7();
+  const normalised = name.replace(/^\.+/, '').toLowerCase();
+
+  return enqueue({ kind: 'create-tag', tagId, name }).then(() => ({
+    id: tagId,
+    name: normalised,
+    label: `.${normalised}`,
+    visibility: 'private' as const,
+    shortcut: null,
+    vertical: null,
+    suggestedProperties: [],
+    version: 0,
+  }));
+}
 
 export interface NewVerse {
   tagIds: string[];
@@ -98,17 +139,22 @@ export interface NewVerse {
   mediaIds?: string[];
 }
 
-export const createVerse = (input: NewVerse): Promise<VerseView> =>
-  authedFetch('/v1/verses', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      // A phone on a flaky network retries underneath the app. Without this a
-      // retry writes the verse twice (architecture.md §6).
-      'idempotency-key': crypto.randomUUID(),
-    },
-    body: JSON.stringify(input),
-  }).then((r) => json<VerseView>(r));
+/**
+ * Writes a verse to the outbox and answers once it is stored, not once it is
+ * sent (§8.1).
+ *
+ * `tags` is what the timeline needs to draw the row before the server has ever
+ * seen it — the ids in `input` are the truth, these are the labels. It is
+ * passed in rather than looked up because the sheet already has them, and a
+ * lookup is exactly the network call this path exists to avoid.
+ *
+ * Returns the id so the caller can point at the row it just made.
+ */
+export async function createVerse(input: NewVerse, tags: TagLabel[]): Promise<string> {
+  const verseId = uuidv7();
+  await enqueue({ kind: 'create-verse', verseId, body: input, tags });
+  return verseId;
+}
 
 /**
  * The shared deep-time catalogue: what the past runs into once a person's own
@@ -208,45 +254,30 @@ export interface VerseEdit {
   mediaIds?: string[];
 }
 
-export class VersionConflict extends Error {}
+/**
+ * Queues an edit.
+ *
+ * ---------------------------------------------------------------------------
+ * A version conflict no longer lands in the sheet, and that is a real change.
+ *
+ * This used to send the PATCH and throw on a 409 while the editor was still
+ * open, so the message arrived exactly where the change had been typed. Queuing
+ * every write means the answer comes back after the sheet has closed, so a
+ * conflict surfaces on the row instead — marked, with what the server said and
+ * the choice to retry or discard.
+ *
+ * The trade is deliberate: the alternative is an editor that blocks on the
+ * network, which is the thing a person composing a verse underground cannot
+ * afford. See `sync.ts` for why a conflict is never retried.
+ * ---------------------------------------------------------------------------
+ */
+export async function updateVerse(id: string, input: VerseEdit): Promise<void> {
+  await enqueue({ kind: 'update-verse', verseId: id, body: input });
+}
 
-export const updateVerse = async (id: string, input: VerseEdit): Promise<VerseView> => {
-  const response = await authedFetch(`/v1/verses/${id}`, {
-    method: 'PATCH',
-    headers: {
-      'content-type': 'application/json',
-      'idempotency-key': crypto.randomUUID(),
-    },
-    body: JSON.stringify(input),
-  });
-
-  // Distinguished from every other failure because it is the only one the
-  // reader can actually do something about, and what they should do — reload
-  // and look at what changed — is particular enough to deserve saying.
-  if (response.status === 409) {
-    throw new VersionConflict(
-      'This verse changed somewhere else while you were editing it. Reopen it to see the current version.',
-    );
-  }
-
-  return json<VerseView>(response);
-};
-
-export const deleteVerse = async (id: string, expectedVersion: number): Promise<void> => {
-  const response = await authedFetch(
-    `/v1/verses/${id}?expectedVersion=${expectedVersion}`,
-    { method: 'DELETE', headers: { 'idempotency-key': crypto.randomUUID() } },
-  );
-
-  if (response.status === 409) {
-    throw new VersionConflict(
-      'This verse changed somewhere else. Reopen it before deleting.',
-    );
-  }
-  // 204 is the success case and `ok` covers it; anything else goes through
-  // `json` purely to raise the server's own message.
-  if (!response.ok) await json<unknown>(response);
-};
+export async function deleteVerse(id: string, expectedVersion: number): Promise<void> {
+  await enqueue({ kind: 'delete-verse', verseId: id, expectedVersion });
+}
 
 export const searchVerses = (query: string): Promise<TimelinePage> =>
   authedFetch(`/v1/search?q=${encodeURIComponent(query)}`).then((r) =>

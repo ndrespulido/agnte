@@ -1,5 +1,3 @@
-import { createHash, randomBytes } from 'node:crypto';
-
 /**
  * UUIDv7 (RFC 9562), generated wherever the entity is created.
  *
@@ -24,6 +22,12 @@ import { createHash, randomBytes } from 'node:crypto';
  * Hand-written rather than taken from a package because the kernel has no
  * dependencies (§1), and because the monotonicity above is the part worth
  * owning and testing directly.
+ *
+ * Entropy comes from the Web Crypto `crypto` global rather than from
+ * `node:crypto`, which is what lets the browser client mint its own ids. That
+ * is not an incidental nicety: a Verse composed offline needs its final id
+ * immediately (§8.1), and a second implementation in the client would be a
+ * second set of monotonicity bugs to find.
  */
 
 const MAX_COUNTER = 0xfff; // 12 bits of rand_a
@@ -38,7 +42,8 @@ let counter = 0;
  * without overflowing.
  */
 function seedCounter(): number {
-  return randomBytes(2).readUInt16BE(0) & 0x7ff;
+  const bytes = crypto.getRandomValues(new Uint8Array(2));
+  return ((bytes[0]! << 8) | bytes[1]!) & 0x7ff;
 }
 
 /**
@@ -75,7 +80,7 @@ export function uuidv7(now: number = Date.now()): string {
 }
 
 function build(timestamp: number, counterValue: number): string {
-  const bytes = randomBytes(16);
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
 
   // 48-bit big-endian timestamp.
   bytes[0] = (timestamp / 2 ** 40) & 0xff;
@@ -93,7 +98,12 @@ function build(timestamp: number, counterValue: number): string {
   // RFC 4122 variant: top two bits of byte 8 set to 10.
   bytes[8] = (bytes[8]! & 0x3f) | 0x80;
 
-  const hex = bytes.toString('hex');
+  return format(bytes);
+}
+
+/** The 8-4-4-4-12 form, from sixteen bytes. */
+function format(bytes: Uint8Array): string {
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
   return [
     hex.slice(0, 8),
     hex.slice(8, 12),
@@ -124,49 +134,6 @@ const UUID_ANY = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
  * primary key; it just did not come from here.
  */
 export const isUuid = (value: string): boolean => UUID_ANY.test(value);
-
-/**
- * A UUIDv7 derived from a namespace and a source string rather than minted.
- *
- * The one place this is for: importing rows whose ids are already taken. A
- * random replacement would be a different id on every run, so importing the
- * same file twice would write a second copy instead of recognising the first.
- * Deriving it means the same source id, imported into the same account, always
- * lands on the same row — which is what makes an import idempotent without a
- * table of what-became-what.
- *
- * The random half is `sha256(namespace + source)` — stable, and not reversible
- * into the namespace by someone holding the source id. The timestamp half is
- * copied from the source when the source is itself a UUIDv7, so an imported
- * timeline keeps the id order it had at home; a source id of any other shape
- * has no timestamp to keep and takes hash bytes there too.
- *
- * Not a UUIDv5. That is the standard answer for "deterministic id", but it
- * would be the one id in the system that does not sort by time, and the
- * ordering is load-bearing (see above).
- */
-export function derivedUuidv7(namespace: string, source: string): string {
-  const bytes = createHash('sha256')
-    .update(`${namespace}:${source}`)
-    .digest()
-    .subarray(0, 16);
-
-  if (isUuidV7(source)) {
-    Buffer.from(source.replace(/-/g, '').slice(0, 12), 'hex').copy(bytes, 0);
-  }
-
-  bytes[6] = (bytes[6]! & 0x0f) | 0x70;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-
-  const hex = bytes.toString('hex');
-  return [
-    hex.slice(0, 8),
-    hex.slice(8, 12),
-    hex.slice(12, 16),
-    hex.slice(16, 20),
-    hex.slice(20, 32),
-  ].join('-');
-}
 
 /** Test seam: forget the monotonic state between cases. */
 export function resetIdStateForTests(): void {

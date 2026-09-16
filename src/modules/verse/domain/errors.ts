@@ -14,6 +14,7 @@ export const VerseErrorCode = {
   TagNotFound: 'verse.tag_not_found',
   MediaNotFound: 'verse.media_not_found',
   TagAlreadyExists: 'verse.tag_already_exists',
+  TagIdTaken: 'verse.tag_id_taken',
   VerseNotFound: 'verse.not_found',
   VisibilityInvalid: 'verse.visibility_invalid',
   RatingOutOfRange: 'verse.rating_out_of_range',
@@ -61,6 +62,20 @@ export const tagNotFound = (): DomainError =>
  */
 export const mediaNotFound = (): DomainError =>
   new DomainError(VerseErrorCode.MediaNotFound, 'That media does not exist.');
+
+/**
+ * The id the caller chose is already a row — someone else's, since their own
+ * would have been a name collision first.
+ *
+ * Its own error rather than a 500, because ids are client-minted (§2) and an
+ * offline queue will replay a rejected write until something tells it to stop.
+ * "Retry this forever" and "this can never work" have to look different.
+ */
+export const tagIdTaken = (): DomainError =>
+  new DomainError(
+    VerseErrorCode.TagIdTaken,
+    'That tag id already exists. Ids are chosen by the client; mint a fresh one.',
+  );
 
 export const tagAlreadyExists = (name: string): DomainError =>
   new DomainError(VerseErrorCode.TagAlreadyExists, `You already have a tag .${name}.`, {

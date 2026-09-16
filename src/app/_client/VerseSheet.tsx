@@ -8,7 +8,6 @@ import {
   fetchTags,
   updateVerse,
   uploadImage,
-  VersionConflict,
   type PlaceSuggestion,
   type TagView,
   type VerseView,
@@ -250,22 +249,26 @@ export function VerseSheet({
       if (initial) {
         await updateVerse(initial.id, { ...fields, expectedVersion: initial.version });
       } else {
-        await createVerse({
-          ...fields,
-          // The moment it is written is the default placement — the habit this
-          // app came from is messaging yourself something *now* — but only
-          // when nothing was typed into the date field.
-          eventStart: fields.eventStart ?? new Date().toISOString(),
-        });
+        await createVerse(
+          {
+            ...fields,
+            // The moment it is written is the default placement — the habit
+            // this app came from is messaging yourself something *now* — but
+            // only when nothing was typed into the date field.
+            eventStart: fields.eventStart ?? new Date().toISOString(),
+          },
+          // The labels the timeline draws the queued row with, taken from the
+          // list this sheet already loaded plus anything it just created.
+          tagIds.map((id) => {
+            const tag = [...tags, ...created].find((candidate) => candidate.id === id);
+            return { id, name: tag?.name ?? '', label: tag?.label ?? '' };
+          }),
+        );
       }
 
       onSaved();
     } catch (cause) {
-      setError(
-        cause instanceof VersionConflict || cause instanceof Error
-          ? cause.message
-          : 'Could not save.',
-      );
+      setError(cause instanceof Error ? cause.message : 'Could not save.');
     } finally {
       setSaving(false);
     }

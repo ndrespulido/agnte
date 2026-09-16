@@ -141,6 +141,11 @@ export function defaultShortcut(name: string, taken: ReadonlySet<string>): strin
 }
 
 export function createTag(input: {
+  /**
+   * Client-minted when the caller has one (§2). A tag composed offline needs
+   * its final id immediately, because the verse queued behind it names it.
+   */
+  id?: string;
   ownerId: string;
   name: string;
   displayName?: string | null;
@@ -151,7 +156,7 @@ export function createTag(input: {
 }): Tag {
   const now = input.clock.now();
   return {
-    id: uuidv7(now.getTime()),
+    id: input.id ?? uuidv7(now.getTime()),
     ownerId: input.ownerId,
     name: input.name,
     displayName: input.displayName ?? null,

@@ -34,6 +34,12 @@ const tagBody = (tag: Tag) => ({
 });
 
 const CreateBody = z.object({
+  /**
+   * The client's own id, as verse creation already accepts. A tag written
+   * offline is queued with the verse that names it (§8.1), so the id has to be
+   * settled before either reaches the server.
+   */
+  id: z.uuid().optional(),
   name: z.string(),
   displayName: z.string().trim().min(1).max(120).nullish(),
   visibility: z.string().optional(),
@@ -63,6 +69,7 @@ const statusFor = (code: string): number => {
       return 404;
     case VerseErrorCode.TagAlreadyExists:
     case VerseErrorCode.TagShortcutTaken:
+    case VerseErrorCode.TagIdTaken:
     case VerseErrorCode.VersionConflict:
       return 409;
     case VerseErrorCode.NoTags:

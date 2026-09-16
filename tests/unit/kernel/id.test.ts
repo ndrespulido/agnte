@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  derivedUuidv7,
   isUuid,
   isUuidV7,
   resetIdStateForTests,
   timestampOf,
   uuidv7,
 } from '@/shared/kernel/id';
+import { derivedUuidv7 } from '@/shared/kernel/derived-id';
 
 beforeEach(resetIdStateForTests);
 

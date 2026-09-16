@@ -9,3 +9,4 @@ export * from './result';
 export * from './domain-error';
 export * from './clock';
 export * from './id';
+export * from './derived-id';

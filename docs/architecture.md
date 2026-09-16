@@ -365,6 +365,53 @@ The UI must show pending state honestly — a Verse that hasn't synced should lo
 different from one that has. Silent queuing is how people lose trust in an app
 that holds their memories.
 
+> **Built in Phase 5: the outbox, the replay and the pending state.** The read
+> cache, offline media and conflict retention are not built — see below.
+>
+> **Every write goes through the outbox, not only the ones made offline.** The
+> obvious design is "try the network, fall back to a queue", and it has two code
+> paths per mutation where the rare one is the one nobody exercises. Worse,
+> "offline" is not a state a browser reliably knows: `navigator.onLine` is true
+> on a train with a captive portal, and the request simply hangs. One path
+> instead — store, answer, drain — makes being offline an ordinary slow send.
+>
+> **Ordering is the id.** Entries are UUIDv7 and replay in id order, and the
+> drain stops at the first entry it cannot send rather than skipping past it: a
+> verse's edit is queued behind its creation, so sending out of order would
+> PATCH a row that does not exist. The cost is that one stuck entry holds up the
+> ones behind it, which is why "blocked" is reserved for failures a person has
+> to resolve.
+>
+> **A 4xx that is not 408, 409 or 429 is never retried.** The server is saying
+> the request is wrong, and sending it again produces the same answer — in a
+> strictly ordered queue that is an infinite loop that also holds up every good
+> write behind it. Those, and a spent backoff, mark the entry blocked, which the
+> row shows with the server's own words and the choice to retry or discard.
+>
+> **Tags now accept a client-minted id** (`POST /v1/tags`), as verse creation
+> already did, because a verse queued behind a new tag has to name it before
+> either has been sent. An id already taken answers 409 rather than the 500 a
+> raw primary-key violation would produce — a queue replays a rejected write
+> until something tells it to stop, and a 500 reads as "try again".
+>
+> **Not built, and each is a real gap rather than a detail:**
+>
+> - **No service worker, so there is no read cache and no cold start offline.**
+>   Writes queue and survive a reload *if the document loads*; opening the app
+>   with no signal at all is still the browser's own error page. This is the
+>   next piece, and it is also the Web Push transport (§8.4), so it earns its
+>   place twice.
+> - **Media is still online-only.** A photo added with no signal fails its
+>   upload and the verse saves without it, rather than the file being held in
+>   IndexedDB and attached on reconnect.
+> - **No 30-day retention of a losing version.** A conflict blocks the entry and
+>   shows what the server said; resolving it is retry or discard, and nothing is
+>   kept behind.
+> - **A conflict no longer lands in the editor.** It used to be thrown while the
+>   sheet was open, which put the message where the change had been typed. It now
+>   surfaces on the row, because the sheet no longer waits for the network — the
+>   deliberate cost of not blocking a person composing a verse underground.
+
 ### 8.2 Search
 
 Postgres full-text, no external search service.

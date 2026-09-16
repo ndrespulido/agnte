@@ -12,7 +12,7 @@ import {
 import { PrismaTagRepository } from '@/modules/verse/infrastructure/prisma-tag-repository';
 import { PrismaVerseRepository } from '@/modules/verse/infrastructure/prisma-verse-repository';
 import { createVerse } from '@/modules/verse/domain/verse';
-import { fixedClock, unwrap } from '@/shared/kernel';
+import { fixedClock, unwrap, uuidv7 } from '@/shared/kernel';
 
 /**
  * The tag endpoints end to end, against a real Postgres and behind a real
@@ -205,6 +205,40 @@ describe.skipIf(!DATABASE_URL)('tag routes', () => {
       expect(await clash.json()).toMatchObject({
         error: { code: 'verse.tag_shortcut_taken' },
       });
+    });
+
+    /**
+     * The offline write's foundation (§8.1): a tag composed with no signal
+     * needs its final id before it is sent, because the verse queued behind it
+     * already names that id.
+     */
+    it('honours an id the client minted', async () => {
+      const { token } = await signUp('client-id@example.com');
+      const id = uuidv7();
+
+      const response = await create(token, { id, name: 'metro' });
+      expect(response.status).toBe(201);
+      expect((await response.json()) as { id: string }).toMatchObject({ id });
+    });
+
+    /**
+     * 409 rather than the 500 a raw primary-key violation would produce. It
+     * matters because an offline queue replays a rejected write until something
+     * tells it to stop, and a 500 reads as "the server had a moment, try again"
+     * — which for this failure is a loop that also holds up every write behind
+     * it.
+     */
+    it("refuses an id that is already someone else's tag, without crashing", async () => {
+      const owner = await signUp('holds-the-id@example.com');
+      const other = await signUp('wants-the-id@example.com');
+
+      const id = uuidv7();
+      expect((await create(owner.token, { id, name: 'metro' })).status).toBe(201);
+
+      const response = await create(other.token, { id, name: 'something-else' });
+      expect(response.status).toBe(409);
+      const body = (await response.json()) as { error: { code: string } };
+      expect(body.error.code).toBe('verse.tag_id_taken');
     });
 
     it('refuses a duplicate name', async () => {

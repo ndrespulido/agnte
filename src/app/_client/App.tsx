@@ -17,6 +17,7 @@ import {
   signOut,
   subscribeToSession,
 } from './session';
+import { startSync } from './sync';
 
 /**
  * The shell: a glass date header pinned to the top, the timeline beneath it,
@@ -101,6 +102,18 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
       );
     });
   }, []);
+
+  /**
+   * Start draining the outbox once there is a session to drain it with.
+   *
+   * Here rather than at module load because a queued write needs a token: the
+   * queue survives a reload, so the first thing this does on every open is send
+   * whatever the last session left behind (§8.1). `startSync` is idempotent, so
+   * a re-render or a second sign-in does not start a second loop.
+   */
+  useEffect(() => {
+    if (session === 'signed-in') startSync();
+  }, [session]);
 
   const [dateLabel, setDateLabel] = useState('Today');
   /**
