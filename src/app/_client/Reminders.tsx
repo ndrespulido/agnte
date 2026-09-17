@@ -3,13 +3,28 @@
 import { useEffect, useState } from 'react';
 import {
   createReminder,
+  createTag,
+  createVerse,
   fetchQuietHours,
   fetchReminders,
+  fetchTags,
   saveQuietHours,
   type QuietHoursView,
   type ReminderView,
+  type TagView,
 } from './api';
-import { fromLocalDateTimeInput, localMomentLabel, toLocalDateTimeInput } from './format';
+import {
+  REMINDER_TAG,
+  planTags,
+  reminderVerseFields,
+  normaliseTagName,
+} from './reminder-verse';
+import {
+  fromLocalDateTimeInput,
+  localMomentLabel,
+  splitTagNames,
+  toLocalDateTimeInput,
+} from './format';
 import { disablePush, enablePush, pushState, type PushState } from './push';
 
 /**
@@ -45,7 +60,17 @@ const fromTimeInput = (value: string): number | null => {
   return Number(match[1]) * 60 + Number(match[2]);
 };
 
-export function Reminders({ onClose }: { onClose: () => void }) {
+export function Reminders({
+  onClose,
+  onOpenVerse,
+  onScheduled,
+}: {
+  onClose: () => void;
+  /** Opens the verse behind a reminder, over the timeline. */
+  onOpenVerse: (verseId: string) => void;
+  /** A reminder was scheduled, so the timeline behind has a new verse on it. */
+  onScheduled: () => void;
+}) {
   const [reminders, setReminders] = useState<ReminderView[] | null>(null);
   const [quiet, setQuiet] = useState<QuietHoursView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -132,6 +157,7 @@ export function Reminders({ onClose }: { onClose: () => void }) {
             onAdded={() => {
               setAdding(false);
               load();
+              onScheduled();
             }}
           />
         ) : (
@@ -140,7 +166,7 @@ export function Reminders({ onClose }: { onClose: () => void }) {
               New reminder
             </button>
 
-            <ReminderList reminders={reminders} error={error} />
+            <ReminderList reminders={reminders} error={error} onOpenVerse={onOpenVerse} />
             <QuietHoursField quiet={quiet} onSaved={setQuiet} />
           </>
         )}
@@ -158,26 +184,22 @@ export function Reminders({ onClose }: { onClose: () => void }) {
 function ReminderList({
   reminders,
   error,
+  onOpenVerse,
 }: {
   reminders: ReminderView[] | null;
   error: string | null;
+  onOpenVerse: (verseId: string) => void;
 }) {
   if (reminders === null) return error ? null : <p className="notice">Loading…</p>;
 
   if (reminders.length === 0) {
-    return (
-      <p className="notice">
-        Nothing scheduled. A reminder can stand on its own — it does not have to be
-        attached to a verse.
-      </p>
-    );
+    return <p className="notice">Nothing scheduled.</p>;
   }
 
   return (
     <ul className="reminder-rows">
-      {reminders.map((reminder) => (
-        <li key={reminder.id}>
-          <span className="reminder-title">{reminder.title}</span>
+      {reminders.map((reminder) => {
+        const when = (
           <span className="quiet-note">
             {/* Local, not UTC — see format.ts for why reminders break with the
                 rest of the display layer on this. */}
@@ -188,8 +210,38 @@ function ReminderList({
               <> · {reminder.status}</>
             ) : null}
           </span>
-        </li>
-      ))}
+        );
+
+        /*
+         * A reminder made here has a verse behind it, so the row opens it.
+         *
+         * Not every row does: a reminder can still be created through the API
+         * with no verse, and one made before this existed has none either. A
+         * plain row rather than a dead button for those — an affordance that
+         * does nothing is worse than none.
+         */
+        if (reminder.verseId === null) {
+          return (
+            <li key={reminder.id}>
+              <span className="reminder-title">{reminder.title}</span>
+              {when}
+            </li>
+          );
+        }
+
+        return (
+          <li key={reminder.id}>
+            <button
+              type="button"
+              className="reminder-open"
+              onClick={() => onOpenVerse(reminder.verseId as string)}
+            >
+              <span className="reminder-title">{reminder.title}</span>
+              {when}
+            </button>
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -213,6 +265,32 @@ function AddReminder({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * The tags to put on the verse, beyond `.reminder` itself.
+   *
+   * Loaded rather than typed-only, because the point of this is that a
+   * reminder lands among everything else it belongs with — `.flight` for the
+   * check-in nudge, `.barcelona-trip` for the whole thing — and those tags
+   * already exist by the time anyone is scheduling against them.
+   */
+  const [tags, setTags] = useState<TagView[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [newTag, setNewTag] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchTags()
+      .then((list) => {
+        if (!cancelled) setTags(list);
+      })
+      // Silent: tags are an addition here, not the point of the form, and a
+      // failure to list them must not stop someone scheduling a reminder.
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -221,7 +299,56 @@ function AddReminder({
     try {
       const when = fromLocalDateTimeInput(fireAt);
       if (!when) throw new Error('Pick a date and time.');
-      await createReminder({ title, fireAt: when, recurrence: rule });
+
+      /*
+       * `.reminder` first, then whatever was chosen or typed.
+       *
+       * It is an ordinary tag, not a flag: it has a dashboard, it can be
+       * filtered to, and it can be removed from a verse that has outgrown
+       * being a reminder. Asked for by name so it is made on first use rather
+       * than seeded, which keeps a brand new account's tag list empty until
+       * they do something.
+       */
+      const wanted = [REMINDER_TAG, ...splitTagNames(newTag)];
+      const plan = planTags(wanted, tags, selected);
+
+      const tagIds = [...plan.ids];
+      const made: TagView[] = [];
+      for (const name of plan.create) {
+        const tag = await createTag(name);
+        made.push(tag);
+        tagIds.push(tag.id);
+      }
+      if (made.length > 0) setTags((current) => [...current, ...made]);
+
+      /*
+       * The verse is written first, and through the outbox, so it survives a
+       * network that drops between the two writes (§8.1). The reminder then
+       * names it.
+       *
+       * The reverse order would be worse in the same situation: a reminder
+       * pointing at a verse that was never queued fires a notification which
+       * opens nothing. This way the failure leaves a verse on the timeline
+       * with no reminder behind it — visible, editable, and obviously
+       * incomplete rather than silently broken.
+       */
+      const known = [...tags, ...made];
+      const verseId = await createVerse(
+        reminderVerseFields({ title, fireAt: when, tagIds }),
+        // The labels the timeline draws the row with before the server has
+        // ever seen it (api.ts). Every id here came from `known`, so the
+        // fallback is unreachable — it exists so a future caller adding an id
+        // from somewhere else gets a readable chip rather than a crash.
+        tagIds.map((id) => {
+          const tag = known.find((candidate) => candidate.id === id);
+          const name = tag?.name ?? normaliseTagName(REMINDER_TAG);
+          return { id, name, label: `.${name}` };
+        }),
+      );
+
+      await createReminder({ title, fireAt: when, recurrence: rule, verseId });
+
+      setNewTag('');
       onAdded();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not save that.');
@@ -266,6 +393,46 @@ function AddReminder({
           ))}
         </select>
       </label>
+
+      <fieldset className="field">
+        <legend>Tags</legend>
+        <p className="quiet-note">
+          It lands on the timeline as a verse, tagged <code>.reminder</code>. Add more to
+          file it with the rest of the trip.
+        </p>
+        <div className="tag-picker">
+          {/*
+            `.reminder` is not offered as a chip, because it is not optional —
+            every reminder verse gets it. A chip that stays on however it is
+            pressed is a control that lies about what it does, and the sentence
+            above already says the tag is there.
+          */}
+          {tags
+            .filter((tag) => tag.name !== REMINDER_TAG)
+            .map((tag) => (
+              <button
+                key={tag.id}
+                type="button"
+                className={selected.includes(tag.id) ? 'tag chosen' : 'tag'}
+                aria-pressed={selected.includes(tag.id)}
+                onClick={() =>
+                  setSelected((current) =>
+                    current.includes(tag.id)
+                      ? current.filter((id) => id !== tag.id)
+                      : [...current, tag.id],
+                  )
+                }
+              >
+                {tag.label}
+              </button>
+            ))}
+        </div>
+        <input
+          value={newTag}
+          onChange={(e) => setNewTag(e.target.value)}
+          placeholder="or new ones: .barcelona, .flight"
+        />
+      </fieldset>
 
       {error ? (
         <p className="notice error" role="alert">

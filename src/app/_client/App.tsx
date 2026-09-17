@@ -20,6 +20,7 @@ import {
 } from './session';
 import { startSync } from './sync';
 import { purgeCaches, registerServiceWorker } from './service-worker';
+import { verseIdFromSearch, withoutVerse } from './deep-link';
 
 /**
  * The shell: a glass date header pinned to the top, the timeline beneath it,
@@ -143,8 +144,35 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
    * its loaded pages, which a navigation would throw away and have to rebuild
    * a page at a time on the way back.
    */
-  const [openVerseId, setOpenVerseId] = useState<string | null>(null);
+  /**
+   * `/?verse=<id>` — where a tapped reminder lands (deep-link.ts).
+   *
+   * Read in the initialiser rather than an effect. An effect would setState
+   * synchronously on mount, which is the cascading render the lint rule is
+   * there to stop, and it would also open the overlay one frame late. Safe
+   * against hydration because the server renders nothing at all until the
+   * session has answered (`session === 'unknown'` below), so there is no
+   * server-rendered markup for this to disagree with.
+   */
+  const [openVerseId, setOpenVerseId] = useState<string | null>(() =>
+    typeof window === 'undefined' ? null : verseIdFromSearch(window.location.search),
+  );
   const [changingPassword, setChangingPassword] = useState(false);
+
+  /**
+   * Take the parameter back out of the address bar.
+   *
+   * This half *is* an effect's job — updating an external system to match
+   * React's state — and it is why the read above is split from the clear.
+   * `replaceState` rather than a navigation: the verse is an overlay, not a
+   * route, so pushing history would make Back close the overlay on one press
+   * and leave the page on the next, two meanings for one gesture. Clearing it
+   * also stops a reload reopening the same verse indefinitely.
+   */
+  useEffect(() => {
+    if (verseIdFromSearch(window.location.search) === null) return;
+    window.history.replaceState(null, '', withoutVerse(window.location.href));
+  }, []);
 
   /**
    * The tag list, and the dashboard reached from it.
@@ -235,7 +263,14 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
       ) : null}
 
       {browsingReminders ? (
-        <Reminders onClose={() => setBrowsingReminders(false)} />
+        <Reminders
+          onClose={() => setBrowsingReminders(false)}
+          onOpenVerse={(verseId) => {
+            setBrowsingReminders(false);
+            setOpenVerseId(verseId);
+          }}
+          onScheduled={() => setAnchor(new Date())}
+        />
       ) : null}
 
       {browsingData ? (

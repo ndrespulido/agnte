@@ -534,6 +534,42 @@ ScheduledNotification { id, userId, verseId?, fireAt, kind, payload, status, att
 > shape of the trap the reminder tick sat in for two days, and it is only closed
 > by doing it on a phone: set VAPID keys, open the app, Menu → Reminders → Turn
 > on, set a reminder a few minutes out, and watch for the notification.
+>
+> **A reminder is a Verse.** Scheduling one writes two rows: a Verse carrying
+> what it says, when it is for and whatever tags it was given, and a
+> `ScheduledNotification` carrying only the schedule and pointing at that Verse
+> through the `verse_id` it already had.
+>
+> Three alternatives were considered and rejected. A second kind of row the
+> timeline fetches separately and interleaves by date works, and then has to be
+> taught about tags, media, visibility and editing one feature at a time —
+> every one of which a Verse already has. A reminder carrying its own parallel
+> tag list duplicates the tag table in another schema and drifts from it. And
+> the timeline merging two sources server-side would be the cross-schema join
+> §1.1 forbids outright.
+>
+> The orchestration is in the client, not in either module: it creates the
+> Verse (through the outbox, §8.1) and then the reminder naming it. That keeps
+> `notifications` from importing `verse` to do its work, which is the coupling
+> the boundaries exist to prevent — and it costs nothing, because IDs are
+> client-generated (§2), so the id is known before either write leaves the
+> device.
+>
+> Two consequences worth stating plainly rather than discovering:
+>
+> - **The text is copied, not shared.** The notification keeps its own `title`,
+>   taken when the reminder was made. Reading the verse at fire time would be a
+>   cross-schema read. So editing the verse's note later does not change what
+>   the notification will say.
+> - **The verse is written first.** The reverse order fails worse: a reminder
+>   pointing at a verse that was never queued fires a notification that opens
+>   nothing. This way a failure between the two leaves a verse on the timeline
+>   with no reminder behind it — visible, editable and obviously incomplete.
+>
+> Tapping the notification lands on `/?verse=<id>`, which the app reads once on
+> load and then clears from the address bar (`_client/deep-link.ts`). The id is
+> shape-checked before it is used: `?verse=` is reachable by anyone who can put
+> a link in front of someone, and the value goes straight into a fetch path.
 
 ### 8.5 Data export
 

@@ -1249,6 +1249,42 @@ button.danger {
 }
 
 /*
+ * A reminder row that opens the verse behind it.
+ *
+ * A button rather than a link, because the verse is an overlay and not a route
+ * (App.tsx) — a link would promise an address that does not exist. Stripped
+ * back to the row it replaces so the list does not suddenly look like a form:
+ * the affordance is the hover and the focus ring, not a border.
+ */
+.reminder-open {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xxs, 2px);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.reminder-open:hover .reminder-title {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* The row is the target, so the ring goes round the row and not the text. */
+.reminder-open:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+/*
  * A verse the outbox is still holding (architecture.md §8.1).
  *
  * > The UI must show pending state honestly — a Verse that hasn't synced
