@@ -104,6 +104,17 @@ export function proxy(request: NextRequest): NextResponse {
     // The manifest, so the PWA install works.
     "manifest-src 'self'",
 
+    /*
+     * The service worker, and it has to be said explicitly.
+     *
+     * `worker-src` falls back to `script-src` when it is absent, and
+     * `script-src` here carries `strict-dynamic` — which tells the browser to
+     * ignore host allowlists, `'self'` included. Without this line the fallback
+     * refuses /sw.js and the registration fails silently, taking the offline
+     * app and the read cache (§8.1) with it.
+     */
+    "worker-src 'self'",
+
     // No mixed content. Harmless locally, where everything is already http.
     'upgrade-insecure-requests',
   ].join('; ');

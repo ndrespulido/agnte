@@ -18,6 +18,7 @@ import {
   subscribeToSession,
 } from './session';
 import { startSync } from './sync';
+import { purgeCaches, registerServiceWorker } from './service-worker';
 
 /**
  * The shell: a glass date header pinned to the top, the timeline beneath it,
@@ -115,6 +116,17 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
     if (session === 'signed-in') startSync();
   }, [session]);
 
+  /**
+   * Turn the service worker on, once, whatever the session says.
+   *
+   * Outside the session check above because the shell and its assets are worth
+   * caching for the sign-in screen too — and because a person who is signed out
+   * on this device is exactly the person whose next load might have no signal.
+   */
+  useEffect(() => {
+    registerServiceWorker();
+  }, []);
+
   const [dateLabel, setDateLabel] = useState('Today');
   /**
    * The timeline's anchor. Replacing it is how a write refetches: a new Date
@@ -146,6 +158,19 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
   const [browsingTags, setBrowsingTags] = useState(false);
   const [browsingReminders, setBrowsingReminders] = useState(false);
   const [dashboardTagId, setDashboardTagId] = useState<string | null>(null);
+
+  /**
+   * Sign out, and take the offline copy with it.
+   *
+   * The caches hold pages of the timeline in plaintext; leaving them behind
+   * would mean the next person to open this browser could read the last
+   * person's record without a token. Purged before the tokens go, so the
+   * request that ends the session on the server still has one to send.
+   */
+  const endSession = useCallback(async () => {
+    await purgeCaches();
+    await signOut();
+  }, []);
 
   const onDateChange = useCallback((label: string) => setDateLabel(label), []);
   const onOpen = useCallback((verseId: string) => setOpenVerseId(verseId), []);
@@ -194,7 +219,7 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
             setMenuOpen(false);
             setChangingPassword(true);
           }}
-          onSignOut={() => void signOut()}
+          onSignOut={() => void endSession()}
           onClose={() => setMenuOpen(false)}
         />
       ) : null}
