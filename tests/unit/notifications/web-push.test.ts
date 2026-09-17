@@ -4,6 +4,7 @@ import {
   buildPushRequest,
   encryptPayload,
   generateVapidKeys,
+  scalar32,
   vapidAuthorization,
 } from '@/modules/notifications/infrastructure/web-push';
 
@@ -174,6 +175,36 @@ describe('buildPushRequest', () => {
     expect(request.headers.authorization?.startsWith('vapid t=')).toBe(true);
     expect(Number(request.headers.ttl)).toBeGreaterThan(0);
     expect(request.body.length).toBeGreaterThan(86);
+  });
+});
+
+describe('scalar32', () => {
+  /**
+   * Node strips leading zero bytes from an ECDH private key, so about one in
+   * 250 comes back short. Handed a fixed input rather than a generated one,
+   * because generating until a short key appears is a slow coin flip.
+   */
+  it('left-pads a short scalar to 32 bytes without changing its value', () => {
+    const short = Buffer.alloc(31, 0x7f);
+    const padded = scalar32(short);
+
+    expect(padded.length).toBe(32);
+    expect(padded[0]).toBe(0);
+    expect(padded.subarray(1).equals(short)).toBe(true);
+    // The same integer, which is the whole point of the padding.
+    expect(BigInt(`0x${padded.toString('hex')}`)).toBe(
+      BigInt(`0x${short.toString('hex')}`),
+    );
+  });
+
+  it('leaves a full-length scalar alone', () => {
+    const full = Buffer.alloc(32, 0x01);
+    expect(scalar32(full).equals(full)).toBe(true);
+  });
+
+  /** Longer than the curve is not a padding problem, it is a wrong input. */
+  it('refuses a scalar too long for the curve', () => {
+    expect(() => scalar32(Buffer.alloc(33))).toThrow(/cannot be 33 bytes/);
   });
 });
 

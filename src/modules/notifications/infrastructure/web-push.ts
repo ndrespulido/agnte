@@ -274,13 +274,40 @@ export function buildPushRequest(
   };
 }
 
+/**
+ * A P-256 private scalar as the 32 bytes every consumer of it expects.
+ *
+ * `createECDH().getPrivateKey()` returns the scalar as a big-endian integer
+ * with leading zero bytes stripped, so roughly one key in 250 comes back 31
+ * bytes or shorter. JWK (RFC 7518 §6.2.2.1) says `d` is a fixed-length octet
+ * string for the curve, and while Node happens to accept a short one, nothing
+ * guarantees the next thing to read this key does — a `web-push` library, a
+ * different runtime, or a hand-written verifier.
+ *
+ * The failure that matters is the shape of it: a key generated today works
+ * everywhere it is tried, and then one key in 250 does not, months later, in
+ * whatever read it next. Padding at the point of generation means the stored
+ * form is never the short one.
+ *
+ * Exported for its test: the short case appears in well under 1% of generated
+ * keys, so a test that generated keys and hoped to see one would be a coin
+ * flip rather than a regression test.
+ */
+export function scalar32(raw: Buffer): Buffer {
+  if (raw.length === 32) return raw;
+  if (raw.length > 32) {
+    throw new Error(`A P-256 scalar cannot be ${raw.length} bytes.`);
+  }
+  return Buffer.concat([Buffer.alloc(32 - raw.length), raw]);
+}
+
 /** A fresh VAPID keypair, for the setup script. */
 export function generateVapidKeys(subject: string): VapidKeys {
   const ecdh = createECDH('prime256v1');
   ecdh.generateKeys();
   return {
     publicKey: b64u(ecdh.getPublicKey()),
-    privateKey: b64u(ecdh.getPrivateKey()),
+    privateKey: b64u(scalar32(ecdh.getPrivateKey())),
     subject,
   };
 }

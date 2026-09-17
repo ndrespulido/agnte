@@ -30,6 +30,7 @@ Everything below is a one-time setup step. Per-deploy infrastructure lives in
 | R2 CORS | Bucket CORS rule so the browser's presigned upload isn't blocked | 4.11 | ☐ |
 | Custom domain | Cloud Run Domain Mapping, Cloudflare-proxied, `APP_BASE_URL` pinned | 4.12 | ☑ |
 | Place suggestions | Places API key for the location field, production only | 6.2 | ☐ key not valid |
+| Web Push | VAPID keypair (by set-secrets.sh), production only | 7.2 | ☐ never run against the live project |
 
 **This table is a note, not a source of truth, and it has been wrong twice.**
 Both times the same way: a ☐ against something the *code* for was already
@@ -1288,6 +1289,81 @@ This matters more here than elsewhere because the client swallows every
 Places failure by design — an optional field should degrade to plain text
 rather than put an error in front of someone mid-sentence — so a broken key
 is indistinguishable from "nowhere matches that" in the UI.
+
+---
+
+## 2m. Web Push (task 7.2)
+
+Reminders arrive as a notification on the device when this is configured and
+by email when it is not. Push is preferred and email is the fallback, so there
+is no state in which a reminder is silently dropped for want of a keypair.
+
+**Production only.** A preview minting its own keypair would subscribe a
+browser to an identity that vanishes when the pull request closes, leaving a
+subscription in the browser that nothing can ever push to. Previews report
+reminders as email-only on the status page.
+
+### Creating the keypair
+
+```bash
+PROJECT_ID=agnte-prod ./infra/set-secrets.sh
+```
+
+The Web Push section generates a P-256 keypair, asks for a contact address
+(defaulted from the Resend From address), and stores three secrets:
+`agnte-vapid-private-key`, `agnte-vapid-public-key`, `agnte-vapid-subject`.
+The next production deploy mounts all three or none.
+
+The private key is generated inside the script and captured through command
+substitution, so it never becomes a command argument and never reaches shell
+history or the process table.
+
+### Rotating it is close to irreversible
+
+The public key is not merely *sent* to browsers — it is baked into the
+subscription each browser creates. Rotate it and every existing subscription
+starts answering 403, and every person has to turn notifications off and on
+again by hand. There is no server-side migration for it, and deliberately no
+one-liner in the script.
+
+Rotate only if the private key is believed to have leaked. The blast radius of
+a leak is bounded: whoever holds it can send notifications to browsers already
+subscribed to this origin, and can read nothing.
+
+### Checking it
+
+The status page has a `web-push` row. It reports:
+
+| Row | Meaning |
+| --- | --- |
+| `not-configured` | No keypair. Reminders go by email. Normal locally and in previews. |
+| `partly configured; missing …` | Some of the three are mounted. The app treats this as no push at all and quietly emails — the row names the missing one. |
+| `the VAPID public key does not belong to the private key` | The halves were rotated apart. Every push will 403 with an error that reads like a crypto bug. |
+| `keypair present, contact …` | Mounted and internally consistent. |
+
+None of these block a deploy, on purpose: a broken keypair is fixed by
+re-running `set-secrets.sh`, not by shipping code, so a fatal status would
+wedge the pipeline for every unrelated change.
+
+**The row going green is not proof a notification arrives.** It proves the
+keys are mounted and match each other, and nothing past that — the push
+service, the browser's subscription and the device are all downstream of it.
+Proving the rest needs a real phone:
+
+1. Sign in on the production URL, Menu → Reminders → **Turn on**, and accept
+   the browser's permission prompt.
+2. Set a reminder for a minute or two ahead.
+3. Wait for the scheduler's tick, or force it:
+
+   ```bash
+   gcloud scheduler jobs run agnte-notifications-tick \
+     --location=europe-west3 --project=agnte-prod
+   ```
+
+4. The notification should appear on the device. If an email arrives instead,
+   push fell back: check the `web-push` row first, then whether the browser
+   still holds a subscription (a 404 or 410 from the push service deletes it
+   server-side, by design).
 
 ---
 

@@ -1,3 +1,4 @@
+import { createECDH } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { isHealthy, runChecks, type CheckResult } from '@/shared/infra/checks';
 import { resetConfigForTests } from '@/shared/infra/config';
@@ -29,6 +30,7 @@ describe('runChecks', () => {
       'google-sign-in',
       'backups',
       'place-suggestions',
+      'web-push',
       'deferred-jobs',
     ]);
     expect(results.every((r) => typeof r.durationMs === 'number')).toBe(true);
@@ -113,6 +115,129 @@ describe('runChecks', () => {
     // that exists precisely to be noticed.
     expect(backups?.status).toBe('not-configured');
     expect(backups?.detail).toContain('production only');
+  });
+});
+
+describe('the web-push check', () => {
+  const keypair = () => {
+    const ecdh = createECDH('prime256v1');
+    ecdh.generateKeys();
+    const raw = ecdh.getPrivateKey();
+    const d =
+      raw.length === 32 ? raw : Buffer.concat([Buffer.alloc(32 - raw.length), raw]);
+    return {
+      publicKey: ecdh.getPublicKey().toString('base64url'),
+      privateKey: d.toString('base64url'),
+    };
+  };
+
+  const webPush = async () => (await runChecks()).find((r) => r.name === 'web-push');
+
+  it('reports email-only when no keypair is configured', async () => {
+    delete process.env.VAPID_PUBLIC_KEY;
+    delete process.env.VAPID_PRIVATE_KEY;
+    delete process.env.VAPID_SUBJECT;
+    resetConfigForTests();
+
+    const check = await webPush();
+
+    expect(check?.status).toBe('not-configured');
+    expect(check?.detail).toContain('email');
+  });
+
+  it('reports a matching keypair as ok', async () => {
+    const keys = keypair();
+    process.env.VAPID_PUBLIC_KEY = keys.publicKey;
+    process.env.VAPID_PRIVATE_KEY = keys.privateKey;
+    process.env.VAPID_SUBJECT = 'mailto:ops@agnte.app';
+    resetConfigForTests();
+
+    const check = await webPush();
+
+    expect(check?.status).toBe('ok');
+    expect(check?.detail).toContain('mailto:ops@agnte.app');
+  });
+
+  /**
+   * Two of three is the state the application treats as no push at all, and
+   * silently emails instead. The check has to name the missing one, because
+   * nothing else in the system will.
+   */
+  it('names the variable that is missing when only some are set', async () => {
+    const keys = keypair();
+    process.env.VAPID_PUBLIC_KEY = keys.publicKey;
+    process.env.VAPID_PRIVATE_KEY = keys.privateKey;
+    delete process.env.VAPID_SUBJECT;
+    resetConfigForTests();
+
+    const check = await webPush();
+
+    expect(check?.status).toBe('stale');
+    expect(check?.detail).toContain('VAPID_SUBJECT');
+  });
+
+  /**
+   * The one this check exists for. Rotating one half and not the other signs
+   * every push with a key the browser's subscription does not name; the push
+   * service answers 403 and explains nothing, so it reads as a bug in the
+   * encryption rather than a mismatched pair.
+   */
+  it('catches a public key that does not belong to the private key', async () => {
+    process.env.VAPID_PUBLIC_KEY = keypair().publicKey;
+    process.env.VAPID_PRIVATE_KEY = keypair().privateKey;
+    process.env.VAPID_SUBJECT = 'mailto:ops@agnte.app';
+    resetConfigForTests();
+
+    const check = await webPush();
+
+    expect(check?.status).toBe('stale');
+    expect(check?.detail).toContain('does not belong');
+  });
+
+  /**
+   * Garbage that happens to be a *valid* scalar reports as a mismatch rather
+   * than as malformed, because that is what it is: `setPrivateKey` accepts any
+   * number below the curve order, so a truncated or mistyped key derives a
+   * perfectly good public point that is simply the wrong one. Asserted so the
+   * wording of the two branches does not get swapped later.
+   */
+  it('reports a mistyped private key as a mismatch', async () => {
+    process.env.VAPID_PUBLIC_KEY = keypair().publicKey;
+    process.env.VAPID_PRIVATE_KEY = 'not-a-key';
+    process.env.VAPID_SUBJECT = 'mailto:ops@agnte.app';
+    resetConfigForTests();
+
+    const check = await webPush();
+
+    expect(check?.status).toBe('stale');
+    expect(check?.detail).toContain('does not belong');
+  });
+
+  /** A scalar outside the curve order is the case that actually throws. */
+  it('survives a private key the curve rejects outright', async () => {
+    process.env.VAPID_PUBLIC_KEY = keypair().publicKey;
+    process.env.VAPID_PRIVATE_KEY = Buffer.alloc(32, 0xff).toString('base64url');
+    process.env.VAPID_SUBJECT = 'mailto:ops@agnte.app';
+    resetConfigForTests();
+
+    const check = await webPush();
+
+    expect(check?.status).toBe('stale');
+    expect(check?.detail).toContain('P-256');
+  });
+
+  /**
+   * A broken keypair must not stop a deploy: it is fixed by re-running
+   * ./infra/set-secrets.sh, not by shipping code, so a fatal status would
+   * wedge the pipeline for every unrelated change.
+   */
+  it('never blocks a deploy, however broken it is', async () => {
+    process.env.VAPID_PUBLIC_KEY = keypair().publicKey;
+    process.env.VAPID_PRIVATE_KEY = keypair().privateKey;
+    process.env.VAPID_SUBJECT = 'mailto:ops@agnte.app';
+    resetConfigForTests();
+
+    expect(isHealthy(await runChecks())).toBe(true);
   });
 });
 
