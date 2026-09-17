@@ -810,3 +810,107 @@ local dev.
 2. **Shortcut scope** — global per user (recommended), or per-tag context?
 
 Neither blocks Phase 0.
+
+---
+
+## 11. Wanted next — captured, not designed
+
+Asked for after the current build. Written down here rather than in a message
+so the reasoning survives, and deliberately *not* designed: each entry says
+what it is, where it lands, and what it collides with. None of it is scheduled
+and none of it changes anything above.
+
+### 11.1 Reading key/value out of an image
+
+Dates, reservation numbers, seat, gate — pulled off a photographed or
+screenshotted booking and written into the Verse.
+
+The target already exists: `properties` is schema-free key/value, and the five
+verticals (§`.flight`, `.hotel`, `.restaurant`, `.concert`, `.movie`) already
+carry *suggested* property sets, which double as a list of what is worth
+looking for in a `.flight` image.
+
+The hard part is not the extraction, it is the bill. OCR and vision models are
+metered, and §3.1 has exactly one metered dependency today (Places) with a
+paragraph explaining why that is a deliberate exception. A second one needs the
+same argument made again: per-image cost, a cap, and a default of *off*. The
+three shapes, cheapest first — on-device OCR in WASM (free, no egress, worst
+accuracy on a crumpled boarding pass), a cloud OCR API (cheap per call, returns
+text and not fields), a vision model (returns fields directly, costs the most).
+
+Whichever it is, it runs as deferred work through Cloud Tasks like thumbnails
+do (§1.3), never in the upload request: extraction that fails must not fail the
+upload, and the photo is already safely in R2 by then.
+
+**Every extracted value is a suggestion, not a fact.** A wrong seat number
+written silently into a Verse is worse than no seat number, so the result
+belongs in front of the person before it is saved.
+
+### 11.2 Cropping an image
+
+Straightforward, with one rule already decided: the original is kept precisely
+so variants can be re-derived from it (§ media). A crop is therefore a *new
+derived variant*, never a destructive edit of what was uploaded — the same
+reason `medium` and `thumb` exist alongside the original.
+
+Open: crop in the browser before upload (no round trip, and `downscale.ts`
+already does canvas work client-side) or server-side from the original (lets
+the crop be changed later, costs a Task per edit). The second is more in
+keeping with keeping the original.
+
+### 11.3 Periods of time, with inherited tags
+
+A window — a trip, a stay, a festival — where a Verse falling inside it picks
+up the window's tags.
+
+**This is the closest anything has come to the Timeline entity that CLAUDE.md
+records as considered and rejected**, and it needs to be resolved on purpose
+rather than by accident. A period does not need a new table: a Verse already
+takes `eventStart` *and* `eventEnd`, so a period is a Verse with a range. What
+is new is the inheritance.
+
+Two questions decide the whole shape:
+
+1. **Computed at read time or written at write time?** Read-time means moving a
+   trip's dates re-files everything inside it, which is the behaviour someone
+   would expect and also means a Verse's tags are not a fact about the row.
+   Write-time means the inheritance is a one-off suggestion applied on save,
+   which is duller and far easier to reason about.
+2. **What does it do to visibility?** This is the blocker, not a detail.
+   Visibility resolves to the *most restrictive* among a Verse's tags and fails
+   closed (CLAUDE.md), and this app holds medical notes and financial
+   screenshots. Tags arriving implicitly because of a date range means
+   visibility can change without anyone touching the Verse — and worse, a
+   period made public could pull a private Verse's resolution in a direction
+   nobody asked for. Any design here has to state what happens to an inherited
+   tag in the resolver, and the safe answer is probably that inherited tags
+   narrow visibility but never widen it.
+
+### 11.4 Default location for a period
+
+"I lived in Lisbon from March to September." "This flight confirmation says I
+am in Berlin from the 3rd to the 9th." Verses written in that window get the
+location filled in.
+
+The same mechanism as 11.3 and blocked behind the same two questions, plus one
+of its own: a default is not the same as a value. A location that was
+*inherited* and one that was *typed* need to be distinguishable, or correcting
+one Verse's location looks identical to the period being wrong.
+
+Deriving the window from a confirmed booking is 11.1 and 11.3 stacked: extract
+the dates and the city from a `.flight` verse's image, propose a period, and
+let it default the location. Worth noting it is the *last* of these to build,
+not the first, however appealing it sounds — it is only as good as the two
+features underneath it.
+
+### 11.5 Tag visualisation
+
+A dashboard per tag already exists (`GET /v1/tags/:id/dashboard`), and every
+tag is already a filterable sub-timeline. So this is not new plumbing — it is
+what those two surfaces show.
+
+Worth being concrete about before building, because "visualisation" can mean
+three different things here: what a tag looks like *over time* (a sparkline of
+when you actually went to restaurants), what it looks like *against other tags*
+(the co-tag data the dashboard already returns), and what a filtered timeline
+looks like when it is a whole screen rather than a filter on the main one.

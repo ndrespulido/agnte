@@ -226,6 +226,21 @@ Still open — neither blocks Phase 0:
    shared tag in v2, or is sharing read-only first?
 2. **Shortcut scope** — global per user (recommended) or per-tag context?
 
+## Wanted next
+
+Asked for after the current build, captured in `docs/architecture.md` §11 with
+what each one collides with. Not scheduled, not designed:
+
+1. Key/value extraction from images (dates, reservation number, seat).
+2. Cropping images.
+3. Periods of time whose contents inherit the period's tags.
+4. A default location for a period — "I lived in Lisbon from March".
+5. Tag visualisation, on the dashboard and the timeline.
+
+Two of these need a decision before any code: a second **metered** dependency
+(§3.1 allows exactly one today, and says why), and what an **inherited tag does
+to visibility** — which resolves to the most restrictive and must fail closed.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know
