@@ -241,6 +241,29 @@ Two of these need a decision before any code: a second **metered** dependency
 (§3.1 allows exactly one today, and says why), and what an **inherited tag does
 to visibility** — which resolves to the most restrictive and must fail closed.
 
+## Blocked on you
+
+**The v1 converter (Phase 9) cannot be written without v1's schema.** It needs
+either v1's `prisma/schema.prisma` or a `pg_dump` of the v1 database, pasted or
+attached in a session. Nothing else unblocks it: the converter's whole job is
+mapping v1's column names and shapes onto `agnte.export.v1`, and guessing at
+them produces a script that runs cleanly and silently drops or mangles fields.
+
+Everything on this side is already built and tested — `POST /v1/privacy/import`
+reads `agnte.export.v1`, refuses bad rows with reasons rather than dropping
+them, and runs every row through the domain's constructors (§8.5). The missing
+piece is only the mapping.
+
+A schema is enough to write it. A dump is better, because it also settles what
+the data *actually* looks like as opposed to what the schema permits — how many
+rows have a null where the column allows one, which free-text fields are empty
+in practice, whether tags were ever used the way v2 assumes. If you send a dump,
+say so plainly: it holds real content, and it should not be committed to this
+repo.
+
+**Do not build the converter against a guessed schema**, and do not ask again
+in the same session once it has been asked — say what is blocked and move on.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know
