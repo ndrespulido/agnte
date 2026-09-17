@@ -26,7 +26,8 @@ Everything below is a one-time setup step. Per-deploy infrastructure lives in
 | Backups | Cloud Run Job + nightly schedule → R2 | 1.8 | ☑ first successful run 2026-09-15 |
 | Cloud Tasks | Thumbnail queue + enqueuer role (in the GCP bootstrap) | 4.9 | ☑ |
 | Task callback secret | Shared secret for `/internal/*` (by set-secrets.sh) | 4.9 | ☑ |
-| Retention sweep | Daily Cloud Scheduler job → `/internal/prune` | 4.10 | ☐ |
+| Retention sweep | Daily Cloud Scheduler job → `/internal/prune` | 4.10 | ☑ ran 200 on 2026-09-15 |
+| Reminder tick | Cloud Scheduler job → `/internal/notifications/tick` | 7.x | ☑ delivered end to end 2026-09-17 |
 | R2 CORS | Bucket CORS rule so the browser's presigned upload isn't blocked | 4.11 | ☐ |
 | Custom domain | Cloud Run Domain Mapping, Cloudflare-proxied, `APP_BASE_URL` pinned | 4.12 | ☑ |
 | Place suggestions | Places API key for the location field, production only | 6.2 | ☐ key not valid |
@@ -37,6 +38,28 @@ written and merged, so it read as "still to build" when it meant "written,
 never run against the live project". That is how the Cloud Tasks queue went a
 day without existing while every upload silently failed to thumbnail, and how
 backups looked like a phase of work rather than one command.
+
+A row here means *this was run against the live project and answered*, not
+that the code exists. The reminder tick is the example worth keeping: the job
+had been deployed for two days and every check said green, because a tick with
+nothing due answers `claimed: 0` — which is both the correct answer and
+indistinguishable from a tick that has quietly stopped working. It was only
+proven on 2026-09-17, by setting a reminder, waiting for it to come due, and
+watching an email arrive:
+
+```bash
+SECRET=$(gcloud secrets versions access latest \
+  --secret=agnte-internal-tasks-secret --project=agnte-prod)
+
+curl -s -X POST https://agnte.app/internal/notifications/tick \
+  -H "authorization: Bearer $SECRET" | jq
+# {"claimed":1,"sent":1,"deferred":0,"failed":0,"rescheduled":0,...}
+```
+
+`sent` is worth more than it looks: the email transport throws on a non-`ok`
+response from Resend and the dispatcher counts that as `failed`, so
+`sent: 1, failed: 0` means Resend accepted the message rather than merely that
+the code ran. Everything after that is deliverability.
 
 Before trusting a row, ask the thing itself:
 
