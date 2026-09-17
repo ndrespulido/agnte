@@ -10,6 +10,7 @@ import { Tags } from './Tags';
 import { Dashboard } from './Dashboard';
 import { Menu } from './Menu';
 import { Reminders } from './Reminders';
+import { YourData } from './YourData';
 import {
   completeGoogleSignIn,
   getServerSessionSnapshot,
@@ -157,6 +158,7 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [browsingTags, setBrowsingTags] = useState(false);
   const [browsingReminders, setBrowsingReminders] = useState(false);
+  const [browsingData, setBrowsingData] = useState(false);
   const [dashboardTagId, setDashboardTagId] = useState<string | null>(null);
 
   /**
@@ -215,6 +217,10 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
             setMenuOpen(false);
             setBrowsingReminders(true);
           }}
+          onYourData={() => {
+            setMenuOpen(false);
+            setBrowsingData(true);
+          }}
           onPassword={() => {
             setMenuOpen(false);
             setChangingPassword(true);
@@ -230,6 +236,16 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
 
       {browsingReminders ? (
         <Reminders onClose={() => setBrowsingReminders(false)} />
+      ) : null}
+
+      {browsingData ? (
+        <YourData
+          onClose={() => setBrowsingData(false)}
+          onErased={() => {
+            setBrowsingData(false);
+            void endSession();
+          }}
+        />
       ) : null}
 
       {browsingTags ? (

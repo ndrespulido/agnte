@@ -1334,3 +1334,108 @@ button.danger {
     opacity: 0.4;
   }
 }
+
+/*
+ * "Your data": the export, the import, and leaving (§8.5, §8.7).
+ *
+ * One sheet, three sections separated by hairlines rather than boxes — the same
+ * restraint the rest of the app uses, and it keeps the dangerous section from
+ * reading as a separate, clickable card.
+ */
+.sheet-title {
+  margin: 0 0 var(--space-md);
+  font-size: var(--text-large);
+  font-weight: 500;
+}
+
+.data-section {
+  padding: var(--space-lg) 0;
+  border-top: var(--hairline) solid var(--color-rule);
+}
+
+.data-section:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.data-section h3 {
+  margin: 0 0 var(--space-xs);
+  font-size: var(--text-body);
+  font-weight: 500;
+}
+
+.data-note {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--text-small);
+  color: var(--ink-soft);
+  /* Long enough to be read as prose rather than scanned as a label. */
+  line-height: 1.5;
+}
+
+.data-note code {
+  font-size: 0.95em;
+}
+
+.data-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  margin-top: var(--space-sm);
+}
+
+.import-summary {
+  margin-top: var(--space-md);
+}
+
+/*
+ * What the import refused, listed rather than counted.
+ *
+ * Indented and quiet: it is reference material someone reads once while fixing
+ * a file, not something to shout. Scrollable because a converted v1 export can
+ * legitimately refuse a hundred rows, and a sheet that grew to hold all of them
+ * would push Close off the screen.
+ */
+.rejected {
+  margin: 0;
+  padding-left: var(--space-lg);
+  max-height: 12rem;
+  overflow-y: auto;
+  font-size: var(--text-small);
+  color: var(--ink-soft);
+}
+
+.rejected li {
+  margin-bottom: var(--space-xs);
+}
+
+/*
+ * The one destructive action in the app.
+ *
+ * Red text on the paper base rather than a filled red block: a solid button is
+ * the most tappable thing on a screen, which is the opposite of what this
+ * should be. It has to be readable and deliberate, not inviting — and it is
+ * only ever rendered after a first, quiet press.
+ */
+.danger-button {
+  border: var(--hairline) solid var(--failed);
+  background: none;
+  color: var(--failed);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm) var(--space-md);
+  font: inherit;
+  font-size: var(--text-small);
+  cursor: pointer;
+}
+
+.danger-button:hover {
+  background: color-mix(in srgb, var(--failed) 8%, transparent);
+}
+
+.danger-button:focus-visible {
+  outline: 2px solid var(--failed);
+  outline-offset: 2px;
+}
+
+.data-section.danger h3 {
+  color: var(--failed);
+}
