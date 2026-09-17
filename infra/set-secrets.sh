@@ -388,6 +388,110 @@ else
 fi
 
 # ----------------------------------------------------------------------------
+# Web Push (architecture.md §8.4)
+#
+# A VAPID keypair identifies this application server to a push service. The
+# private half signs a short-lived JWT per message; the public half is handed
+# to every browser that subscribes and is baked into the subscription the
+# browser creates.
+#
+# That last part is why this is generated once and then left alone with more
+# conviction than the keys above. Rotating it does not merely invalidate
+# tokens — every existing subscription was created against the old public key,
+# so every one of them starts answering 403 and every browser has to be
+# re-subscribed by hand. There is no server-side migration for it.
+#
+# Stored as three secrets rather than one secret plus two workflow variables.
+# The public key and subject are not sensitive, but they have to match the
+# private key, and a mismatch is silent: pushes fail at the push service with
+# an error that reads like a crypto bug. Keeping the three together means they
+# are created, rotated and mounted as one unit.
+#
+# Optional like R2 and Resend: without it reminders simply go by email, which
+# is the state every environment starts in.
+# ----------------------------------------------------------------------------
+
+say "Web Push"
+
+if gcloud secrets describe agnte-vapid-private-key --project="${PROJECT_ID}" >/dev/null 2>&1; then
+  note "agnte-vapid-private-key already exists; leaving it alone."
+  note "Rotating it unsubscribes every browser and cannot be undone, so there"
+  note "is deliberately no one-liner for it here."
+  VAPID_PUBLIC_KEY=""
+elif ! command -v node >/dev/null; then
+  note "Skipped: generating a P-256 keypair needs node."
+  VAPID_PUBLIC_KEY=""
+else
+  cat <<'EXPLAIN'
+
+  Push services (Google's, Mozilla's, Apple's) want a contact address for
+  whoever runs this server, so they have somewhere to complain before they
+  start dropping messages. It is sent with every push and is not secret.
+
+Press Enter at the prompt to skip Web Push; reminders then go by email only.
+
+EXPLAIN
+
+  # Defaulted from the From address, which is the same person in practice.
+  # "Agnte <no-reply@example>" -> "no-reply@example".
+  VAPID_DEFAULT=""
+  if [[ -n "${EMAIL_FROM:-}" ]]; then
+    VAPID_DEFAULT="${EMAIL_FROM##*<}"
+    VAPID_DEFAULT="${VAPID_DEFAULT%>}"
+  fi
+
+  if [[ -n "${VAPID_DEFAULT}" ]]; then
+    read -rp "  Contact address [${VAPID_DEFAULT}]: " VAPID_CONTACT
+    VAPID_CONTACT="${VAPID_CONTACT:-${VAPID_DEFAULT}}"
+  else
+    read -rp "  Contact address: " VAPID_CONTACT
+  fi
+
+  if [[ -z "${VAPID_CONTACT}" ]]; then
+    note "Skipping Web Push. Reminders will go by email."
+    VAPID_PUBLIC_KEY=""
+  else
+    # RFC 8292 §2.1 allows a "mailto:" or "https:" subject and nothing else.
+    if [[ "${VAPID_CONTACT}" != mailto:* && "${VAPID_CONTACT}" != https://* ]]; then
+      if [[ "${VAPID_CONTACT}" == *@*.* ]]; then
+        VAPID_CONTACT="mailto:${VAPID_CONTACT}"
+      else
+        echo "  That needs to be an email address or an https:// URL."
+        echo "  A push service uses it to reach you, so it has to be real."
+        exit 1
+      fi
+    fi
+
+    # Generated in-process and captured through command substitution: the
+    # private key never becomes a command argument, so it stays out of the
+    # process table and out of shell history.
+    VAPID_KEYPAIR="$(node -e '
+      const { createECDH } = require("node:crypto");
+      const ecdh = createECDH("prime256v1");
+      ecdh.generateKeys();
+      // Node strips leading zeros from the scalar; JWK wants a fixed 32 bytes.
+      const raw = ecdh.getPrivateKey();
+      const d = raw.length === 32
+        ? raw
+        : Buffer.concat([Buffer.alloc(32 - raw.length), raw]);
+      process.stdout.write(
+        ecdh.getPublicKey().toString("base64url") + " " + d.toString("base64url"),
+      );
+    ')"
+
+    VAPID_PUBLIC_KEY="${VAPID_KEYPAIR%% *}"
+    VAPID_PRIVATE_KEY="${VAPID_KEYPAIR##* }"
+    VAPID_SUBJECT="${VAPID_CONTACT}"
+    unset VAPID_KEYPAIR
+
+    [[ -n "${VAPID_PUBLIC_KEY}" && -n "${VAPID_PRIVATE_KEY}" ]] \
+      || { echo "  Key generation produced nothing. Is node working?"; exit 1; }
+
+    note "Generated a P-256 keypair. Contact: ${VAPID_SUBJECT}"
+  fi
+fi
+
+# ----------------------------------------------------------------------------
 # Google OAuth (architecture.md §4)
 #
 # Optional like R2 and Resend. Production only, by necessity: Google does not
@@ -467,6 +571,12 @@ if [[ -n "${GOOGLE_CLIENT_ID}" ]]; then
   store agnte-google-client-secret "${GOOGLE_CLIENT_SECRET}"
 fi
 
+if [[ -n "${VAPID_PUBLIC_KEY}" ]]; then
+  store agnte-vapid-private-key "${VAPID_PRIVATE_KEY}"
+  store agnte-vapid-public-key "${VAPID_PUBLIC_KEY}"
+  store agnte-vapid-subject "${VAPID_SUBJECT}"
+fi
+
 # ----------------------------------------------------------------------------
 # Grant
 #
@@ -526,7 +636,8 @@ done
 # ----------------------------------------------------------------------------
 for secret in agnte-jwt-secret agnte-jwt-secret-preview agnte-resend-api-key agnte-email-from \
               agnte-google-client-id agnte-google-client-secret \
-              agnte-internal-tasks-secret agnte-internal-tasks-secret-preview; do
+              agnte-internal-tasks-secret agnte-internal-tasks-secret-preview \
+              agnte-vapid-private-key agnte-vapid-public-key agnte-vapid-subject; do
   if gcloud secrets describe "${secret}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
     gcloud secrets add-iam-policy-binding "${secret}" \
       --member="serviceAccount:${DEPLOYER_SA}" \
@@ -555,6 +666,18 @@ if [[ -n "${GOOGLE_CLIENT_ID}" ]]; then
     note "runtime  -> ${secret}"
   done
 fi
+
+# Bound whenever the secrets exist, not only on the run that created them: a
+# later run that skips Web Push must not leave an earlier run's grant behind.
+for secret in agnte-vapid-private-key agnte-vapid-public-key agnte-vapid-subject; do
+  if gcloud secrets describe "${secret}" --project="${PROJECT_ID}" >/dev/null 2>&1; then
+    gcloud secrets add-iam-policy-binding "${secret}" \
+      --member="serviceAccount:${RUNTIME_SA}" \
+      --role=roles/secretmanager.secretAccessor \
+      --project="${PROJECT_ID}" --quiet >/dev/null
+    note "runtime  -> ${secret}"
+  fi
+done
 
 # ----------------------------------------------------------------------------
 # Verify
@@ -606,6 +729,12 @@ fi
 
 if [[ -n "${GOOGLE_CLIENT_ID}" ]]; then
   for secret in agnte-google-client-id agnte-google-client-secret; do
+    verify "${secret}" "${RUNTIME_SA}" "runtime"
+  done
+fi
+
+if [[ -n "${VAPID_PUBLIC_KEY}" ]]; then
+  for secret in agnte-vapid-private-key agnte-vapid-public-key agnte-vapid-subject; do
     verify "${secret}" "${RUNTIME_SA}" "runtime"
   done
 fi

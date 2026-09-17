@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createECDH, randomUUID } from 'node:crypto';
 import { loadConfig } from './config';
 import { getDatabase, MIGRATED_SCHEMAS, shippedMigrations } from './database';
 import { getEmailTransport } from './email';
@@ -299,6 +299,84 @@ const checks: Check[] = [
       return {
         status: 'ok' as const,
         detail: 'key present (not called — Places is metered)',
+      };
+    },
+  },
+  {
+    name: 'web-push',
+    run: async () => {
+      const config = loadConfig();
+
+      const publicKey = config.VAPID_PUBLIC_KEY?.trim();
+      const privateKey = config.VAPID_PRIVATE_KEY?.trim();
+      const subject = config.VAPID_SUBJECT?.trim();
+
+      if (!publicKey && !privateKey && !subject) {
+        return {
+          status: 'not-configured' as const,
+          detail: 'no VAPID keypair; reminders go by email',
+        };
+      }
+
+      /*
+       * Partial configuration is `failed`, not `not-configured`.
+       *
+       * The application treats two-of-three as no push at all and quietly
+       * sends the email instead (notifications/infrastructure/push-delivery.ts),
+       * which is the right runtime behaviour and an awful thing to debug:
+       * someone sets the secrets, turns notifications on, and gets an email —
+       * with nothing anywhere saying why. Naming the missing one here is the
+       * difference between a minute and an afternoon.
+       *
+       * `stale`, not `failed`, for the reason the backup check gives above:
+       * the deploy smoke test gates promotion on this endpoint, and a broken
+       * VAPID configuration is fixed by re-running ./infra/set-secrets.sh, not
+       * by a deploy. Marking it fatal would wedge the pipeline for every
+       * unrelated change until someone noticed. Red on the status page,
+       * without a veto over shipping.
+       */
+      const missing = [
+        publicKey ? null : 'VAPID_PUBLIC_KEY',
+        privateKey ? null : 'VAPID_PRIVATE_KEY',
+        subject ? null : 'VAPID_SUBJECT',
+      ].filter((name): name is string => name !== null);
+
+      if (missing.length > 0 || !publicKey || !privateKey) {
+        return {
+          status: 'stale' as const,
+          detail: `partly configured; missing ${missing.join(', ')}`,
+        };
+      }
+
+      /*
+       * And then the mismatch, which is the failure this check exists for.
+       *
+       * The two halves are separate secrets, so they can be rotated apart.
+       * When they are, every push is signed by a key the browser's
+       * subscription does not name, the push service answers 403, and the
+       * error names nothing — it looks exactly like a bug in the encryption.
+       * Deriving the public point from the private scalar and comparing is
+       * local, free, and turns that into one red line here.
+       */
+      try {
+        const ecdh = createECDH('prime256v1');
+        ecdh.setPrivateKey(Buffer.from(privateKey, 'base64url'));
+        if (!ecdh.getPublicKey().equals(Buffer.from(publicKey, 'base64url'))) {
+          return {
+            status: 'stale' as const,
+            detail: 'the VAPID public key does not belong to the private key',
+          };
+        }
+      } catch {
+        return {
+          status: 'stale' as const,
+          detail: 'VAPID_PRIVATE_KEY is not a P-256 scalar',
+        };
+      }
+
+      return {
+        status: 'ok' as const,
+        detail: `keypair present, contact ${subject}`,
       };
     },
   },

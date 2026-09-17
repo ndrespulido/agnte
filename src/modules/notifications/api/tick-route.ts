@@ -3,6 +3,8 @@ import { verifyInternalRequest } from '@/shared/infra/internal-auth';
 import { PrismaNotificationRepository } from '../infrastructure/prisma-notification-repository';
 import { PrismaPreferenceRepository } from '../infrastructure/prisma-preference-repository';
 import { EmailNotificationDelivery } from '../infrastructure/email-delivery';
+import { PrismaPushSubscriptionRepository } from '../infrastructure/prisma-push-subscription-repository';
+import { PushWithEmailFallback } from '../infrastructure/push-delivery';
 import { tick } from '../application/dispatch';
 
 /**
@@ -24,7 +26,12 @@ export async function handleNotificationsTick(request: Request): Promise<Respons
   const result = await tick(systemClock.now(), {
     notifications: new PrismaNotificationRepository(),
     preferences: new PrismaPreferenceRepository(),
-    delivery: new EmailNotificationDelivery(),
+    // Push first, email behind it (§8.4). The dispatcher is unchanged: both
+    // are the same port, and it still counts attempts and decides on retries.
+    delivery: new PushWithEmailFallback(
+      new PrismaPushSubscriptionRepository(),
+      new EmailNotificationDelivery(),
+    ),
   });
 
   return Response.json(

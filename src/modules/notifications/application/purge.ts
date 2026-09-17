@@ -1,5 +1,6 @@
 import { PrismaNotificationRepository } from '../infrastructure/prisma-notification-repository';
 import { PrismaPreferenceRepository } from '../infrastructure/prisma-preference-repository';
+import { PrismaPushSubscriptionRepository } from '../infrastructure/prisma-push-subscription-repository';
 
 /**
  * Erases everything this module holds about one person (§8.7).
@@ -17,8 +18,14 @@ import { PrismaPreferenceRepository } from '../infrastructure/prisma-preference-
 export async function purgeForUser(userId: string): Promise<{
   reminders: number;
   preferences: number;
+  pushSubscriptions: number;
 }> {
   const reminders = await new PrismaNotificationRepository().deleteForUser(userId);
   const preferences = await new PrismaPreferenceRepository().deleteForUser(userId);
-  return { reminders, preferences };
+  // A subscription is an address for reaching someone. Leaving one behind after
+  // erasure would mean this deployment could still push to their phone.
+  const pushSubscriptions = await new PrismaPushSubscriptionRepository().deleteForUser(
+    userId,
+  );
+  return { reminders, preferences, pushSubscriptions };
 }

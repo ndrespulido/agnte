@@ -259,7 +259,7 @@ The architecturally relevant parts:
   fails WCAG easily; the translucent base must keep text at 4.5:1.
 - **PWA** (manifest + service worker) — this is also the offline mechanism
   (§8.1) and the Web Push transport (§8.4), so it earns its place three times
-  over.
+  over. All three are now built.
 
 ---
 
@@ -438,12 +438,15 @@ that holds their memories.
 >   ignore host allowlists — `'self'` included. Without the explicit directive
 >   the registration fails silently and takes the whole offline app with it.
 >
-> Still not built, in the worker: **thumbnails are not cached**. They are signed
+> **Web Push is built** — the worker's `push` and `notificationclick` handlers,
+and the server half in `modules/notifications/infrastructure/`. See §8.4.
+
+Still not built, in the worker: **thumbnails are not cached**. They are signed
 > R2 URLs, so cross-origin and opaque, and an opaque response is padded against
 > the storage quota (~7MB each in some browsers) — enough of a reason to do it
 > deliberately rather than in passing. A photo verse read offline shows its text
-> and an empty tile. And there is **no `push` handler**: the worker is the Web
-> Push transport §8.4 needs, but nothing sends to it yet.
+> and an empty tile. (The `push` handler that was missing here is now built —
+> see §8.4.)
 > - **A conflict no longer lands in the editor.** It used to be thrown while the
 >   sheet was open, which put the message where the change had been typed. It now
 >   surfaces on the row, because the sheet no longer waits for the network — the
@@ -493,6 +496,44 @@ ScheduledNotification { id, userId, verseId?, fireAt, kind, payload, status, att
   materializing a year of rows.
 - Quiet hours per user — never dispatch a medication reminder at 03:00 because
   of a timezone bug.
+
+> **Built in two halves.** Email first and Web Push second, deliberately: Resend
+> was already wired and proven, while push needs VAPID keys, a service worker
+> and — on iOS — the PWA installed to the home screen before it delivers
+> anything. Shipping the fallback first meant reminders worked for everyone on
+> day one.
+>
+> **The encryption is hand-written** (`infrastructure/web-push.ts`), which is a
+> thing this project otherwise avoids. RFC 8291 payload encryption and RFC 8292
+> VAPID, with `node:crypto` and no dependency. What makes that defensible rather
+> than brave is the test: it checks the output **byte for byte against
+> `http_ece`**, an independent implementation, rather than round-tripping
+> against itself. A round trip passes just as happily when the spec has been
+> misread, because both halves misread it identically — and three deliberate
+> mutations (swapped key order in the info string, swapped HKDF salt and IKM, a
+> wrong padding delimiter) all round-trip fine and are all caught by the vector.
+>
+> **Push is preferred, email is the fallback, and the difference between "gone"
+> and "failed" matters.** Every browser a person subscribed is tried. A 404 or
+> 410 means that endpoint no longer exists, so the row is deleted and email
+> takes over; any other failure is *thrown*, so the dispatcher retries rather
+> than quietly downgrading and hiding that push is broken.
+>
+> **One row per browser, not per person.** Push is a capability of an install,
+> so a laptop and a phone are two rows and a reminder goes to both. The endpoint
+> is the unique key, so re-subscribing updates in place instead of accumulating
+> duplicates that all buzz one device. Subscriptions are purged with the account
+> (§8.7): a subscription is an address for reaching someone.
+>
+> **Not proven end to end.** The encryption is checked against an independent
+> implementation, the fallback logic and the worker's handlers are unit-tested,
+> and the subscription endpoints are integration-tested — but no real push has
+> been delivered to a real device. Headless Chromium refuses to register with a
+> push service (`AbortError: Registration failed - permission denied`) and the
+> sandbox cannot reach FCM, so the last link is untested. This is precisely the
+> shape of the trap the reminder tick sat in for two days, and it is only closed
+> by doing it on a phone: set VAPID keys, open the app, Menu → Reminders → Turn
+> on, set a reminder a few minutes out, and watch for the notification.
 
 ### 8.5 Data export
 

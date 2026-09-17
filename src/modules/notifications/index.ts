@@ -20,6 +20,11 @@ export {
 } from './api/reminder-routes';
 
 export { handleNotificationsTick } from './api/tick-route';
+export {
+  handlePushKey,
+  handleSubscribePush,
+  handleUnsubscribePush,
+} from './api/push-routes';
 
 export { purgeForUser } from './application/purge';
 export { exportForUser } from './application/export';

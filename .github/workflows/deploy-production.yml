@@ -179,6 +179,29 @@ jobs:
             SECRETS="${SECRETS},GOOGLE_PLACES_API_KEY=agnte-google-places-api-key:latest"
           fi
 
+          # Web Push (architecture.md §8.4). Reminders arrive as a notification
+          # when this is configured and by email when it is not, so the
+          # conditional mount is the feature's off switch rather than a
+          # degraded mode.
+          #
+          # All three or none: the public key and subject are not secret, but
+          # they must match the private key, and a half-mounted set fails at
+          # the push service with an error that reads like a crypto bug rather
+          # than a missing value. The application makes the same check and
+          # falls back to email.
+          #
+          # Production only, deliberately. A preview minting its own keypair
+          # would subscribe a browser to an identity that disappears when the
+          # pull request closes, leaving a subscription nothing can ever push
+          # to; previews report reminders as email-only instead.
+          if gcloud secrets describe agnte-vapid-private-key >/dev/null 2>&1 \
+            && gcloud secrets describe agnte-vapid-public-key >/dev/null 2>&1 \
+            && gcloud secrets describe agnte-vapid-subject >/dev/null 2>&1; then
+            SECRETS="${SECRETS},VAPID_PRIVATE_KEY=agnte-vapid-private-key:latest,VAPID_PUBLIC_KEY=agnte-vapid-public-key:latest,VAPID_SUBJECT=agnte-vapid-subject:latest"
+          else
+            echo "::warning::No VAPID keypair; reminders will go by email only. Run ./infra/set-secrets.sh"
+          fi
+
           # Production only. Google will not accept a wildcard redirect URI, so
           # a preview's per-pull-request URL cannot be registered in advance —
           # previews use the email and password path and report Google sign-in
