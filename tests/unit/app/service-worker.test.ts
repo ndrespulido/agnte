@@ -26,6 +26,14 @@ interface Worker {
   ): Promise<{ status: number; body: string }>;
   listeners: Map<string, (event: unknown) => void>;
   store: Map<string, Map<string, { status: number; body: string }>>;
+  shown: { title: string; options: Record<string, unknown> }[];
+  opened: string[];
+  focused: string[];
+  windows: {
+    url: string;
+    focus: () => Promise<void>;
+    navigate: (u: string) => Promise<void>;
+  }[];
 }
 
 const SOURCE = readFileSync('public/sw.js', 'utf8');
@@ -57,14 +65,38 @@ function load(fetchImpl: (request: { url: string }) => Promise<unknown>): Worker
     fetch: fetchImpl,
     URL,
   };
+  const shown: { title: string; options: Record<string, unknown> }[] = [];
+  const opened: string[] = [];
+  const focused: string[] = [];
+  const windows: {
+    url: string;
+    focus: () => Promise<void>;
+    navigate: (u: string) => Promise<void>;
+  }[] = [];
+
   context.self = {
     location: { origin: 'https://agnte.test' },
     addEventListener: (name: string, handler: (event: unknown) => void) => {
       listeners.set(name, handler);
     },
     skipWaiting: () => undefined,
-    clients: { claim: async () => undefined },
+    registration: {
+      showNotification: async (title: string, options: Record<string, unknown>) => {
+        shown.push({ title, options });
+      },
+    },
+    clients: {
+      claim: async () => undefined,
+      matchAll: async () => windows,
+      openWindow: async (url: string) => {
+        opened.push(url);
+      },
+    },
   };
+  context.shown = shown;
+  context.opened = opened;
+  context.focused = focused;
+  context.windows = windows;
 
   createContext(context);
   runInContext(SOURCE, context);
@@ -251,5 +283,123 @@ describe('purge', () => {
     await Promise.all(waits);
 
     expect(sw.store.size).toBe(1);
+  });
+});
+
+/** Runs a listener and waits for whatever it passed to `waitUntil`. */
+async function fire(sw: Worker, name: string, event: Record<string, unknown>) {
+  const waits: Promise<unknown>[] = [];
+  sw.listeners.get(name)?.({
+    ...event,
+    waitUntil: (promise: Promise<unknown>) => waits.push(promise),
+  });
+  await Promise.all(waits);
+}
+
+describe('push', () => {
+  it('shows the reminder it was sent', async () => {
+    const sw = load(async () => response(200));
+
+    await fire(sw, 'push', {
+      data: {
+        json: () => ({ title: 'Take the tablet', body: 'the blue one', verseId: 'v1' }),
+      },
+    });
+
+    expect(sw.shown).toHaveLength(1);
+    expect(sw.shown[0]?.title).toBe('Take the tablet');
+    expect(sw.shown[0]?.options.body).toBe('the blue one');
+    // Tagged by verse, so a retry replaces the notification rather than
+    // stacking a second copy of the same reminder.
+    expect(sw.shown[0]?.options.tag).toBe('v1');
+  });
+
+  /**
+   * Browsers require a visible notification for every push they deliver, and
+   * revoke the permission from origins that stay silent. So a payload that
+   * cannot be read must still show *something* — an early return here would
+   * eventually cost the permission outright.
+   */
+  it('still shows something when the payload cannot be read', async () => {
+    const sw = load(async () => response(200));
+
+    await fire(sw, 'push', {
+      data: {
+        json: () => {
+          throw new Error('not json');
+        },
+      },
+    });
+
+    expect(sw.shown).toHaveLength(1);
+    expect(sw.shown[0]?.title).toBe('Reminder');
+  });
+
+  it('shows something for a push with no payload at all', async () => {
+    const sw = load(async () => response(200));
+    await fire(sw, 'push', {});
+    expect(sw.shown).toHaveLength(1);
+  });
+});
+
+describe('notificationclick', () => {
+  const notification = (verseId: string | null) => ({
+    close: () => undefined,
+    data: { verseId },
+  });
+
+  it('opens the verse when there is no window to focus', async () => {
+    const sw = load(async () => response(200));
+    await fire(sw, 'notificationclick', { notification: notification('v1') });
+
+    expect(sw.opened).toEqual(['/?verse=v1']);
+  });
+
+  it('opens the app when the reminder stands on its own', async () => {
+    const sw = load(async () => response(200));
+    await fire(sw, 'notificationclick', { notification: notification(null) });
+
+    expect(sw.opened).toEqual(['/']);
+  });
+
+  /**
+   * On a phone a second window is indistinguishable from the first except that
+   * it has lost whatever was on screen. Focusing the existing one is what a
+   * person tapping a reminder actually wants.
+   */
+  it('focuses an open window rather than opening another', async () => {
+    const sw = load(async () => response(200));
+    const navigated: string[] = [];
+    sw.windows.push({
+      url: 'https://agnte.test/',
+      focus: async () => {
+        sw.focused.push('yes');
+      },
+      navigate: async (url: string) => {
+        navigated.push(url);
+      },
+    });
+
+    await fire(sw, 'notificationclick', { notification: notification('v2') });
+
+    expect(sw.focused).toEqual(['yes']);
+    expect(navigated).toEqual(['/?verse=v2']);
+    expect(sw.opened).toEqual([]);
+  });
+
+  it('ignores a window from another origin', async () => {
+    const sw = load(async () => response(200));
+    sw.windows.push({
+      url: 'https://elsewhere.example/',
+      focus: async () => {
+        sw.focused.push('yes');
+      },
+      navigate: async () => undefined,
+    });
+
+    await fire(sw, 'notificationclick', { notification: notification(null) });
+
+    expect(sw.focused).toEqual([]);
+    expect(sw.opened).toEqual(['/']);
   });
 });

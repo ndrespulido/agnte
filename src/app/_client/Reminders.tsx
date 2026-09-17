@@ -10,6 +10,7 @@ import {
   type ReminderView,
 } from './api';
 import { fromLocalDateTimeInput, localMomentLabel, toLocalDateTimeInput } from './format';
+import { disablePush, enablePush, pushState, type PushState } from './push';
 
 /**
  * Reminders, and the hours not to send them in.
@@ -49,6 +50,22 @@ export function Reminders({ onClose }: { onClose: () => void }) {
   const [quiet, setQuiet] = useState<QuietHoursView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [push, setPush] = useState<PushState | null>(null);
+  const [pushBusy, setPushBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    pushState()
+      .then((state) => {
+        if (!cancelled) setPush(state);
+      })
+      .catch(() => {
+        if (!cancelled) setPush('unsupported');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const load = () => {
     Promise.all([fetchReminders(), fetchQuietHours()])
@@ -84,6 +101,24 @@ export function Reminders({ onClose }: { onClose: () => void }) {
         onClick={(event) => event.stopPropagation()}
       >
         <h2 className="dashboard-title">Reminders</h2>
+
+        <PushToggle
+          state={push}
+          busy={pushBusy}
+          onChange={(next) => {
+            setPushBusy(true);
+            (next === 'on' ? enablePush() : disablePush())
+              .then(setPush)
+              .catch((cause: unknown) => {
+                setError(
+                  cause instanceof Error
+                    ? cause.message
+                    : 'Could not change notifications.',
+                );
+              })
+              .finally(() => setPushBusy(false));
+          }}
+        />
 
         {error ? (
           <p className="notice error" role="alert">
@@ -348,5 +383,66 @@ function QuietHoursField({
         </p>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * Notifications on this browser.
+ *
+ * Deliberately a row inside Reminders rather than a prompt on load: the
+ * permission dialogue is the one a person dismisses when it arrives unasked,
+ * and on most browsers a dismissal is a denial that cannot be asked about
+ * again. Here it sits where someone is already thinking about being reminded.
+ *
+ * Every state says what is actually true, including the two the app cannot fix
+ * — a browser that does not do push, and a permission already refused — because
+ * "reminders are on" next to a browser that will never show one is exactly the
+ * silent failure this feature is for.
+ */
+function PushToggle({
+  state,
+  busy,
+  onChange,
+}: {
+  state: PushState | null;
+  busy: boolean;
+  onChange: (next: 'on' | 'off') => void;
+}) {
+  if (state === null) return null;
+
+  if (state === 'unsupported') {
+    return (
+      <p className="data-note">
+        This browser cannot show notifications here, so reminders arrive by email. On an
+        iPhone, add Agnte to your home screen first.
+      </p>
+    );
+  }
+
+  if (state === 'denied') {
+    return (
+      <p className="data-note">
+        Notifications are blocked for this site, so reminders arrive by email. Your
+        browser&rsquo;s site settings are the only place that can undo it.
+      </p>
+    );
+  }
+
+  return (
+    <p className="data-note push-toggle">
+      <span>
+        {state === 'on'
+          ? 'Reminders show as notifications on this device.'
+          : 'Reminders arrive by email. Notifications are quicker.'}
+      </span>
+      <button
+        type="button"
+        className="quiet"
+        disabled={busy}
+        onClick={() => onChange(state === 'on' ? 'off' : 'on')}
+      >
+        {busy ? 'Just a moment…' : state === 'on' ? 'Turn off' : 'Turn on'}
+      </button>
+    </p>
   );
 }

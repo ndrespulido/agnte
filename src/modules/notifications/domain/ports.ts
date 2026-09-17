@@ -87,6 +87,52 @@ export interface PreferenceRepository {
   deleteForUser(userId: string): Promise<number>;
 }
 
+/** One browser's Web Push subscription (§8.4). */
+export interface PushSubscriptionRecord {
+  readonly id: string;
+  readonly userId: string;
+  readonly endpoint: string;
+  readonly p256dh: string;
+  readonly auth: string;
+  readonly userAgent: string | null;
+}
+
+export interface PushSubscriptionRepository {
+  /** Every browser this person has subscribed. A reminder goes to all of them. */
+  listForUser(userId: string): Promise<PushSubscriptionRecord[]>;
+
+  /**
+   * Stores a subscription, keyed on the endpoint rather than the id.
+   *
+   * A browser re-subscribes on its own schedule — after a permission reset, a
+   * profile restore, or whenever the push service rotates the endpoint — and
+   * each time it hands back the same endpoint with fresh keys. Inserting would
+   * accumulate rows that all address one device; upserting keeps one row and
+   * the newest keys.
+   */
+  upsert(subscription: PushSubscriptionRecord): Promise<void>;
+
+  /**
+   * Forgets one, by endpoint and owner.
+   *
+   * Scoped to the owner even though the endpoint is unique: the endpoint is not
+   * a secret — it travels in every subscription payload — so an unscoped delete
+   * would let anyone holding one unsubscribe someone else's device.
+   */
+  remove(userId: string, endpoint: string): Promise<boolean>;
+
+  /**
+   * Forgets one the push service has rejected as gone, wherever it lives.
+   *
+   * Unscoped on purpose, and the only place that is right: a 404 or 410 from
+   * the push service is that service saying this endpoint no longer exists, and
+   * keeping it means failing against it on every tick forever.
+   */
+  removeByEndpoint(endpoint: string): Promise<boolean>;
+
+  deleteForUser(userId: string): Promise<number>;
+}
+
 /** Where a reminder actually goes. */
 export interface NotificationDelivery {
   /** Human-readable, for the status page and for logs. */

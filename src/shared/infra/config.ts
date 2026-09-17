@@ -99,6 +99,23 @@ const schema = z.object({
   GOOGLE_PLACES_API_KEY: z.string().min(1).optional(),
 
   /**
+   * Web Push (architecture.md §8.4). All three or none.
+   *
+   * Unset means reminders go by email only, which is the correct state locally
+   * and in previews: a VAPID keypair identifies the application server to a
+   * push service, and a preview minting its own would subscribe browsers to an
+   * identity that disappears when the preview is torn down.
+   *
+   * The private key is the one secret here. The public key is handed to every
+   * browser by design — it is what they encrypt a subscription to — so it is
+   * not sensitive, and the subject is a contact address a push service can
+   * complain to.
+   */
+  VAPID_PUBLIC_KEY: z.string().min(1).optional(),
+  VAPID_PRIVATE_KEY: z.string().min(1).optional(),
+  VAPID_SUBJECT: z.string().min(1).optional(),
+
+  /**
    * Deferred work (architecture.md §1.3): Cloud Tasks in a deployed
    * environment, an in-process loopback locally.
    *

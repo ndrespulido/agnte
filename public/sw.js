@@ -1,9 +1,9 @@
 /**
  * The service worker (architecture.md §5, §8.1).
  *
- * It earns its place twice over: it is what makes the app open with no signal
- * at all, and it is the read cache §8.1 asks for. (The third use — the Web Push
- * transport for §8.4 — is not built here; there is no `push` handler yet.)
+ * It earns its place three times over, as §5 said it would: it is what makes the
+ * app open with no signal at all, it is the read cache §8.1 asks for, and it is
+ * the Web Push transport for §8.4.
  *
  * ---------------------------------------------------------------------------
  * Runtime caching, not a build-time precache manifest.
@@ -184,3 +184,72 @@ async function networkFirst(request, cacheName, key) {
     throw cause;
   }
 }
+
+/* -------------------------------------------------------------------------
+ * Web Push (§8.4).
+ *
+ * The payload arrives already decrypted: the browser did the RFC 8291 work
+ * with the private key it generated at subscribe time and never shared. The
+ * server's half of that is `infrastructure/web-push.ts`.
+ * ---------------------------------------------------------------------- */
+
+self.addEventListener('push', (event) => {
+  /*
+   * A push with no readable payload still shows something.
+   *
+   * Browsers require a visible notification for every push they deliver — show
+   * nothing and they eventually revoke the permission — so a malformed payload
+   * must not end in an early return. A vague notification is recoverable; a
+   * silently dropped one costs the permission.
+   */
+  let reminder = { title: 'Reminder', body: null, verseId: null };
+  try {
+    if (event.data) reminder = { ...reminder, ...event.data.json() };
+  } catch {
+    // Keep the default.
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(reminder.title || 'Reminder', {
+      body: reminder.body ?? undefined,
+      icon: '/icon.svg',
+      badge: '/icon.svg',
+      // So a reminder that is pushed twice — a retry, or two subscriptions on
+      // one device — replaces itself rather than stacking.
+      tag: reminder.verseId ?? reminder.title,
+      data: { verseId: reminder.verseId },
+    }),
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
+  const verseId = event.notification.data?.verseId;
+  const target = verseId ? `/?verse=${verseId}` : '/';
+
+  /*
+   * Focus the tab that is already open rather than opening a second one.
+   *
+   * Someone tapping a reminder wants the app, not another copy of it, and on a
+   * phone a second window is indistinguishable from the first except that it
+   * has lost whatever they were looking at.
+   */
+  event.waitUntil(
+    (async () => {
+      const windows = await self.clients.matchAll({
+        type: 'window',
+        includeUncontrolled: true,
+      });
+
+      for (const client of windows) {
+        if (new URL(client.url).origin !== self.location.origin) continue;
+        await client.focus();
+        if ('navigate' in client) await client.navigate(target);
+        return;
+      }
+
+      await self.clients.openWindow(target);
+    })(),
+  );
+});

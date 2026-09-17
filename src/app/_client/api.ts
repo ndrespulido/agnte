@@ -576,3 +576,30 @@ export interface ErasureView {
 /** Asks for the account to be erased. 202: marked now, removed after the grace window. */
 export const eraseAccount = (): Promise<ErasureView> =>
   authedFetch('/v1/me', { method: 'DELETE' }).then((r) => json<ErasureView>(r));
+
+/* -------------------------------------------------------------------------
+ * Web Push (§8.4).
+ * ---------------------------------------------------------------------- */
+
+/** The VAPID public key, or null when this deployment has push switched off. */
+export const fetchPushKey = (): Promise<string | null> =>
+  authedFetch('/v1/push/key')
+    .then((r) => json<{ publicKey: string | null }>(r))
+    .then((body) => body.publicKey);
+
+export const subscribeToPush = (subscription: {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+}): Promise<void> =>
+  authedFetch('/v1/push/subscriptions', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(subscription),
+  }).then((r) => json<unknown>(r).then(() => undefined));
+
+export const unsubscribeFromPush = (endpoint: string): Promise<void> =>
+  authedFetch('/v1/push/subscriptions', {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ endpoint }),
+  }).then((r) => json<unknown>(r).then(() => undefined));

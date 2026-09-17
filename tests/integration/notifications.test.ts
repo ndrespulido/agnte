@@ -4,6 +4,7 @@ import { resetConfigForTests } from '@/shared/infra/config';
 import { uuidv7 } from '@/shared/kernel';
 import { PrismaNotificationRepository } from '@/modules/notifications/infrastructure/prisma-notification-repository';
 import { PrismaPreferenceRepository } from '@/modules/notifications/infrastructure/prisma-preference-repository';
+import { PrismaPushSubscriptionRepository } from '@/modules/notifications/infrastructure/prisma-push-subscription-repository';
 import { purgeForUser } from '@/modules/notifications';
 import type { ScheduledNotification } from '@/modules/notifications/domain/ports';
 
@@ -49,6 +50,7 @@ describe.skipIf(!DATABASE_URL)('notifications persistence', () => {
     const db = getDatabase()!;
     await db.$executeRawUnsafe('DELETE FROM notifications.scheduled_notification');
     await db.$executeRawUnsafe('DELETE FROM notifications.notification_preference');
+    await db.$executeRawUnsafe('DELETE FROM notifications.push_subscription');
   });
 
   afterEach(() => {
@@ -259,8 +261,125 @@ describe.skipIf(!DATABASE_URL)('notifications persistence', () => {
       version: 0,
     });
 
-    expect(await purgeForUser(userId)).toEqual({ reminders: 2, preferences: 1 });
+    // A push subscription is an address for reaching someone; erasure has to
+    // take it too, or the deployment could still push to their phone.
+    await new PrismaPushSubscriptionRepository().upsert({
+      id: uuidv7(),
+      userId,
+      endpoint: 'https://push.example/purge-me',
+      p256dh:
+        'BL5o0KPDOlRPRwye0AxlHLSY9F3Oqq2aAmOejVmqch-8rYcxgFl8naSZrK5zq15mmpdBumde19vRrhYCSFBHoVM',
+      auth: '5ixp7JUVeDLks8R17y0Qzg',
+      userAgent: null,
+    });
+
+    expect(await purgeForUser(userId)).toEqual({
+      reminders: 2,
+      preferences: 1,
+      pushSubscriptions: 1,
+    });
     expect(await repo.listForUser(userId, 10)).toHaveLength(0);
     expect(await preferences.find(userId)).toBeNull();
+    expect(await new PrismaPushSubscriptionRepository().listForUser(userId)).toHaveLength(
+      0,
+    );
+  });
+});
+
+describe.skipIf(!DATABASE_URL)('push subscriptions', () => {
+  const subscriptions = new PrismaPushSubscriptionRepository();
+
+  const owner = '018f0000-0000-7000-8000-0000000000a1';
+  const other = '018f0000-0000-7000-8000-0000000000a2';
+
+  const record = (over: Record<string, unknown> = {}) => ({
+    id: uuidv7(),
+    userId: owner,
+    endpoint: 'https://push.example/one',
+    p256dh:
+      'BL5o0KPDOlRPRwye0AxlHLSY9F3Oqq2aAmOejVmqch-8rYcxgFl8naSZrK5zq15mmpdBumde19vRrhYCSFBHoVM',
+    auth: '5ixp7JUVeDLks8R17y0Qzg',
+    userAgent: 'a phone',
+    ...over,
+  });
+
+  beforeEach(async () => {
+    await getDatabase()!.$executeRawUnsafe('DELETE FROM notifications.push_subscription');
+  });
+
+  it('round-trips a subscription', async () => {
+    await subscriptions.upsert(record());
+
+    const found = await subscriptions.listForUser(owner);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({
+      endpoint: 'https://push.example/one',
+      userAgent: 'a phone',
+    });
+  });
+
+  /**
+   * A browser re-subscribes on its own schedule and hands back the same
+   * endpoint with fresh keys. Inserting would accumulate rows that all address
+   * one device, so every reminder would be pushed to it several times.
+   */
+  it('updates in place when the same browser re-subscribes', async () => {
+    await subscriptions.upsert(record());
+    await subscriptions.upsert(
+      record({ auth: 'ZZZZZZZZZZZZZZZZZZZZZZ', userAgent: 'same phone' }),
+    );
+
+    const found = await subscriptions.listForUser(owner);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({
+      auth: 'ZZZZZZZZZZZZZZZZZZZZZZ',
+      userAgent: 'same phone',
+    });
+  });
+
+  /**
+   * The same browser signed into a different account gets the same endpoint
+   * back from the push service. Leaving the old owner on it would deliver one
+   * person's reminders to another's device.
+   */
+  it('moves a subscription to whoever last subscribed it', async () => {
+    await subscriptions.upsert(record());
+    await subscriptions.upsert(record({ userId: other }));
+
+    expect(await subscriptions.listForUser(owner)).toHaveLength(0);
+    expect(await subscriptions.listForUser(other)).toHaveLength(1);
+  });
+
+  it('keeps one person from unsubscribing another', async () => {
+    await subscriptions.upsert(record());
+
+    expect(await subscriptions.remove(other, 'https://push.example/one')).toBe(false);
+    expect(await subscriptions.listForUser(owner)).toHaveLength(1);
+
+    expect(await subscriptions.remove(owner, 'https://push.example/one')).toBe(true);
+    expect(await subscriptions.listForUser(owner)).toHaveLength(0);
+  });
+
+  /** A 404/410 from the push service means the endpoint is gone, whoever owns it. */
+  it('forgets a dead endpoint without needing to know the owner', async () => {
+    await subscriptions.upsert(record());
+    expect(await subscriptions.removeByEndpoint('https://push.example/one')).toBe(true);
+    expect(await subscriptions.listForUser(owner)).toHaveLength(0);
+  });
+
+  /**
+   * A subscription is an address for reaching someone. Erasure has to take it,
+   * or the deployment could still push to their phone afterwards.
+   */
+  it('is purged with the account', async () => {
+    await subscriptions.upsert(record());
+    await subscriptions.upsert(record({ endpoint: 'https://push.example/two' }));
+
+    expect(await subscriptions.deleteForUser(owner)).toBe(2);
+    expect(await subscriptions.listForUser(owner)).toHaveLength(0);
+  });
+
+  it('refuses a row with no key material', async () => {
+    await expect(subscriptions.upsert(record({ p256dh: '' }))).rejects.toThrow();
   });
 });
