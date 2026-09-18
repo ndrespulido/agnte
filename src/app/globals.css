@@ -1580,7 +1580,114 @@ button.danger {
   font-size: 0.85rem;
 }
 
-/* Search results: a ranked list, so no date column and no rules between days. */
+/*
+ * The header's actions, side by side.
+ *
+ * `baseline` on the header aligns the date with the word "Menu"; the icon has
+ * no baseline of its own, so the pair is centred against each other here and
+ * the group as a whole keeps the header's alignment.
+ */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.header-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* A thumb target, not a glyph's worth of pixels. The icon stays small; the
+     area around it is what gets pressed on a phone. */
+  width: 2.75rem;
+  height: 2.75rem;
+  margin: -0.75rem -0.5rem -0.75rem 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.header-icon svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.header-icon:focus-visible {
+  outline: var(--hairline) solid var(--color-accent-text);
+  outline-offset: var(--space-xxs);
+  border-radius: var(--radius-sm);
+}
+
+/*
+ * The search box, at the top of its sheet.
+ *
+ * The field and the way out on one line: on a phone the sheet covers the app,
+ * so the only thing between someone and the timeline is this row, and it
+ * should not take a scroll to reach.
+ */
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/*
+ * The same field styling every other input in the app has.
+ *
+ * It sits outside a `.field` label — the box is the whole control here, and a
+ * "What are you looking for" label above a box that says Search is one caption
+ * too many — so the rules have to be repeated rather than inherited. Without
+ * this it renders as a browser default input, which on this page looks like a
+ * piece someone forgot to finish.
+ */
+.search-box input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: var(--text-body);
+  color: var(--color-ink);
+  background: var(--color-paper);
+  border: var(--hairline) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+  min-height: var(--size-min-tap-target);
+}
+
+/* The tag bar, above the results. Wraps rather than scrolls sideways: a
+   horizontal scroller hides its own contents, and these are the shortcuts. */
+.search-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin: var(--space-md) 0;
+}
+
+/*
+ * Here the chips are the control, not an aside.
+ *
+ * On a timeline row a tag is a label that happens to be tappable, so it stays
+ * plain text. In this bar it is the primary thing to press before anything is
+ * typed, and plain text reads as a caption nobody thinks to touch — so it
+ * takes an edge, and the chosen one fills.
+ */
+.search-tags .tag {
+  padding: var(--space-xs) var(--space-sm);
+  border: var(--hairline) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  min-height: var(--size-min-tap-target);
+  display: inline-flex;
+  align-items: center;
+}
+
+.search-tags .tag.chosen {
+  border-color: var(--color-accent-text);
+  background: var(--color-paper);
+  font-weight: 500;
+}
+
+/* Search results: newest first, so no date column and no rules between days. */
 .search-results {
   list-style: none;
   margin: 0;
