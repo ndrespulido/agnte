@@ -179,20 +179,73 @@ describe.skipIf(!DATABASE_URL)('search', () => {
       expect((await search(token, '?q=trip')).body.verses).toHaveLength(1);
     });
 
-    it('ranks a mention in xp above a mere tag name', async () => {
+    /**
+     * Relevance is still computed and still reported — it is simply not what
+     * decides the order any more.
+     *
+     * The dates here are deliberately the wrong way round for ranking: the
+     * better match is the *older* verse, so a result ordered by rank would put
+     * it first. This test used to assert exactly that, and passed for the
+     * wrong reason once the ordering changed — the two rows happened to be
+     * created newest-last.
+     */
+    it('reports a stronger match without letting it jump the queue', async () => {
       const { token } = await signUp('d@example.com');
       const named = await makeTag(token, 'barcelona-trip');
       const plain = await makeTag(token, 'diary');
 
-      await makeVerse(token, { tagIds: [named.id], xp: 'nothing about the city here' });
-      const written = await makeVerse(token, {
+      const strong = await makeVerse(token, {
         tagIds: [plain.id],
-        xp: 'Barcelona was the best part',
+        xp: 'Barcelona, Barcelona, the best part',
+        eventStart: '2024-01-01T00:00:00Z',
+      });
+      const recent = await makeVerse(token, {
+        tagIds: [named.id],
+        xp: 'nothing about the city here',
+        eventStart: '2026-01-01T00:00:00Z',
       });
 
       const { body } = await search(token, '?q=barcelona');
-      expect(body.verses[0]?.id).toBe(written.id);
+
       expect(body.verses).toHaveLength(2);
+      // Newest first, even though the older one matches better.
+      expect(body.verses.map((v) => v.id)).toEqual([recent.id, strong.id]);
+
+      const ranks = body.verses.map((v) => v.rank);
+      expect(ranks[1]).toBeGreaterThan(ranks[0] as number);
+    });
+
+    /**
+     * The change this ordering exists for.
+     *
+     * Searching your own life is not searching a corpus: someone typing
+     * "barcelona" knows what they wrote and wants the most recent one. Ranked
+     * order put a note from years ago above yesterday's with nothing on screen
+     * to explain why.
+     */
+    it('answers newest first', async () => {
+      const { token } = await signUp('newest@example.com');
+      const tag = await makeTag(token, 'diary');
+
+      const oldest = await makeVerse(token, {
+        tagIds: [tag.id],
+        xp: 'barcelona then',
+        eventStart: '2020-05-05T00:00:00Z',
+      });
+      const newest = await makeVerse(token, {
+        tagIds: [tag.id],
+        xp: 'barcelona now',
+        eventStart: '2026-05-05T00:00:00Z',
+      });
+      const middle = await makeVerse(token, {
+        tagIds: [tag.id],
+        xp: 'barcelona between',
+        eventStart: '2023-05-05T00:00:00Z',
+      });
+
+      const { body } = await search(token, '?q=barcelona');
+
+      expect(body.verses.map((v) => v.id)).toEqual([newest.id, middle.id, oldest.id]);
     });
 
     it('is case-insensitive', async () => {
@@ -428,7 +481,7 @@ describe.skipIf(!DATABASE_URL)('search', () => {
   });
 
   describe('paging', () => {
-    it('pages by relevance without repeating a row', async () => {
+    it('pages newest first without repeating a row', async () => {
       const { token } = await signUp('s@example.com');
       const tag = await makeTag(token, 'diary');
 

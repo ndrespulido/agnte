@@ -282,22 +282,20 @@ export async function deleteVerse(id: string, expectedVersion: number): Promise<
 /**
  * Full-text search (§8.2).
  *
- * Ranked, not chronological, which is why it has its own surface rather than
- * being another way to filter the timeline: the timeline's whole shape is a
- * date column you scroll in two directions, and a relevance order has no
- * place in it.
+ * Newest first, not ranked. Searching your own life is not searching a corpus:
+ * someone typing "barcelona" knows what they wrote and wants the most recent
+ * one. The relevance score still comes back, it just does not decide the order.
  *
- * Text only for now. The route also takes `from`, `to`, `ratingAtLeast`,
- * `hasMedia` and tags — none of them surfaced yet, deliberately, so the first
- * version is small enough to judge on screen.
+ * `from`, `to`, `ratingAtLeast` and `hasMedia` are still unsurfaced.
  */
 export const searchVerses = (
   query: string,
-  options: { cursor?: string | null; limit?: number } = {},
+  options: { cursor?: string | null; limit?: number; tagIds?: readonly string[] } = {},
 ): Promise<TimelinePage> => {
   const params = new URLSearchParams({ q: query });
   if (options.limit !== undefined) params.set('limit', String(options.limit));
   if (options.cursor) params.set('cursor', options.cursor);
+  for (const tag of options.tagIds ?? []) params.append('tag', tag);
 
   return authedFetch(`/v1/search?${params.toString()}`).then((r) =>
     json<TimelinePage>(r),

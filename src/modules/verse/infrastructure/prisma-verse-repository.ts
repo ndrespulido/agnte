@@ -353,11 +353,19 @@ export class PrismaVerseRepository
   /**
    * Full-text search (§8.2), with the filters composing.
    *
-   * Ranked by `ts_rank_cd` over the weighted vector, so `xp` beats a property
-   * value beats a tag name. Paged by `(rank, id)` rather than the timeline's
-   * `(position, id)`: search results are ordered by relevance, and reusing the
-   * timeline cursor here would page through a different order than the one the
-   * rows came back in.
+   * **Newest first**, on the same `(timeline_years, id)` axis the timeline
+   * pages by. The relevance score is still computed and still returned, so a
+   * caller can see how well a row matched, but it no longer decides the order.
+   *
+   * It used to. Relevance is the right default for searching a corpus, and the
+   * wrong one for searching your own life: a person looking for "barcelona"
+   * knows what they wrote and wants the most recent one, not whichever mentions
+   * the word most densely. Ranked order also put a note from four years ago
+   * above yesterday's for no reason the screen could explain.
+   *
+   * Sharing the timeline's cursor axis is the other half of that: one ordering
+   * means one pagination, and a cursor that means the same thing on both
+   * surfaces.
    *
    * The query text goes through `websearch_to_tsquery`, which accepts what a
    * person actually types — quoted phrases, `or`, a leading `-` to exclude —
@@ -374,8 +382,9 @@ export class PrismaVerseRepository
     const limit = query.limit + 1;
 
     const cursor = query.cursor ? decodeCursor(query.cursor) : null;
-    // For search the cursor's "years" slot carries the rank of the last row.
-    const afterRank = cursor?.ok ? cursor.value.years : null;
+    // The same slot the timeline's cursor uses, and now the same meaning:
+    // where the last row sat on the shared axis.
+    const afterYears = cursor?.ok ? cursor.value.years : null;
     const afterId = cursor?.ok ? cursor.value.id : null;
 
     const tagFilter = query.tagIds && query.tagIds.length > 0 ? [...query.tagIds] : null;
@@ -409,10 +418,10 @@ export class PrismaVerseRepository
                OR (cardinality(v.media_ids) > 0) = ${query.hasMedia ?? null})
       )
       SELECT * FROM matched  -- the CTE already lists its columns
-      WHERE ${afterRank}::double precision IS NULL
-         OR rank < ${afterRank}
-         OR (rank = ${afterRank} AND id < ${afterId}::uuid)
-      ORDER BY rank DESC, id DESC
+      WHERE ${afterYears}::double precision IS NULL
+         OR timeline_years < ${afterYears}
+         OR (timeline_years = ${afterYears} AND id < ${afterId}::uuid)
+      ORDER BY timeline_years DESC, id DESC
       LIMIT ${limit}
     `;
 
@@ -423,7 +432,7 @@ export class PrismaVerseRepository
 
     const last = page.at(-1);
     const nextCursor =
-      hasMore && last ? encodeCursor({ years: last.rank, id: last.id }) : null;
+      hasMore && last ? encodeCursor({ years: last.timeline_years, id: last.id }) : null;
 
     return {
       items: page.map((row) => ({

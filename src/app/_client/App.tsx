@@ -258,14 +258,54 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
     <>
       <header className="date-header">
         <h1 className="date-label">{dateLabel}</h1>
-        <button
-          type="button"
-          className="quiet sign-out"
-          onClick={() => setMenuOpen(true)}
-          aria-label="Menu"
-        >
-          Menu
-        </button>
+        <div className="header-actions">
+          {/*
+            Search, permanently, beside the menu rather than inside it.
+
+            It is the one action reached often enough to earn a place in a
+            header this deliberately sparse — a menu is where things go when
+            they are occasional, and looking for something is not.
+
+            A glyph rather than the word, because the word next to "Menu"
+            reads as two menus. Drawn inline: one small shape is cheaper than
+            a request, and it inherits `currentColor` so it follows the theme
+            without a second asset for dark mode.
+          */}
+          <button
+            type="button"
+            className="quiet header-icon"
+            onClick={() => setSearching(true)}
+            aria-label="Search"
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+              <circle
+                cx="8.5"
+                cy="8.5"
+                r="5.25"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              />
+              <line
+                x1="12.5"
+                y1="12.5"
+                x2="17"
+                y2="17"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="quiet sign-out"
+            onClick={() => setMenuOpen(true)}
+            aria-label="Menu"
+          >
+            Menu
+          </button>
+        </div>
       </header>
 
       <main className="app-main">
@@ -314,10 +354,6 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
 
       {menuOpen ? (
         <Menu
-          onSearch={() => {
-            setMenuOpen(false);
-            setSearching(true);
-          }}
           onTags={() => {
             setMenuOpen(false);
             setBrowsingTags(true);
