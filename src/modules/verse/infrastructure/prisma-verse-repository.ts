@@ -1,5 +1,7 @@
 import { getDatabase } from '@/shared/infra/database';
+import { constraintName, isUniqueViolation } from '@/shared/infra/postgres-errors';
 import type {
+  CreateVerseOutcome,
   Page,
   SearchHit,
   SearchQuery,
@@ -133,7 +135,30 @@ export class PrismaVerseRepository
    * kept by writing both inside a transaction — one aggregate, one transaction
    * (CLAUDE.md).
    */
-  async create(verse: Verse): Promise<void> {
+  /**
+   * Answers rather than throws when the client's id is already taken.
+   *
+   * The insert is inside the transaction, so a collision rolls back the tag
+   * rows and the search vector with it — catching outside the transaction
+   * would leave the verse's tags written against a verse that does not exist.
+   */
+  async create(verse: Verse): Promise<CreateVerseOutcome> {
+    try {
+      await this.insert(verse);
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+
+      // A verse has only the one unique index. A unique violation naming
+      // anything else is a constraint nobody here knows about, and reporting
+      // it as a taken id would put a friendly message on a bug.
+      if ((constraintName(error) ?? '').includes('pkey')) return { kind: 'id-taken' };
+      throw error;
+    }
+
+    return { kind: 'created' };
+  }
+
+  private async insert(verse: Verse): Promise<void> {
     await requireDatabase().$transaction(async (tx) => {
       await tx.$executeRaw`
         INSERT INTO verse.verse

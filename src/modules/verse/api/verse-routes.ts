@@ -62,7 +62,10 @@ const statusFor = (code: string): number => {
     case VerseErrorCode.TagNotFound:
     case VerseErrorCode.MediaNotFound:
       return 404;
+    // VerseIdTaken is a client-minted id that is already a row: 409 and not
+    // 500, so the offline queue stops replaying it (§8.1) — see `verseIdTaken`.
     case VerseErrorCode.VersionConflict:
+    case VerseErrorCode.VerseIdTaken:
       return 409;
     // 422 rather than 400: the request is well-formed JSON, it just asks for a
     // Verse that cannot exist.

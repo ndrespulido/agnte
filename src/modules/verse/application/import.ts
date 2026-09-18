@@ -366,7 +366,23 @@ export async function importVerses(
       continue;
     }
 
-    await deps.verses.create(verse.value);
+    /*
+     * The id check above is a read, so this is the race it cannot close: two
+     * imports of the same document at once, or a verse written between the
+     * `findById` and here. Reported rather than thrown, because one colliding
+     * row must not abandon an import that is otherwise fine — and rather than
+     * ignored, because counting it as imported would report a number that did
+     * not happen.
+     */
+    const outcome = await deps.verses.create(verse.value);
+    if (outcome.kind === 'id-taken') {
+      rejected.push({
+        what: `verse ${label}`,
+        why: 'Its id was taken while this import was running.',
+      });
+      continue;
+    }
+
     verseCount += 1;
   }
 

@@ -15,6 +15,7 @@ export const VerseErrorCode = {
   MediaNotFound: 'verse.media_not_found',
   TagAlreadyExists: 'verse.tag_already_exists',
   TagIdTaken: 'verse.tag_id_taken',
+  VerseIdTaken: 'verse.verse_id_taken',
   VerseNotFound: 'verse.not_found',
   VisibilityInvalid: 'verse.visibility_invalid',
   RatingOutOfRange: 'verse.rating_out_of_range',
@@ -75,6 +76,25 @@ export const tagIdTaken = (): DomainError =>
   new DomainError(
     VerseErrorCode.TagIdTaken,
     'That tag id already exists. Ids are chosen by the client; mint a fresh one.',
+  );
+
+/**
+ * The same thing for a verse, and reached the same way.
+ *
+ * A verse has no natural key, so this only happens when the id itself is
+ * already a row — the caller's own or someone else's. The message does not say
+ * which, because saying so would confirm the existence of a row the caller
+ * cannot see.
+ *
+ * 409 rather than 500 for the reason `tagIdTaken` gives, which is sharper here
+ * than it looks: the offline queue replays on 5xx and stops on 4xx (§8.1). A
+ * 500 tells a phone to retry a write that can never succeed, forever, with
+ * everything queued behind it stuck.
+ */
+export const verseIdTaken = (): DomainError =>
+  new DomainError(
+    VerseErrorCode.VerseIdTaken,
+    'That verse id already exists. Ids are chosen by the client; mint a fresh one.',
   );
 
 export const tagAlreadyExists = (name: string): DomainError =>

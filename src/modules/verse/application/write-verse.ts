@@ -24,6 +24,7 @@ import {
   mediaNotFound,
   noTags,
   tagNotFound,
+  verseIdTaken,
   versionConflict,
   visibilityInvalid,
 } from '../domain/errors';
@@ -208,7 +209,9 @@ export async function createVerseFor(
   });
   if (!verse.ok) return verse;
 
-  await deps.verses.create(verse.value);
+  const outcome = await deps.verses.create(verse.value);
+  if (outcome.kind === 'id-taken') return err(verseIdTaken());
+
   return ok(verse.value);
 }
 
