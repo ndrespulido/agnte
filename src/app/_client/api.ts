@@ -61,7 +61,7 @@ export function fetchTimeline(options: {
   anchor: Date;
   direction: 'past' | 'future';
   cursor?: string | null;
-  tagIds?: string[];
+  tagIds?: readonly string[];
   limit?: number;
 }): Promise<TimelinePage> {
   const params = new URLSearchParams({
@@ -279,10 +279,30 @@ export async function deleteVerse(id: string, expectedVersion: number): Promise<
   await enqueue({ kind: 'delete-verse', verseId: id, expectedVersion });
 }
 
-export const searchVerses = (query: string): Promise<TimelinePage> =>
-  authedFetch(`/v1/search?q=${encodeURIComponent(query)}`).then((r) =>
+/**
+ * Full-text search (§8.2).
+ *
+ * Ranked, not chronological, which is why it has its own surface rather than
+ * being another way to filter the timeline: the timeline's whole shape is a
+ * date column you scroll in two directions, and a relevance order has no
+ * place in it.
+ *
+ * Text only for now. The route also takes `from`, `to`, `ratingAtLeast`,
+ * `hasMedia` and tags — none of them surfaced yet, deliberately, so the first
+ * version is small enough to judge on screen.
+ */
+export const searchVerses = (
+  query: string,
+  options: { cursor?: string | null; limit?: number } = {},
+): Promise<TimelinePage> => {
+  const params = new URLSearchParams({ q: query });
+  if (options.limit !== undefined) params.set('limit', String(options.limit));
+  if (options.cursor) params.set('cursor', options.cursor);
+
+  return authedFetch(`/v1/search?${params.toString()}`).then((r) =>
     json<TimelinePage>(r),
   );
+};
 
 export interface MediaView {
   id: string;

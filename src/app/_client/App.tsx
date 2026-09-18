@@ -10,6 +10,7 @@ import { Tags } from './Tags';
 import { Dashboard } from './Dashboard';
 import { Menu } from './Menu';
 import { Reminders } from './Reminders';
+import { Search } from './Search';
 import { YourData } from './YourData';
 import {
   completeGoogleSignIn,
@@ -21,6 +22,8 @@ import {
 import { startSync } from './sync';
 import { purgeCaches, registerServiceWorker } from './service-worker';
 import { verseIdFromSearch, withoutVerse } from './deep-link';
+import { toggleFilterTag } from './timeline-filter';
+import { fetchTags, type TagView } from './api';
 
 /**
  * The shell: a glass date header pinned to the top, the timeline beneath it,
@@ -184,7 +187,43 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
    * loaded pages.
    */
   const [menuOpen, setMenuOpen] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [browsingTags, setBrowsingTags] = useState(false);
+
+  /**
+   * The tags the timeline is narrowed to. Empty is the whole timeline.
+   *
+   * Held here rather than in Timeline because the chips that show and clear it
+   * live in the header, above the timeline — two copies of the same set in two
+   * components would drift, and the one the query uses would not be the one on
+   * screen.
+   */
+  const [filterTagIds, setFilterTagIds] = useState<readonly string[]>([]);
+
+  /**
+   * Names for the filtered tags, for the chips and the empty state.
+   *
+   * Loaded once rather than derived from the rows on screen: under a filter
+   * that matches nothing there are no rows to read a label from, and that is
+   * exactly the case where the message has to name the tag.
+   */
+  const [allTags, setAllTags] = useState<TagView[]>([]);
+  useEffect(() => {
+    if (filterTagIds.length === 0) return;
+    let cancelled = false;
+    fetchTags()
+      .then((tags) => {
+        if (!cancelled) setAllTags(tags);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [filterTagIds.length]);
+
+  const filterLabels = filterTagIds.map(
+    (id) => allTags.find((tag) => tag.id === id)?.label ?? 'that tag',
+  );
   const [browsingReminders, setBrowsingReminders] = useState(false);
   const [browsingData, setBrowsingData] = useState(false);
   const [dashboardTagId, setDashboardTagId] = useState<string | null>(null);
@@ -230,13 +269,55 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
       </header>
 
       <main className="app-main">
-        <Timeline onDateChange={onDateChange} anchor={anchor} onOpen={onOpen} />
+        {/*
+          The filter, where it can be seen and undone.
+          
+          Under the header rather than inside a sheet: a timeline silently showing
+          a subset is the worst outcome here, so whatever narrows it has to be
+          visible on the same screen as the rows it is hiding.
+        */}
+        {filterTagIds.length > 0 ? (
+          <div className="filter-bar">
+            {filterTagIds.map((id, index) => (
+              <button
+                key={id}
+                type="button"
+                className="tag chosen"
+                onClick={() => setFilterTagIds((current) => toggleFilterTag(current, id))}
+                aria-label={`Stop filtering by ${filterLabels[index]}`}
+              >
+                {filterLabels[index]} ×
+              </button>
+            ))}
+            <button
+              type="button"
+              className="quiet filter-clear"
+              onClick={() => setFilterTagIds([])}
+            >
+              Clear
+            </button>
+          </div>
+        ) : null}
+        <Timeline
+          onDateChange={onDateChange}
+          anchor={anchor}
+          onOpen={onOpen}
+          tagIds={filterTagIds}
+          tagLabels={filterLabels}
+          onFilterTag={(tagId) =>
+            setFilterTagIds((current) => toggleFilterTag(current, tagId))
+          }
+        />
       </main>
 
       <QuickAdd onAdded={() => setAnchor(new Date())} />
 
       {menuOpen ? (
         <Menu
+          onSearch={() => {
+            setMenuOpen(false);
+            setSearching(true);
+          }}
           onTags={() => {
             setMenuOpen(false);
             setBrowsingTags(true);
@@ -260,6 +341,16 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
 
       {changingPassword ? (
         <ChangePassword onClose={() => setChangingPassword(false)} />
+      ) : null}
+
+      {searching ? (
+        <Search
+          onClose={() => setSearching(false)}
+          onOpenVerse={(verseId) => {
+            setSearching(false);
+            setOpenVerseId(verseId);
+          }}
+        />
       ) : null}
 
       {browsingReminders ? (

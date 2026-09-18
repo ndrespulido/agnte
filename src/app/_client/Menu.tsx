@@ -18,6 +18,7 @@ import { useEffect } from 'react';
  * shows the date, not a toolbar.
  */
 export function Menu({
+  onSearch,
   onTags,
   onReminders,
   onPassword,
@@ -25,6 +26,7 @@ export function Menu({
   onSignOut,
   onClose,
 }: {
+  onSearch: () => void;
   onTags: () => void;
   onReminders: () => void;
   onPassword: () => void;
@@ -50,6 +52,13 @@ export function Menu({
         onClick={(event) => event.stopPropagation()}
       >
         <ul className="menu-rows">
+          {/* First, because it is the one people reach for most once there is
+              enough on the timeline to lose things in. */}
+          <li>
+            <button type="button" className="menu-row" onClick={onSearch}>
+              Search
+            </button>
+          </li>
           <li>
             <button type="button" className="menu-row" onClick={onTags}>
               Tags

@@ -289,6 +289,49 @@ a {
   outline-offset: var(--space-xxs);
 }
 
+/*
+ * The one thing on a row that is not the row.
+ *
+ * `.verse-open` is stretched over the whole row at `z-index: 1` so that a tap
+ * anywhere opens the verse — which also means it swallows every click meant
+ * for something inside. A tag chip is the exception: tapping it filters the
+ * timeline rather than opening the verse, so it has to sit above the overlay
+ * to be reachable at all.
+ *
+ * Found by driving a browser, not by reading: the chips rendered, looked
+ * pressable, and every click landed on the overlay behind them.
+ */
+button.tag {
+  position: relative;
+  z-index: 2;
+
+  /*
+   * A tag button has to look exactly like the span it replaced.
+   *
+   * Making these buttons so they could be tapped gave every tag on every row a
+   * default browser box, which is the one thing the UI direction rules out —
+   * hairline rules rather than boxes. The filter worked and the timeline
+   * stopped looking like itself.
+   */
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--color-accent-text);
+  cursor: pointer;
+}
+
+button.tag:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+button.tag:focus-visible {
+  outline: var(--hairline) solid var(--color-accent-text);
+  outline-offset: var(--space-xxs);
+}
+
 .verse-time {
   font-variant-numeric: tabular-nums;
   font-size: var(--text-small);
@@ -666,6 +709,38 @@ a {
 .tag-picker .tag.chosen {
   border-color: var(--color-accent-text);
   background: var(--color-paper);
+}
+
+/*
+ * A tag that is currently filtering the timeline, wherever it appears.
+ *
+ * Until this existed, `.chosen` was scoped to the add sheet's picker, so the
+ * chip on a row and the chip in the filter bar rendered identically to an
+ * inactive one — the filter worked and nothing on screen said which tag was
+ * doing it. Caught by looking at a screenshot, not by a test.
+ *
+ * The accent on the text as well as the border, because a border alone at this
+ * size is close to invisible against a hairline-ruled page.
+ */
+/*
+ * A tag that is currently filtering the timeline.
+ *
+ * An underline rather than a border or a fill: the row chips carry no box, so
+ * a box is the wrong vocabulary, and it has to read at a glance which of three
+ * tags on a row is the one doing the filtering.
+ */
+.verse-tags .tag.chosen {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-weight: 500;
+}
+
+/* In the bar they are the subject rather than an aside, so they take an edge. */
+.filter-bar .tag.chosen {
+  padding: var(--space-xxs) var(--space-sm);
+  border: var(--hairline) solid var(--color-accent-text);
+  border-radius: var(--radius-sm);
+  font-weight: 500;
 }
 
 /* The picked photos in the add sheet, before they are a verse. */
@@ -1474,4 +1549,89 @@ button.danger {
 
 .data-section.danger h3 {
   color: var(--failed);
+}
+
+/*
+ * The tag filter, pinned under the header.
+ *
+ * Outside the scrolling main so it cannot scroll away: a timeline quietly
+ * showing a subset is the worst outcome of this feature, so what narrows it
+ * has to stay on screen next to the rows it is hiding.
+ */
+.filter-bar {
+  position: sticky;
+  /* The same clearance `.app-main` pads by, so this sits directly under the
+     fixed date header rather than sliding beneath it. */
+  top: calc(var(--space-xxxl) + var(--space-xl));
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  margin: 0 calc(var(--space-lg) * -1) var(--space-md);
+  padding: var(--space-sm) var(--space-lg);
+  background: var(--color-glass);
+  backdrop-filter: blur(20px);
+  border-bottom: var(--hairline) solid var(--color-glass-edge);
+}
+
+.filter-clear {
+  margin-left: auto;
+  font-size: 0.85rem;
+}
+
+/* Search results: a ranked list, so no date column and no rules between days. */
+.search-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.search-results li {
+  border-bottom: var(--hairline) solid var(--color-rule);
+}
+
+.search-result {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xxs);
+  width: 100%;
+  margin: 0;
+  padding: var(--space-sm) 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.search-when {
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  /* A token, not a literal: a hardcoded grey here would stay light in dark
+     mode, which is the whole reason these exist. */
+  color: var(--color-ink-soft);
+}
+
+.search-text {
+  /* Two lines, then cut: a long note must not push the next result off screen. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.search-result:hover .search-text {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.search-result:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+  border-radius: 2px;
 }
