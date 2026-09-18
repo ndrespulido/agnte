@@ -28,7 +28,7 @@ Everything below is a one-time setup step. Per-deploy infrastructure lives in
 | Task callback secret | Shared secret for `/internal/*` (by set-secrets.sh) | 4.9 | ☑ |
 | Retention sweep | Daily Cloud Scheduler job → `/internal/prune` | 4.10 | ☑ ran 200 on 2026-09-15 |
 | Reminder tick | Cloud Scheduler job → `/internal/notifications/tick` | 7.x | ☑ delivered end to end 2026-09-17 |
-| R2 CORS | Bucket CORS rule so the browser's presigned upload isn't blocked | 4.11 | ☐ |
+| R2 CORS | Bucket CORS rule so the browser's presigned upload isn't blocked | 4.11 | ☑ set 2026-09-18, production + preview wildcard |
 | Custom domain | Cloud Run Domain Mapping, Cloudflare-proxied, `APP_BASE_URL` pinned | 4.12 | ☑ |
 | Place suggestions | Places API key for the location field, production only | 6.2 | ☐ key not valid |
 | Web Push | VAPID keypair (by set-secrets.sh), production only | 7.2 | ☐ never run against the live project |

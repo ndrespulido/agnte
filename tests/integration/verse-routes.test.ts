@@ -328,6 +328,54 @@ describe.skipIf(!DATABASE_URL)('verse routes', () => {
       expect(body.id).toBe(id);
     });
 
+    /**
+     * The same id twice under *different* idempotency keys.
+     *
+     * Not the ordinary retry below — that one replays and never reaches the
+     * database. This is the case the key cannot cover: a second write naming
+     * an id that is already a row. Ids are client-minted (§2), so this is a
+     * request the API can receive, and it used to surface as a raw Postgres
+     * unique violation and a 500.
+     *
+     * 500 is the wrong answer in a way that matters here, because the offline
+     * queue replays on 5xx and gives up on 4xx (§8.1): a 500 means the phone
+     * retries a write that can never succeed, forever, with everything queued
+     * behind it stuck. Tags already answer 409 for exactly this.
+     */
+    it('refuses a client id that is already a row, without a 500', async () => {
+      const { token } = await signUp('id-taken@example.com');
+      const tag = await makeTag(token, 'movies');
+      const id = uuidv7();
+
+      const first = await post(token, { tagIds: [tag.id], id });
+      expect(first.status).toBe(201);
+
+      const second = await post(token, { tagIds: [tag.id], id });
+
+      expect(second.status).toBe(409);
+      expect((await second.json()) as { error: { code: string } }).toMatchObject({
+        error: { code: 'verse.verse_id_taken' },
+      });
+    });
+
+    /** Someone else's id collides the same way, and must not confirm whose. */
+    it('refuses another owner\u2019s id the same way', async () => {
+      const mine = await signUp('id-mine@example.com');
+      const theirs = await signUp('id-theirs@example.com');
+      const myTag = await makeTag(mine.token, 'movies');
+      const theirTag = await makeTag(theirs.token, 'movies');
+      const id = uuidv7();
+
+      expect((await post(theirs.token, { tagIds: [theirTag.id], id })).status).toBe(201);
+
+      const response = await post(mine.token, { tagIds: [myTag.id], id });
+
+      expect(response.status).toBe(409);
+      expect((await response.json()) as { error: { code: string } }).toMatchObject({
+        error: { code: 'verse.verse_id_taken' },
+      });
+    });
+
     it('replays an idempotent retry instead of creating twice', async () => {
       const { token } = await signUp('j@example.com');
       const tag = await makeTag(token, 'movies');

@@ -199,6 +199,42 @@ describe.skipIf(!DATABASE_URL)('verse repositories against real Postgres', () =>
       expect(await verses.findById(verse.id)).toBe(null);
     });
 
+    /**
+     * A taken id is an answer, not a throw — ids are client-minted (§2), so
+     * this is a request the API can receive rather than a bug. The test above
+     * is the other half of the same rule: a *foreign key* violation still
+     * throws, because nothing about it is a thing a caller can be told.
+     */
+    it('reports a taken id rather than throwing', async () => {
+      const ownerId = owner();
+      const tag = newTag(ownerId, 'movies');
+      await tags.create(tag);
+      const verse = newVerse(ownerId, [tag.id]);
+
+      expect(await verses.create(verse)).toEqual({ kind: 'created' });
+
+      const second = newVerse(ownerId, [tag.id]);
+      expect(await verses.create({ ...second, id: verse.id })).toEqual({
+        kind: 'id-taken',
+      });
+    });
+
+    /** And the collision leaves nothing half-written behind it. */
+    it('writes no tag rows for a verse it refused', async () => {
+      const ownerId = owner();
+      const first = newTag(ownerId, 'movies');
+      const second = newTag(ownerId, 'books');
+      await tags.create(first);
+      await tags.create(second);
+      const verse = newVerse(ownerId, [first.id]);
+
+      await verses.create(verse);
+      await verses.create({ ...newVerse(ownerId, [second.id]), id: verse.id });
+
+      // Still the original's tag, not the refused write's.
+      expect((await verses.findById(verse.id))?.tagIds).toEqual([first.id]);
+    });
+
     it('updates only on a matching version, and rewrites the tags', async () => {
       const ownerId = owner();
       const a = newTag(ownerId, 'aaa');

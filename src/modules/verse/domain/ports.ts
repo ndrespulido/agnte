@@ -41,6 +41,19 @@ export interface TagRepository {
   delete(id: string, expectedVersion: number): Promise<boolean>;
 }
 
+/**
+ * Why a verse insert did not happen, when it did not.
+ *
+ * An outcome rather than a thrown error for the same reason `CreateTagOutcome`
+ * is one: a client-minted id colliding is a thing the API can be asked to do
+ * (§2), not a bug, and the caller has to be able to answer 409 rather than
+ * letting a driver error become a 500.
+ */
+export type CreateVerseOutcome =
+  | { kind: 'created' }
+  /** The client-minted id is already a row. See `verseIdTaken`. */
+  | { kind: 'id-taken' };
+
 export type CreateTagOutcome =
   | { kind: 'created' }
   | { kind: 'name-taken' }
@@ -110,7 +123,7 @@ export interface SearchHit {
 
 export interface VerseRepository {
   findById(id: string): Promise<Verse | null>;
-  create(verse: Verse): Promise<void>;
+  create(verse: Verse): Promise<CreateVerseOutcome>;
   update(verse: Verse, expectedVersion: number): Promise<boolean>;
   delete(id: string, expectedVersion: number): Promise<boolean>;
 
