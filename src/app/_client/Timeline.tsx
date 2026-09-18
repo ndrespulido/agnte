@@ -26,6 +26,7 @@ import {
   timelinePosition,
 } from './format';
 import { withPending, type TimelineVerse } from './pending';
+import { emptyMessage, showsCatalogue } from './timeline-filter';
 import {
   discard,
   outboxSnapshot,
@@ -84,11 +85,26 @@ export function Timeline({
   onDateChange,
   anchor,
   onOpen,
+  tagIds = [],
+  tagLabels = [],
+  onFilterTag,
 }: {
   /** Reports the date of whatever is under the sticky header. */
   onDateChange: (label: string) => void;
   /** A row was tapped: the shell opens the detail view over the timeline. */
   onOpen: (verseId: string) => void;
+  /**
+   * Narrow the timeline to these tags. Empty is the whole timeline.
+   *
+   * Owned by the shell rather than here, for the same reason `anchor` is: the
+   * chips that show and clear the filter live above this component, and two
+   * copies of the same set would drift.
+   */
+  tagIds?: readonly string[];
+  /** What those tags are called, for the empty state. */
+  tagLabels?: readonly string[];
+  /** A tag on a row was tapped. */
+  onFilterTag?: (tagId: string) => void;
   /**
    * The point the timeline runs back from. Owned by the shell rather than
    * computed here: a `new Date()` recomputed on render would move mid-scroll
@@ -107,6 +123,38 @@ export function Timeline({
    * (nearest first) and the column runs descending, so the reversal is the one
    * place that fact lives.
    */
+  /**
+   * A stable identity for the filter, so effects can depend on it.
+   *
+   * `tagIds` is a fresh array on every render of the shell, so depending on it
+   * directly re-runs the first-page fetch forever. The joined string changes
+   * only when the filter actually does.
+   */
+  const filterKey = tagIds.join(',');
+
+  /**
+   * The same filter, as a reference that only changes when the filter does.
+   *
+   * The shell passes a fresh array on every render, so depending on `tagIds`
+   * directly re-runs every fetch on every render — a refetch loop rather than
+   * a filter. Rebuilding it from the joined key gives the effects below a
+   * dependency that is both stable and honest, rather than a suppressed lint
+   * rule hiding a real one.
+   */
+  const tags = useMemo(() => (filterKey === '' ? [] : filterKey.split(',')), [filterKey]);
+
+  /**
+   * Whether the shared catalogue belongs on screen at all right now.
+   *
+   * Derived rather than cleared on filter change, and that distinction is the
+   * bug this fixes: guarding only the *loader* left whatever had already been
+   * fetched sitting under the filter, so narrowing to `.flight` still showed
+   * the moon landing. A render-time gate cannot be got wrong that way, and it
+   * also means clearing the filter brings the catalogue straight back rather
+   * than refetching it.
+   */
+  const withCatalogue = showsCatalogue(tags);
+
   const [past, setPast] = useState<VerseView[]>([]);
   const [future, setFuture] = useState<VerseView[]>([]);
   const [pastCursor, setPastCursor] = useState<string | null>(null);
@@ -131,8 +179,20 @@ export function Timeline({
     let cancelled = false;
 
     Promise.all([
-      fetchTimeline({ anchor, direction: 'past', cursor: null, limit: PAGE }),
-      fetchTimeline({ anchor, direction: 'future', cursor: null, limit: PAGE }),
+      fetchTimeline({
+        anchor,
+        direction: 'past',
+        cursor: null,
+        limit: PAGE,
+        tagIds: tags,
+      }),
+      fetchTimeline({
+        anchor,
+        direction: 'future',
+        cursor: null,
+        limit: PAGE,
+        tagIds: tags,
+      }),
     ])
       .then(([back, forward]) => {
         if (cancelled) return;
@@ -159,7 +219,9 @@ export function Timeline({
     return () => {
       cancelled = true;
     };
-  }, [anchor]);
+    // `key` and not the array itself: a new `[]` every render would re-run this
+    // on every render, which is a refetch loop rather than a filter.
+  }, [anchor, tags]);
 
   /**
    * How much scroll height the next render has to make up for.
@@ -234,7 +296,9 @@ export function Timeline({
   const inFlight = useRef(false);
 
   const loadCatalogue = useCallback(async () => {
-    if (catalogueDone || inFlight.current) return;
+    // Never under a filter — the catalogue is nobody's data and carries none of
+    // anyone's tags (timeline-filter.ts).
+    if (!withCatalogue || catalogueDone || inFlight.current) return;
 
     inFlight.current = true;
     setLoading(true);
@@ -254,12 +318,13 @@ export function Timeline({
       inFlight.current = false;
       setLoading(false);
     }
-  }, [catalogueCursor, catalogueDone]);
+  }, [catalogueCursor, catalogueDone, withCatalogue]);
 
   const loadPast = useCallback(async () => {
     // Past first, then history. The catalogue is what comes after a life, not
-    // instead of one.
-    if (pastCursor === null) return loadCatalogue();
+    // instead of one — and under a filter there is no "after", because the
+    // catalogue is not part of what was filtered.
+    if (pastCursor === null) return withCatalogue ? loadCatalogue() : undefined;
 
     setLoading(true);
     try {
@@ -268,6 +333,7 @@ export function Timeline({
         direction: 'past',
         cursor: pastCursor,
         limit: PAGE,
+        tagIds: tags,
       });
       // Appended below the fold — nothing moves, so no anchoring needed.
       setPast((current) => [...current, ...page.verses]);
@@ -279,7 +345,7 @@ export function Timeline({
     } finally {
       setLoading(false);
     }
-  }, [anchor, pastCursor, loadCatalogue]);
+  }, [anchor, pastCursor, loadCatalogue, tags, withCatalogue]);
 
   const loadFuture = useCallback(async () => {
     if (futureCursor === null) return;
@@ -291,6 +357,7 @@ export function Timeline({
         direction: 'future',
         cursor: futureCursor,
         limit: PAGE,
+        tagIds: tags,
       });
 
       // Measured here rather than in the layout effect: by the time that runs
@@ -308,7 +375,7 @@ export function Timeline({
     } finally {
       setLoading(false);
     }
-  }, [anchor, futureCursor]);
+  }, [anchor, futureCursor, tags]);
 
   /**
    * The column, top to bottom: farthest future first, then today, then back
@@ -385,12 +452,12 @@ export function Timeline({
   const anchors = useMemo(
     () => [
       ...sections.map((section) => ({ key: section.key, label: section.label })),
-      ...catalogue.map((event) => ({
+      ...(withCatalogue ? catalogue : []).map((event) => ({
         key: event.id,
         label: deepTimeLabel(event.timelineYears),
       })),
     ],
-    [sections, catalogue],
+    [sections, catalogue, withCatalogue],
   );
 
   // Report whatever is currently under the header.
@@ -462,7 +529,7 @@ export function Timeline({
     const observers = [
       // Only truly finished once the catalogue is too — `loadPast` hands over
       // to it when a person's own past runs out.
-      pastDone && catalogueDone
+      pastDone && (!withCatalogue || catalogueDone)
         ? undefined
         : watch(pastSentinel.current, () => void loadPast()),
       futureDone ? undefined : watch(futureSentinel.current, () => void loadFuture()),
@@ -472,6 +539,7 @@ export function Timeline({
       for (const observer of observers) observer?.disconnect();
     };
   }, [
+    withCatalogue,
     pastCursor,
     futureCursor,
     pastDone,
@@ -543,11 +611,7 @@ export function Timeline({
   }
 
   if (!loading && verses.length === 0) {
-    return (
-      <p className="notice">
-        Nothing on the timeline yet. Add the first verse with the button below.
-      </p>
-    );
+    return <p className="notice">{emptyMessage(tagIds, tagLabels)}</p>;
   }
 
   return (
@@ -591,7 +655,13 @@ export function Timeline({
 
             <ul className="verses">
               {section.verses.map((verse) => (
-                <VerseRow key={verse.id} verse={verse} onOpen={onOpen} />
+                <VerseRow
+                  key={verse.id}
+                  verse={verse}
+                  onOpen={onOpen}
+                  tagIds={tagIds}
+                  {...(onFilterTag ? { onFilterTag } : {})}
+                />
               ))}
             </ul>
           </section>
@@ -604,7 +674,7 @@ export function Timeline({
 
       <div ref={pastSentinel} aria-hidden="true" />
 
-      {catalogue.length > 0 ? (
+      {withCatalogue && catalogue.length > 0 ? (
         <section className="catalogue" aria-label="Before your own record">
           {/*
             The seam. Worth marking rather than letting the scroll slide from
@@ -638,7 +708,7 @@ export function Timeline({
       ) : null}
 
       {loading ? <p className="notice">Loading…</p> : null}
-      {catalogueDone && catalogue.length > 0 ? (
+      {withCatalogue && catalogueDone && catalogue.length > 0 ? (
         <p className="notice end">That is the beginning.</p>
       ) : null}
     </div>
@@ -682,9 +752,14 @@ const PENDING_LABEL = {
 function VerseRow({
   verse,
   onOpen,
+  tagIds = [],
+  onFilterTag,
 }: {
   verse: TimelineVerse;
   onOpen: (verseId: string) => void;
+  /** Which tags the timeline is currently narrowed to, so the chips can say so. */
+  tagIds?: readonly string[];
+  onFilterTag?: (tagId: string) => void;
 }) {
   const placement = placementOf(verse);
   const time = timeLabel(placement);
@@ -770,11 +845,36 @@ function VerseRow({
         ) : null}
 
         <p className="verse-tags">
-          {verse.tags.map((tag) => (
-            <span key={tag.id} className="tag">
-              {tag.label}
-            </span>
-          ))}
+          {/*
+            Tapping a tag filters the timeline to it. This is the entry point
+            the feature lives or dies by: a filter reachable only from a menu
+            is one nobody finds, and the tag is already sitting there naming
+            exactly what someone wants more of.
+
+            A plain span when there is no handler, rather than a dead button —
+            the detail view reuses this row shape and has nothing to filter.
+          */}
+          {verse.tags.map((tag) =>
+            onFilterTag ? (
+              <button
+                key={tag.id}
+                type="button"
+                className={tagIds.includes(tag.id) ? 'tag chosen' : 'tag'}
+                aria-pressed={tagIds.includes(tag.id)}
+                onClick={(event) => {
+                  // The row itself opens the verse; the tag must not do both.
+                  event.stopPropagation();
+                  onFilterTag(tag.id);
+                }}
+              >
+                {tag.label}
+              </button>
+            ) : (
+              <span key={tag.id} className="tag">
+                {tag.label}
+              </span>
+            ),
+          )}
           {verse.rating !== null ? (
             <span className="rating">{verse.rating}/10</span>
           ) : null}
