@@ -12,9 +12,13 @@
 # Usage:
 #   PROJECT_ID=agnte-prod ./infra/set-r2-cors.sh
 #
-#   Once a custom domain fronts the service (docs/operations.md §2k), add it
-#   too — Cloud Run's own URL stays reachable, but the browser's Origin on a
-#   presigned upload is whatever the person actually loaded the app from:
+#   A custom domain fronting the service (docs/operations.md §2k) is found
+#   automatically, by reading APP_BASE_URL back off the deployed service. It
+#   matters because Cloud Run's own URL staying reachable is not the point:
+#   the browser's Origin on a presigned upload is whatever the person actually
+#   loaded the app from, and if that origin is missing every upload is blocked.
+#
+#   Pass it explicitly to set a domain up before it has been deployed:
 #   PROJECT_ID=agnte-prod APP_BASE_URL=https://agnte.app ./infra/set-r2-cors.sh
 #
 # Prerequisites: gcloud installed and `gcloud auth login` done, R2 already
@@ -95,8 +99,38 @@ else
   note "Preview service does not exist yet — skipping."
 fi
 
-if [[ -n "${APP_BASE_URL:-}" ]]; then
+# Read back from the deployed service when it was not passed in.
+#
+# This is the trap the script used to set: a custom domain fronts the app,
+# everyone loads it from there, and a CORS rule listing only the run.app URLs
+# blocks every upload — while the script reports success, because it did
+# exactly what it was told. The domain is not a thing to remember. The deploy
+# already puts APP_BASE_URL on the service (deploy-production.yml), so the
+# answer is sitting in the environment the app is actually running with.
+#
+# An explicit APP_BASE_URL still wins, for setting a domain up before it is
+# deployed.
+if [[ -z "${APP_BASE_URL:-}" && -n "${PROD_URL}" ]]; then
+  DEPLOYED_BASE_URL="$(gcloud run services describe agnte \
+    --region="${REGION}" --project="${PROJECT_ID}" \
+    --format='value(spec.template.spec.containers[0].env.filter("name", "APP_BASE_URL").extract("value").flatten())' \
+    2>/dev/null || true)"
+
+  # Only when it is a *different* origin. The service's APP_BASE_URL is its own
+  # run.app URL until a domain is mapped, and listing that twice is noise.
+  if [[ -n "${DEPLOYED_BASE_URL}" && "${DEPLOYED_BASE_URL}" != "${PROD_URL}" ]]; then
+    APP_BASE_URL="${DEPLOYED_BASE_URL}"
+    note "Custom domain, read back from the service: ${APP_BASE_URL}"
+  fi
+elif [[ -n "${APP_BASE_URL:-}" ]]; then
   note "Custom domain: ${APP_BASE_URL}"
+fi
+
+# Said out loud, because the failure it warns about is silent: the upload is
+# blocked in the browser and nothing server-side ever hears about it.
+if [[ -z "${APP_BASE_URL:-}" ]]; then
+  note "No custom domain found. If one fronts the app, uploads from it will"
+  note "be blocked — re-run with APP_BASE_URL=https://your-domain."
 fi
 
 if [[ -z "${PROD_URL}" && -z "${PREVIEW_URL}" && -z "${APP_BASE_URL:-}" ]]; then

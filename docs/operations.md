@@ -28,7 +28,7 @@ Everything below is a one-time setup step. Per-deploy infrastructure lives in
 | Task callback secret | Shared secret for `/internal/*` (by set-secrets.sh) | 4.9 | ☑ |
 | Retention sweep | Daily Cloud Scheduler job → `/internal/prune` | 4.10 | ☑ ran 200 on 2026-09-15 |
 | Reminder tick | Cloud Scheduler job → `/internal/notifications/tick` | 7.x | ☑ delivered end to end 2026-09-17 |
-| R2 CORS | Bucket CORS rule so the browser's presigned upload isn't blocked | 4.11 | ☑ set 2026-09-18, production + preview wildcard |
+| R2 CORS | Bucket CORS rule so the browser's presigned upload isn't blocked | 4.11 | ☐ set 2026-09-18 without the custom domain — uploads from agnte.app still blocked |
 | Custom domain | Cloud Run Domain Mapping, Cloudflare-proxied, `APP_BASE_URL` pinned | 4.12 | ☑ |
 | Place suggestions | Places API key for the location field, production only | 6.2 | ☐ key not valid |
 | Web Push | VAPID keypair (by set-secrets.sh), production only | 7.2 | ☐ never run against the live project |
@@ -959,6 +959,16 @@ Run it after the production (and, if it exists yet, preview) Cloud Run service
 has been deployed at least once — it reads their URLs back the same way the
 deploy workflows do. Safe to re-run: it replaces the whole CORS rule rather
 than adding to it, which is what you want after adding a custom domain.
+
+**The custom domain is the one that actually matters**, and it is found
+automatically now — read back from `APP_BASE_URL` on the deployed service.
+Cloud Run's own URL staying in the rule is beside the point: the Origin a
+browser sends on a presigned upload is whatever the person loaded the app
+from, so a rule listing only the run.app URLs blocks every upload from
+`agnte.app` while reporting success.
+
+That is not hypothetical — it is how this row came to be ticked and uploads
+still broken. The script now says so out loud when it finds no domain.
 
 ### Why this exists
 
