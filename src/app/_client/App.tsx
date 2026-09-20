@@ -34,15 +34,6 @@ import { fetchTags, type TagView } from './api';
  * every open. 'unknown' during server rendering is what lets this render
  * nothing until the browser has actually answered.
  */
-/**
- * How many tags the filter bar offers at once.
- *
- * It sits above the timeline, and past a couple of rows of chips the thing
- * someone came to read is off screen. The rest stay reachable by typing, since
- * a tag's name is in the search vector (§8.2).
- */
-const TAG_BAR_LIMIT = 12;
-
 export function App({ googleEnabled }: { googleEnabled: boolean }) {
   const session = useSyncExternalStore(
     subscribeToSession,
@@ -383,11 +374,13 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
                 there is no way to narrow to it. This is that way. It is not on
                 screen permanently because the timeline is the thing to read,
                 and a wall of chips above it is not.
+
+                All of them, uncapped: the bar is two rows that scroll sideways
+                (globals.css), so a long list costs width rather than height.
               */}
               {searching
                 ? allTags
                     .filter((tag) => !filterTagIds.includes(tag.id))
-                    .slice(0, TAG_BAR_LIMIT)
                     .map((tag) => (
                       <button
                         key={tag.id}

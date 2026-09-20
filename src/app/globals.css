@@ -1650,12 +1650,49 @@ button.danger {
   min-height: var(--size-min-tap-target);
 }
 
-/* The chips wrap under it; `filter-bar` itself is a column now. */
+/*
+ * The chips: two rows, scrolling sideways.
+ *
+ * Wrapping was the obvious thing and it was wrong — a tag list grows without
+ * limit, and a bar that wraps grows down the screen until the timeline it is
+ * filtering is off the bottom of it. Two rows is a fixed budget; the overflow
+ * goes sideways, where there is nothing else to push out of the way.
+ *
+ * `grid-auto-flow: column` with two rows fills top-then-bottom and starts a
+ * new column, so reading order runs left to right across the pairs. Chosen
+ * tags are sorted to the front in App.tsx, which puts them in the first
+ * column — a filter can never scroll out of the bar it was set in.
+ *
+ * It also retires the cap that was here before: with somewhere for the extra
+ * chips to go, every tag is reachable rather than the first twelve.
+ */
 .filter-chips {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(2, auto);
+  grid-auto-columns: max-content;
+  justify-content: start;
   align-items: center;
   gap: var(--space-xs);
+
+  overflow-x: auto;
+  /* Without this a sideways flick at either end scrolls the page, and on iOS
+     it triggers the back gesture — losing the filter and the screen with it. */
+  overscroll-behavior-x: contain;
+  /* Room for the scrollbar where one is drawn, so it does not sit on the
+     bottom row of chips. */
+  padding-bottom: var(--space-xxs);
+  scrollbar-width: thin;
+}
+
+/*
+ * One row when there is only one row's worth.
+ *
+ * `repeat(2, auto)` reserves both tracks whether or not the second is used, so
+ * a bar with three tags in it would keep an empty row's height under them.
+ */
+.filter-chips:not(:has(> :nth-child(3))) {
+  grid-template-rows: auto;
 }
 
 /*
