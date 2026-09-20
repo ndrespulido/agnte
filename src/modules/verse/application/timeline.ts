@@ -22,6 +22,8 @@ export interface TimelineInput {
   cursor?: string | null | undefined;
   tagIds?: readonly string[] | undefined;
   matchAllTags?: boolean | undefined;
+  /** Free text, narrowing the page the way tags do (§8.2). */
+  text?: string | null | undefined;
 }
 
 export interface TimelineDeps {
@@ -68,6 +70,7 @@ export async function timelinePage(
     ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
     ...(input.tagIds === undefined ? {} : { tagIds: input.tagIds }),
     ...(input.matchAllTags === undefined ? {} : { matchAllTags: input.matchAllTags }),
+    ...(input.text === undefined ? {} : { text: input.text }),
   });
 
   const items = await visibleMany(page.items, input.viewerId, deps);

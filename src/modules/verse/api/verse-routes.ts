@@ -19,6 +19,7 @@ import {
   MAX_TIMELINE_LIMIT,
   timelinePage,
 } from '../application/timeline';
+import { MAX_SEARCH_TEXT_LENGTH } from '../application/search';
 import { VerseErrorCode } from '../domain/errors';
 import { verseBody } from './verse-body';
 
@@ -194,6 +195,25 @@ export async function handleTimeline(request: Request): Promise<Response> {
   // repeated parameters cost nothing.
   const tagIds = params.getAll('tag');
 
+  /*
+   * Free text, narrowing the same timeline (§8.2).
+   *
+   * Capped at the same length search caps at: a query longer than that is
+   * either a paste or an attempt to make the parser work, and both deserve
+   * the same answer in both places.
+   */
+  const text = params.get('q');
+  if (text !== null && text.length > MAX_SEARCH_TEXT_LENGTH) {
+    return jsonError(
+      new DomainError(
+        'invalid_query',
+        `q must be ${MAX_SEARCH_TEXT_LENGTH} characters or fewer.`,
+      ),
+      400,
+      rateLimitHeaders(decision),
+    );
+  }
+
   const result = await timelinePage(
     {
       ownerId: auth.userId,
@@ -204,6 +224,7 @@ export async function handleTimeline(request: Request): Promise<Response> {
       cursor: params.get('cursor'),
       ...(tagIds.length > 0 ? { tagIds } : {}),
       matchAllTags: params.get('match') === 'all',
+      ...(text === null ? {} : { text }),
     },
     {
       verses: new PrismaVerseRepository(),

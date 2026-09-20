@@ -256,18 +256,82 @@ describe.skipIf(!DATABASE_URL)('search', () => {
       expect((await search(token, '?q=barcelona')).body.verses).toHaveLength(1);
     });
 
-    it('handles a quoted phrase and an exclusion', async () => {
+    /**
+     * This used to assert phrase search *and* exclusion, and it counted rather
+     * than naming a row — so when the query moved off `websearch_to_tsquery`
+     * it still passed while `red -car` returned the car. Both now name the
+     * verse they expect.
+     *
+     * Phrase search is gone with `websearch_to_tsquery`; `"red bus"` is now
+     * `red AND bus`, which finds the same row here and would also find a verse
+     * saying "the bus, then the red one".
+     */
+    it('excludes a word written with a leading dash', async () => {
       const { token } = await signUp('f@example.com');
       const tag = await makeTag(token, 'diary');
-      await makeVerse(token, { tagIds: [tag.id], xp: 'the red bus', id: undefined });
+      const bus = await makeVerse(token, { tagIds: [tag.id], xp: 'the red bus' });
       await makeVerse(token, { tagIds: [tag.id], xp: 'a red car' });
 
-      expect(
-        (await search(token, `?q=${encodeURIComponent('"red bus"')}`)).body.verses,
-      ).toHaveLength(1);
-      expect(
-        (await search(token, `?q=${encodeURIComponent('red -car')}`)).body.verses,
-      ).toHaveLength(1);
+      const { body } = await search(token, `?q=${encodeURIComponent('red -car')}`);
+
+      expect(body.verses.map((v) => v.id)).toEqual([bus.id]);
+    });
+
+    it('treats a quoted phrase as its words, since phrase search is gone', async () => {
+      const { token } = await signUp('phrase@example.com');
+      const tag = await makeTag(token, 'diary');
+      const bus = await makeVerse(token, { tagIds: [tag.id], xp: 'the red bus' });
+      await makeVerse(token, { tagIds: [tag.id], xp: 'a red car' });
+
+      const { body } = await search(token, `?q=${encodeURIComponent('"red bus"')}`);
+
+      expect(body.verses.map((v) => v.id)).toEqual([bus.id]);
+    });
+
+    /**
+     * The bug this change exists for.
+     *
+     * The field filters as you type, so a whole-word matcher answers "nothing"
+     * to every keystroke until the last letter lands — which is exactly what
+     * "I type text that is in the verse and get no results" looks like.
+     */
+    it('finds a word from the part of it already typed', async () => {
+      const { token } = await signUp('prefix@example.com');
+      const tag = await makeTag(token, 'diary');
+      const verse = await makeVerse(token, {
+        tagIds: [tag.id],
+        xp: 'Dinner at Tickets, the olives were the best part',
+      });
+
+      for (const typed of ['o', 'ol', 'oliv', 'olive', 'olives']) {
+        const { body } = await search(token, `?q=${encodeURIComponent(typed)}`);
+        expect(
+          body.verses.map((v) => v.id),
+          `typed ${typed}`,
+        ).toContain(verse.id);
+      }
+    });
+
+    /**
+     * Accents, folded on both sides by `unaccent` (the search_unaccent
+     * migration). On a timeline written partly in Spanish, typing "manana" for
+     * "mañana" is how most people type it.
+     */
+    it('finds accented text typed without the accents, and the reverse', async () => {
+      const { token } = await signUp('accents@example.com');
+      const tag = await makeTag(token, 'diary');
+      const verse = await makeVerse(token, {
+        tagIds: [tag.id],
+        xp: 'Café con leche mañana en León',
+      });
+
+      for (const typed of ['cafe', 'café', 'manana', 'mañana', 'leon', 'León']) {
+        const { body } = await search(token, `?q=${encodeURIComponent(typed)}`);
+        expect(
+          body.verses.map((v) => v.id),
+          `typed ${typed}`,
+        ).toContain(verse.id);
+      }
     });
 
     it('does not blow up on syntax a person might type', async () => {

@@ -464,7 +464,32 @@ Postgres full-text, no external search service.
   it's tempting to write a fast bespoke query — don't.
 - Filters compose with search: tags (AND/OR), date range, rating, has-media.
 - Language config per user locale (`spanish`, `french`, `english`) — relevant
-  given the app is multilingual.
+  given the app is multilingual. **Still unbuilt**, and the reason "olives"
+  does not find "olive".
+
+> **The query is built here, not by Postgres.** `websearch_to_tsquery` is
+> forgiving and never throws, which is why it was chosen — and it cannot do
+> prefix matching. That became the whole problem once the field filtered as you
+> type: every keystroke before the last is a partial word, so a whole-word
+> matcher answers "nothing" until the final letter lands, and the search reads
+> as broken when it is merely strict.
+>
+> `to_tsquery` does prefixes and *throws* on malformed input, so nothing a
+> person types may reach it as syntax. `domain/search-query.ts` builds the
+> query out of lexemes it extracted itself: punctuation is dropped rather than
+> escaped, because escaping is a thing to get subtly wrong. The last term gets
+> `:*`; the earlier ones are finished words and stay exact.
+>
+> `-word` exclusion is kept by hand. Phrase search is not: `"red bus"` is now
+> `red AND bus`.
+>
+> **Accents are folded on both sides** by `unaccent` (migration
+> `search_unaccent`), so `cafe` finds `Café` and `manana` finds `mañana`. On a
+> timeline written partly in Spanish that is not an edge case. It is *not*
+> stemming, which is still the open item above.
+>
+> **The timeline takes `q` too**, sharing this one predicate, so the two
+> surfaces cannot disagree about what a word matches — see §8.2's UI note.
 
 ### 8.3 Image handling
 

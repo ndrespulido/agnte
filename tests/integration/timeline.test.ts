@@ -516,6 +516,128 @@ describe.skipIf(!DATABASE_URL)('timeline', () => {
       expect(body.verses.map((v) => v.xp)).toEqual(['mine']);
     });
   });
+
+  /**
+   * Free text narrowing the timeline itself, rather than a separate results
+   * screen (§8.2). The same predicate `search` uses, so the two cannot
+   * disagree about what a word matches.
+   */
+  describe('the text filter', () => {
+    const seed = async (token: string) => {
+      const tag = await makeTag(token, 'diary');
+      const olives = await makeVerse(token, {
+        tagIds: [tag.id],
+        xp: 'Dinner at Tickets, the olives',
+        eventStart: '2025-01-01T00:00:00Z',
+      });
+      const ramen = await makeVerse(token, {
+        tagIds: [tag.id],
+        xp: 'Ramen near the station',
+        eventStart: '2025-02-01T00:00:00Z',
+      });
+      return { tag, olives, ramen };
+    };
+
+    it('narrows the page to what matches', async () => {
+      const { token } = await signUp('tq@example.com');
+      const { olives } = await seed(token);
+
+      const { body } = await timeline(token, '?anchor=2026-01-01T00:00:00Z&q=olives');
+
+      expect(body.verses.map((v) => v.id)).toEqual([olives.id]);
+    });
+
+    /** The reported bug, on the surface it now lives on. */
+    it('matches the word still being typed', async () => {
+      const { token } = await signUp('tq2@example.com');
+      const { olives } = await seed(token);
+
+      for (const typed of ['o', 'oliv', 'olives']) {
+        const { body } = await timeline(
+          token,
+          `?anchor=2026-01-01T00:00:00Z&q=${encodeURIComponent(typed)}`,
+        );
+        expect(
+          body.verses.map((v) => v.id),
+          `typed ${typed}`,
+        ).toEqual([olives.id]);
+      }
+    });
+
+    it('composes with the tag filter', async () => {
+      const { token } = await signUp('tq3@example.com');
+      const { tag, olives } = await seed(token);
+      const other = await makeTag(token, 'work');
+      await makeVerse(token, {
+        tagIds: [other.id],
+        xp: 'olives at the desk',
+        eventStart: '2025-03-01T00:00:00Z',
+      });
+
+      const { body } = await timeline(
+        token,
+        `?anchor=2026-01-01T00:00:00Z&q=olives&tag=${tag.id}`,
+      );
+
+      expect(body.verses.map((v) => v.id)).toEqual([olives.id]);
+    });
+
+    it('still runs both directions from the anchor', async () => {
+      const { token } = await signUp('tq4@example.com');
+      const tag = await makeTag(token, 'diary');
+      const ahead = await makeVerse(token, {
+        tagIds: [tag.id],
+        xp: 'olives next year',
+        eventStart: '2027-01-01T00:00:00Z',
+      });
+
+      const { body } = await timeline(
+        token,
+        '?anchor=2026-01-01T00:00:00Z&direction=future&q=olives',
+      );
+
+      expect(body.verses.map((v) => v.id)).toEqual([ahead.id]);
+    });
+
+    /**
+     * Text with no words in it is a filter that matches nothing, not an absent
+     * filter. Widening back to the whole timeline would read as the filter
+     * having been silently ignored.
+     */
+    it('matches nothing for text that holds no words', async () => {
+      const { token } = await signUp('tq5@example.com');
+      await seed(token);
+
+      const { body } = await timeline(
+        token,
+        `?anchor=2026-01-01T00:00:00Z&q=${encodeURIComponent('&&&')}`,
+      );
+
+      expect(body.verses).toEqual([]);
+    });
+
+    it('is no filter at all when q is absent or blank', async () => {
+      const { token } = await signUp('tq6@example.com');
+      await seed(token);
+
+      expect(
+        (await timeline(token, '?anchor=2026-01-01T00:00:00Z')).body.verses,
+      ).toHaveLength(2);
+      expect(
+        (await timeline(token, '?anchor=2026-01-01T00:00:00Z&q=')).body.verses,
+      ).toHaveLength(2);
+    });
+
+    it('refuses a query longer than search allows', async () => {
+      const { token } = await signUp('tq7@example.com');
+      const { status } = await timeline(
+        token,
+        `?anchor=2026-01-01T00:00:00Z&q=${'a'.repeat(201)}`,
+      );
+
+      expect(status).toBe(400);
+    });
+  });
 });
 
 describe('the timeline scale', () => {
