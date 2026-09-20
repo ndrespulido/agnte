@@ -22,9 +22,13 @@
  * press is answering a question they did not ask. Worse, it reads as though
  * those events were somehow tagged.
  *
+ * The same goes for a text filter, and for the same reason: someone searching
+ * "olives" is asking what they wrote, and the moon landing is not an answer.
+ *
  * Unfiltered, it stays exactly as it was.
  */
-export const showsCatalogue = (tagIds: readonly string[]): boolean => tagIds.length === 0;
+export const showsCatalogue = (tagIds: readonly string[], text = ''): boolean =>
+  tagIds.length === 0 && text.trim() === '';
 
 /**
  * Adds or removes a tag from the filter.
@@ -54,13 +58,19 @@ export function toggleFilterTag(
 export function emptyMessage(
   tagIds: readonly string[],
   labels: readonly string[],
+  text = '',
 ): string {
-  if (tagIds.length === 0) {
+  const typed = text.trim();
+
+  if (tagIds.length === 0 && typed === '') {
     return 'Nothing on the timeline yet. Add the first verse with the button below.';
   }
 
   // Named rather than counted: "Nothing under 2 tags" makes someone go back and
   // look at the chips to find out which two.
   const named = labels.join(' and ');
+
+  if (typed !== '' && named !== '') return `Nothing under ${named} matches “${typed}”.`;
+  if (typed !== '') return `Nothing matches “${typed}”.`;
   return named === '' ? 'Nothing filed under that tag.' : `Nothing filed under ${named}.`;
 }

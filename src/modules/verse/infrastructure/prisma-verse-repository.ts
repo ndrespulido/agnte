@@ -11,6 +11,7 @@ import type {
   VerseRepository,
 } from '../domain/ports';
 import { decodeCursor, encodeCursor, timelineYears } from '../domain/timeline';
+import { toTsQuery } from '../domain/search-query';
 import type { Tag, Vertical } from '../domain/tag';
 import type { Verse } from '../domain/verse';
 import type { Visibility } from '../domain/visibility';
@@ -288,6 +289,25 @@ export class PrismaVerseRepository
     const tagFilter = query.tagIds && query.tagIds.length > 0 ? [...query.tagIds] : null;
     const requireAll = query.matchAllTags === true && tagFilter !== null;
 
+    /*
+     * The text filter, as a nullable parameter rather than a second query.
+     *
+     * `@@` against a null tsquery is null, not false, so the predicate has to
+     * be written as "no filter OR it matches" — the same shape the tag filter
+     * already uses here. Building the tsquery through the domain means the
+     * timeline and `search` agree about what a word matches, which they would
+     * not if this grew its own `websearch_to_tsquery` call.
+     */
+    const built = query.text ? toTsQuery(query.text) : null;
+
+    // Text that held no words at all (`&&&`) is a filter that matches nothing,
+    // not an absent filter — otherwise it silently widens to the whole
+    // timeline, which reads as the filter having been ignored.
+    if (query.text && query.text.trim() !== '' && built === null) {
+      return { items: [], nextCursor: null };
+    }
+    const tsquery = built?.tsquery ?? null;
+
     const rows =
       query.direction === 'past'
         ? await requireDatabase().$queryRaw<VerseRow[]>`
@@ -309,6 +329,8 @@ export class PrismaVerseRepository
                 SELECT count(DISTINCT vt.tag_id) FROM verse.verse_tag vt
                 WHERE vt.verse_id = v.id AND vt.tag_id = ANY(${tagFilter}::uuid[])
               ) = ${tagFilter === null ? 0 : tagFilter.length})
+              AND (${tsquery}::text IS NULL
+                   OR v.search_vector @@ to_tsquery('simple', unaccent(${tsquery})))
             ORDER BY v.timeline_years DESC, v.id DESC
             LIMIT ${limit}
           `
@@ -331,6 +353,8 @@ export class PrismaVerseRepository
                 SELECT count(DISTINCT vt.tag_id) FROM verse.verse_tag vt
                 WHERE vt.verse_id = v.id AND vt.tag_id = ANY(${tagFilter}::uuid[])
               ) = ${tagFilter === null ? 0 : tagFilter.length})
+              AND (${tsquery}::text IS NULL
+                   OR v.search_vector @@ to_tsquery('simple', unaccent(${tsquery})))
             ORDER BY v.timeline_years ASC, v.id ASC
             LIMIT ${limit}
           `;
@@ -381,6 +405,21 @@ export class PrismaVerseRepository
   async search(query: SearchQuery): Promise<Page<SearchHit>> {
     const limit = query.limit + 1;
 
+    /*
+     * Built in the domain, never handed the raw text.
+     *
+     * `to_tsquery` does the prefix matching the search field needs and throws
+     * on malformed input; `domain/search-query.ts` exists so that what reaches
+     * it is a string this codebase assembled out of lexemes, with nothing the
+     * person typed surviving as syntax.
+     *
+     * Null means the text held no words at all — `&&&`. That matches nothing
+     * rather than erroring, which is also what it looks like on screen.
+     */
+    const built = toTsQuery(query.text);
+    if (built === null) return { items: [], nextCursor: null };
+    const tsquery = built.tsquery;
+
     const cursor = query.cursor ? decodeCursor(query.cursor) : null;
     // The same slot the timeline's cursor uses, and now the same meaning:
     // where the last row sat on the shared axis.
@@ -397,7 +436,7 @@ export class PrismaVerseRepository
                    v.timeline_years, v.created_at, v.updated_at, v.version,
                ts_rank_cd(v.search_vector, q.query) AS rank
         FROM verse.verse v,
-             websearch_to_tsquery('simple', ${query.text}) AS q(query)
+             to_tsquery('simple', unaccent(${tsquery})) AS q(query)
         WHERE v.owner_id = ${query.ownerId}::uuid
           AND v.search_vector @@ q.query
           AND (${tagFilter}::uuid[] IS NULL OR EXISTS (
@@ -567,25 +606,29 @@ async function refreshSearch(
   await tx.$executeRaw`
     UPDATE verse.verse v
     SET search_vector =
-      setweight(to_tsvector('simple', coalesce(v.xp, '')), 'A') ||
+      setweight(to_tsvector('simple', unaccent(coalesce(v.xp, ''))), 'A') ||
       setweight(
         to_tsvector(
           'simple',
-          coalesce((SELECT string_agg(value, ' ') FROM jsonb_each_text(v.properties)), '')
+          unaccent(
+            coalesce((SELECT string_agg(value, ' ') FROM jsonb_each_text(v.properties)), '')
+          )
         ),
         'B'
       ) ||
       setweight(
         to_tsvector(
           'simple',
-          coalesce(
-            (
-              SELECT string_agg(replace(t.name, '-', ' '), ' ')
-              FROM verse.verse_tag vt
-              JOIN verse.tag t ON t.id = vt.tag_id
-              WHERE vt.verse_id = v.id
-            ),
-            ''
+          unaccent(
+            coalesce(
+              (
+                SELECT string_agg(replace(t.name, '-', ' '), ' ')
+                FROM verse.verse_tag vt
+                JOIN verse.tag t ON t.id = vt.tag_id
+                WHERE vt.verse_id = v.id
+              ),
+              ''
+            )
           )
         ),
         'C'

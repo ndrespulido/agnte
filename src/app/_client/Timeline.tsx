@@ -87,6 +87,7 @@ export function Timeline({
   onOpen,
   tagIds = [],
   tagLabels = [],
+  text = '',
   onFilterTag,
 }: {
   /** Reports the date of whatever is under the sticky header. */
@@ -103,6 +104,8 @@ export function Timeline({
   tagIds?: readonly string[];
   /** What those tags are called, for the empty state. */
   tagLabels?: readonly string[];
+  /** Free text, narrowing the same timeline (§8.2). Blank is no filter. */
+  text?: string;
   /** A tag on a row was tapped. */
   onFilterTag?: (tagId: string) => void;
   /**
@@ -144,6 +147,20 @@ export function Timeline({
   const tags = useMemo(() => (filterKey === '' ? [] : filterKey.split(',')), [filterKey]);
 
   /**
+   * The text filter, a beat behind what is being typed.
+   *
+   * The field lives in the shell so it keeps focus across refetches; the
+   * debounce lives here, next to the fetching it protects. Without it every
+   * keystroke is a timeline query, and the rate limiter would answer before
+   * the word was finished.
+   */
+  const [settledText, setSettledText] = useState(text);
+  useEffect(() => {
+    const timer = setTimeout(() => setSettledText(text), 250);
+    return () => clearTimeout(timer);
+  }, [text]);
+
+  /**
    * Whether the shared catalogue belongs on screen at all right now.
    *
    * Derived rather than cleared on filter change, and that distinction is the
@@ -153,7 +170,7 @@ export function Timeline({
    * also means clearing the filter brings the catalogue straight back rather
    * than refetching it.
    */
-  const withCatalogue = showsCatalogue(tags);
+  const withCatalogue = showsCatalogue(tags, settledText);
 
   const [past, setPast] = useState<VerseView[]>([]);
   const [future, setFuture] = useState<VerseView[]>([]);
@@ -185,6 +202,7 @@ export function Timeline({
         cursor: null,
         limit: PAGE,
         tagIds: tags,
+        text: settledText,
       }),
       fetchTimeline({
         anchor,
@@ -192,6 +210,7 @@ export function Timeline({
         cursor: null,
         limit: PAGE,
         tagIds: tags,
+        text: settledText,
       }),
     ])
       .then(([back, forward]) => {
@@ -221,7 +240,7 @@ export function Timeline({
     };
     // `key` and not the array itself: a new `[]` every render would re-run this
     // on every render, which is a refetch loop rather than a filter.
-  }, [anchor, tags]);
+  }, [anchor, tags, settledText]);
 
   /**
    * How much scroll height the next render has to make up for.
@@ -334,6 +353,7 @@ export function Timeline({
         cursor: pastCursor,
         limit: PAGE,
         tagIds: tags,
+        text: settledText,
       });
       // Appended below the fold — nothing moves, so no anchoring needed.
       setPast((current) => [...current, ...page.verses]);
@@ -345,7 +365,7 @@ export function Timeline({
     } finally {
       setLoading(false);
     }
-  }, [anchor, pastCursor, loadCatalogue, tags, withCatalogue]);
+  }, [anchor, pastCursor, loadCatalogue, tags, withCatalogue, settledText]);
 
   const loadFuture = useCallback(async () => {
     if (futureCursor === null) return;
@@ -358,6 +378,7 @@ export function Timeline({
         cursor: futureCursor,
         limit: PAGE,
         tagIds: tags,
+        text: settledText,
       });
 
       // Measured here rather than in the layout effect: by the time that runs
@@ -375,7 +396,7 @@ export function Timeline({
     } finally {
       setLoading(false);
     }
-  }, [anchor, futureCursor, tags]);
+  }, [anchor, futureCursor, tags, settledText]);
 
   /**
    * The column, top to bottom: farthest future first, then today, then back
@@ -465,6 +486,22 @@ export function Timeline({
   useEffect(() => {
     const visible = new Set<string>();
 
+    /**
+     * Whether anything has been reported since this set of sections appeared.
+     *
+     * A filtered timeline can be shorter than the band the observer watches,
+     * so *no* section is ever "under the header" and the header keeps whatever
+     * it said before the filter — a date with nothing on screen to match it.
+     * That is precisely the kind of quietly-wrong the sticky header exists to
+     * avoid, and it only shows up once a filter can make the list short.
+     *
+     * So the first callback after the sections change falls back to the
+     * topmost one. After that the observer is authoritative again: between two
+     * headings nothing is in the band and the header should hold its value
+     * rather than snapping back to the top.
+     */
+    let reported = false;
+
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
@@ -478,10 +515,13 @@ export function Timeline({
         // the first *entry* instead would depend on callback order, which is
         // not the document order and drifts as you scroll fast.
         const ordered = anchors.map((a) => a.key).filter((key) => visible.has(key));
-        const current = ordered[0];
+        const current = ordered[0] ?? (reported ? undefined : anchors[0]?.key);
         if (current) {
           const anchor = anchors.find((a) => a.key === current);
-          if (anchor) onDateChange(anchor.label);
+          if (anchor) {
+            reported = true;
+            onDateChange(anchor.label);
+          }
         }
       },
       {
@@ -611,7 +651,7 @@ export function Timeline({
   }
 
   if (!loading && verses.length === 0) {
-    return <p className="notice">{emptyMessage(tagIds, tagLabels)}</p>;
+    return <p className="notice">{emptyMessage(tagIds, tagLabels, settledText)}</p>;
   }
 
   return (

@@ -62,6 +62,8 @@ export function fetchTimeline(options: {
   direction: 'past' | 'future';
   cursor?: string | null;
   tagIds?: readonly string[];
+  /** Free text, narrowing the same timeline (§8.2). */
+  text?: string | null;
   limit?: number;
 }): Promise<TimelinePage> {
   const params = new URLSearchParams({
@@ -71,6 +73,7 @@ export function fetchTimeline(options: {
   });
   if (options.cursor) params.set('cursor', options.cursor);
   for (const tag of options.tagIds ?? []) params.append('tag', tag);
+  if (options.text) params.set('q', options.text);
 
   return authedFetch(`/v1/timeline?${params.toString()}`).then((r) =>
     json<TimelinePage>(r),

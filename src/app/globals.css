@@ -735,7 +735,18 @@ button.tag:focus-visible {
   font-weight: 500;
 }
 
-/* In the bar they are the subject rather than an aside, so they take an edge. */
+/*
+ * In the bar the chips are the control, not an aside, so they take an edge —
+ * the same reasoning as the search sheet's bar before it moved here.
+ */
+.filter-bar .tag {
+  padding: var(--space-xxs) var(--space-sm);
+  border: var(--hairline) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+}
+
 .filter-bar .tag.chosen {
   padding: var(--space-xxs) var(--space-sm);
   border: var(--hairline) solid var(--color-accent-text);
@@ -1565,9 +1576,9 @@ button.danger {
   top: calc(var(--space-xxxl) + var(--space-xl));
   z-index: 1;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-xs);
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-sm);
   margin: 0 calc(var(--space-lg) * -1) var(--space-md);
   padding: var(--space-sm) var(--space-lg);
   background: var(--color-glass);
@@ -1576,7 +1587,7 @@ button.danger {
 }
 
 .filter-clear {
-  margin-left: auto;
+  align-self: flex-end;
   font-size: 0.85rem;
 }
 
@@ -1621,16 +1632,67 @@ button.danger {
 }
 
 /*
- * The search box, at the top of its sheet.
+ * The text field, in the filter bar.
  *
- * The field and the way out on one line: on a phone the sheet covers the app,
- * so the only thing between someone and the timeline is this row, and it
- * should not take a scroll to reach.
+ * Full width and on its own line above the chips: it is the thing being typed
+ * into, and sharing a row with a wrapping set of tags would move it down the
+ * screen as tags were added.
  */
-.search-box {
-  display: flex;
+.filter-search {
+  width: 100%;
+  font: inherit;
+  font-size: var(--text-body);
+  color: var(--color-ink);
+  background: var(--color-paper);
+  border: var(--hairline) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+  min-height: var(--size-min-tap-target);
+}
+
+/*
+ * The chips: two rows, scrolling sideways.
+ *
+ * Wrapping was the obvious thing and it was wrong — a tag list grows without
+ * limit, and a bar that wraps grows down the screen until the timeline it is
+ * filtering is off the bottom of it. Two rows is a fixed budget; the overflow
+ * goes sideways, where there is nothing else to push out of the way.
+ *
+ * `grid-auto-flow: column` with two rows fills top-then-bottom and starts a
+ * new column, so reading order runs left to right across the pairs. Chosen
+ * tags are sorted to the front in App.tsx, which puts them in the first
+ * column — a filter can never scroll out of the bar it was set in.
+ *
+ * It also retires the cap that was here before: with somewhere for the extra
+ * chips to go, every tag is reachable rather than the first twelve.
+ */
+.filter-chips {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(2, auto);
+  grid-auto-columns: max-content;
+  justify-content: start;
   align-items: center;
-  gap: var(--space-sm);
+  gap: var(--space-xs);
+
+  overflow-x: auto;
+  /* Without this a sideways flick at either end scrolls the page, and on iOS
+     it triggers the back gesture — losing the filter and the screen with it. */
+  overscroll-behavior-x: contain;
+  /* Room for the scrollbar where one is drawn, so it does not sit on the
+     bottom row of chips. */
+  padding-bottom: var(--space-xxs);
+  scrollbar-width: thin;
+}
+
+/*
+ * One row when there is only one row's worth.
+ *
+ * `repeat(2, auto)` reserves both tracks whether or not the second is used, so
+ * a bar with three tags in it would keep an empty row's height under them.
+ */
+.filter-chips:not(:has(> :nth-child(3))) {
+  grid-template-rows: auto;
 }
 
 /*
@@ -1642,27 +1704,9 @@ button.danger {
  * this it renders as a browser default input, which on this page looks like a
  * piece someone forgot to finish.
  */
-.search-box input {
-  flex: 1;
-  min-width: 0;
-  font: inherit;
-  font-size: var(--text-body);
-  color: var(--color-ink);
-  background: var(--color-paper);
-  border: var(--hairline) solid var(--color-rule);
-  border-radius: var(--radius-sm);
-  padding: var(--space-sm);
-  min-height: var(--size-min-tap-target);
-}
 
 /* The tag bar, above the results. Wraps rather than scrolls sideways: a
    horizontal scroller hides its own contents, and these are the shortcuts. */
-.search-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-sm);
-  margin: var(--space-md) 0;
-}
 
 /*
  * Here the chips are the control, not an aside.
@@ -1672,20 +1716,6 @@ button.danger {
  * typed, and plain text reads as a caption nobody thinks to touch — so it
  * takes an edge, and the chosen one fills.
  */
-.search-tags .tag {
-  padding: var(--space-xs) var(--space-sm);
-  border: var(--hairline) solid var(--color-rule);
-  border-radius: var(--radius-sm);
-  min-height: var(--size-min-tap-target);
-  display: inline-flex;
-  align-items: center;
-}
-
-.search-tags .tag.chosen {
-  border-color: var(--color-accent-text);
-  background: var(--color-paper);
-  font-weight: 500;
-}
 
 /* Search results: newest first, so no date column and no rules between days. */
 .search-results {

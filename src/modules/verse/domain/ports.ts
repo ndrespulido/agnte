@@ -98,6 +98,13 @@ export interface TimelineQuery {
   readonly tagIds?: readonly string[];
   /** All of the given tags rather than any of them. */
   readonly matchAllTags?: boolean;
+  /**
+   * Free text, narrowing the timeline the way tags do (§8.2).
+   *
+   * The same predicate `search` uses, so the timeline and the search endpoint
+   * cannot disagree about what a word matches. Absent or blank is no filter.
+   */
+  readonly text?: string | null;
 }
 
 export interface SearchQuery {

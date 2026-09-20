@@ -10,7 +10,6 @@ import { Tags } from './Tags';
 import { Dashboard } from './Dashboard';
 import { Menu } from './Menu';
 import { Reminders } from './Reminders';
-import { Search } from './Search';
 import { YourData } from './YourData';
 import {
   completeGoogleSignIn,
@@ -187,7 +186,6 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
    * loaded pages.
    */
   const [menuOpen, setMenuOpen] = useState(false);
-  const [searching, setSearching] = useState(false);
   const [browsingTags, setBrowsingTags] = useState(false);
 
   /**
@@ -201,6 +199,18 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
   const [filterTagIds, setFilterTagIds] = useState<readonly string[]>([]);
 
   /**
+   * The text filter, and whether its field is on screen.
+   *
+   * Two pieces of state rather than one: closing the field clears the text, but
+   * text with the field hidden would be a timeline silently narrowed by
+   * something invisible — the worst outcome this whole bar exists to prevent.
+   * So the field is shown whenever there is text, and clearing happens on the
+   * way out.
+   */
+  const [searching, setSearching] = useState(false);
+  const [filterText, setFilterText] = useState('');
+
+  /**
    * Names for the filtered tags, for the chips and the empty state.
    *
    * Loaded once rather than derived from the rows on screen: under a filter
@@ -209,17 +219,19 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
    */
   const [allTags, setAllTags] = useState<TagView[]>([]);
   useEffect(() => {
-    if (filterTagIds.length === 0) return;
+    if (filterTagIds.length === 0 && !searching) return;
     let cancelled = false;
     fetchTags()
       .then((tags) => {
         if (!cancelled) setAllTags(tags);
       })
+      // Silent: the bar is a convenience, and a failure to list tags must not
+      // stop someone typing.
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [filterTagIds.length]);
+  }, [filterTagIds.length, searching]);
 
   const filterLabels = filterTagIds.map(
     (id) => allTags.find((tag) => tag.id === id)?.label ?? 'that tag',
@@ -274,8 +286,16 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
           <button
             type="button"
             className="quiet header-icon"
-            onClick={() => setSearching(true)}
+            onClick={() =>
+              setSearching((open) => {
+                // Closing clears, so the timeline is never narrowed by text
+                // that has nowhere on screen to be seen.
+                if (open) setFilterText('');
+                return !open;
+              })
+            }
             aria-label="Search"
+            aria-expanded={searching}
           >
             <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
               <circle
@@ -311,31 +331,83 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
       <main className="app-main">
         {/*
           The filter, where it can be seen and undone.
-          
-          Under the header rather than inside a sheet: a timeline silently showing
-          a subset is the worst outcome here, so whatever narrows it has to be
-          visible on the same screen as the rows it is hiding.
+
+          Under the header rather than inside a sheet: a timeline silently
+          showing a subset is the worst outcome here, so whatever narrows it —
+          text or tags — has to be visible on the same screen as the rows it is
+          hiding, and removable from there.
         */}
-        {filterTagIds.length > 0 ? (
+        {searching || filterTagIds.length > 0 ? (
           <div className="filter-bar">
-            {filterTagIds.map((id, index) => (
+            {searching ? (
+              <input
+                type="search"
+                className="filter-search"
+                value={filterText}
+                onChange={(event) => setFilterText(event.target.value)}
+                placeholder="Search the timeline"
+                aria-label="Search the timeline"
+                autoFocus
+              />
+            ) : null}
+
+            <div className="filter-chips">
+              {filterTagIds.map((id, index) => (
+                <button
+                  key={id}
+                  type="button"
+                  className="tag chosen"
+                  onClick={() =>
+                    setFilterTagIds((current) => toggleFilterTag(current, id))
+                  }
+                  aria-label={`Stop filtering by ${filterLabels[index]}`}
+                >
+                  {filterLabels[index]} ×
+                </button>
+              ))}
+
+              {/*
+                The rest of the tags, offered only while searching.
+
+                Filtering by tapping a tag on a row only reaches tags you can
+                already see — if you have never scrolled to a `.dentist` verse
+                there is no way to narrow to it. This is that way. It is not on
+                screen permanently because the timeline is the thing to read,
+                and a wall of chips above it is not.
+
+                All of them, uncapped: the bar is two rows that scroll sideways
+                (globals.css), so a long list costs width rather than height.
+              */}
+              {searching
+                ? allTags
+                    .filter((tag) => !filterTagIds.includes(tag.id))
+                    .map((tag) => (
+                      <button
+                        key={tag.id}
+                        type="button"
+                        className="tag"
+                        onClick={() =>
+                          setFilterTagIds((current) => toggleFilterTag(current, tag.id))
+                        }
+                      >
+                        {tag.label}
+                      </button>
+                    ))
+                : null}
+            </div>
+
+            {filterTagIds.length > 0 || filterText !== '' ? (
               <button
-                key={id}
                 type="button"
-                className="tag chosen"
-                onClick={() => setFilterTagIds((current) => toggleFilterTag(current, id))}
-                aria-label={`Stop filtering by ${filterLabels[index]}`}
+                className="quiet filter-clear"
+                onClick={() => {
+                  setFilterTagIds([]);
+                  setFilterText('');
+                }}
               >
-                {filterLabels[index]} ×
+                Clear
               </button>
-            ))}
-            <button
-              type="button"
-              className="quiet filter-clear"
-              onClick={() => setFilterTagIds([])}
-            >
-              Clear
-            </button>
+            ) : null}
           </div>
         ) : null}
         <Timeline
@@ -344,6 +416,7 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
           onOpen={onOpen}
           tagIds={filterTagIds}
           tagLabels={filterLabels}
+          text={filterText}
           onFilterTag={(tagId) =>
             setFilterTagIds((current) => toggleFilterTag(current, tagId))
           }
@@ -377,16 +450,6 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
 
       {changingPassword ? (
         <ChangePassword onClose={() => setChangingPassword(false)} />
-      ) : null}
-
-      {searching ? (
-        <Search
-          onClose={() => setSearching(false)}
-          onOpenVerse={(verseId) => {
-            setSearching(false);
-            setOpenVerseId(verseId);
-          }}
-        />
       ) : null}
 
       {browsingReminders ? (
