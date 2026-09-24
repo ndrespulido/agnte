@@ -1,153 +1,97 @@
 import { describe, expect, it } from 'vitest';
-import { searchTerms, toTsQuery } from '@/modules/verse/domain/search-query';
+import { likePattern, searchTermsOf } from '@/modules/verse/domain/search-query';
 
 /**
- * The function standing between a text field and a query language.
+ * Turning typed text into substrings.
  *
- * `to_tsquery` throws on malformed input, and a thrown query is a 500. The
- * whole point of this module is that nothing a person types ever reaches it as
- * syntax — so most of what is below is about punctuation, and the last block
- * is the one that matters: junk in, no operators out.
+ * Much smaller than the tsquery builder it replaced, because a substring
+ * search has no syntax to parse — which was the point. What is left is the
+ * splitting rule, exclusion, and making sure a person's own `%` stays a `%`.
  */
 
-describe('searchTerms', () => {
-  it('splits on whitespace', () => {
-    expect(searchTerms('dinner with friends')).toEqual(['dinner', 'with', 'friends']);
-  });
-
-  it('lowercases, because the stored vector is lowercase', () => {
-    expect(searchTerms('Barcelona')).toEqual(['barcelona']);
-  });
-
-  /** Accented and non-Latin text is words, not punctuation. */
-  it('keeps letters from any script', () => {
-    expect(searchTerms('café mañana')).toEqual(['café', 'mañana']);
-    expect(searchTerms('日本 ramen')).toEqual(['日本', 'ramen']);
-  });
-
-  it('keeps digits', () => {
-    expect(searchTerms('flight BA2748')).toEqual(['flight', 'ba2748']);
-  });
-
-  /** Punctuation separates rather than joining: `a&b` is two words. */
-  it('treats every operator character as a separator', () => {
-    expect(searchTerms('a&b')).toEqual(['a', 'b']);
-    expect(searchTerms('a|b')).toEqual(['a', 'b']);
-    expect(searchTerms("tickets' olives")).toEqual(['tickets', 'olives']);
-    expect(searchTerms('one-two')).toEqual(['one', 'two']);
-  });
-
-  it('is empty for text with no words in it', () => {
-    expect(searchTerms('')).toEqual([]);
-    expect(searchTerms('   ')).toEqual([]);
-    expect(searchTerms('&&& ||| !!!')).toEqual([]);
-  });
-});
-
-describe('toTsQuery', () => {
+describe('searchTermsOf', () => {
   it('is nothing when there is nothing to ask', () => {
-    expect(toTsQuery('')).toBeNull();
-    expect(toTsQuery('  ')).toBeNull();
-    expect(toTsQuery('&&&')).toBeNull();
+    expect(searchTermsOf('')).toBeNull();
+    expect(searchTermsOf('   ')).toBeNull();
+  });
+
+  it('splits on whitespace, and every term must appear', () => {
+    expect(searchTermsOf('dinner olives')?.terms).toEqual(['dinner', 'olives']);
   });
 
   /**
-   * The bug this file exists for. The field filters as you type, so a
-   * whole-word matcher answers "nothing" to every keystroke until the last
-   * letter lands — which reads as a search that does not work.
+   * The reason this is a substring search at all. Chinese has no spaces, so
+   * the split is a no-op and the phrase stays one term — and a substring match
+   * can see inside it, which `to_tsvector` cannot.
    */
-  it('makes the word still being typed a prefix', () => {
-    expect(toTsQuery('barcel')?.tsquery).toBe('barcel:*');
+  it('keeps a Chinese phrase whole', () => {
+    const built = searchTermsOf('巴塞罗那');
+    expect(built?.terms).toEqual(['巴塞罗那']);
+    expect(built?.patterns).toEqual(['%巴塞罗那%']);
   });
 
-  /**
-   * Only the last. The earlier words are finished, and making them prefixes
-   * would turn "cat food" into everything starting with "cat" — a different
-   * question from the one asked.
-   */
-  it('leaves the finished words exact', () => {
-    expect(toTsQuery('dinner barcel')?.tsquery).toBe('dinner & barcel:*');
-    expect(toTsQuery('a b cd')?.tsquery).toBe('a & b & cd:*');
+  it('keeps accented text as typed, for the database to fold', () => {
+    expect(searchTermsOf('café mañana')?.terms).toEqual(['café', 'mañana']);
   });
 
-  /**
-   * Including the very first keystroke. Requiring two letters was the first
-   * instinct and it is the same bug one letter earlier: typing `o` when the
-   * timeline says "olives" must not answer "nothing".
-   */
-  it('prefixes even a single letter', () => {
-    expect(toTsQuery('a')?.tsquery).toBe('a:*');
-    expect(toTsQuery('de')?.tsquery).toBe('de:*');
+  /** Nothing is a separator except whitespace: punctuation is searchable text. */
+  it('does not split on punctuation', () => {
+    expect(searchTermsOf("tickets' olives")?.terms).toEqual(["tickets'", 'olives']);
+    expect(searchTermsOf('one-two')?.terms).toEqual(['one-two']);
   });
 
-  it('reports the terms it used', () => {
-    expect(toTsQuery('Dinner Barcel')?.terms).toEqual(['dinner', 'barcel']);
-  });
-
-  /**
-   * Kept by hand from `websearch_to_tsquery`, because it worked before this
-   * change and dropping a working feature while fixing a broken one is not a
-   * trade anyone asked for.
-   */
   it('excludes a word written with a leading dash', () => {
-    const built = toTsQuery('red -car');
+    const built = searchTermsOf('red -car');
     expect(built?.terms).toEqual(['red']);
     expect(built?.excluded).toEqual(['car']);
-    expect(built?.tsquery).toBe('red:* & !car');
-  });
-
-  /** A hyphen inside a word is not an exclusion. */
-  it('does not read an internal hyphen as an exclusion', () => {
-    const built = toTsQuery('one-two');
-    expect(built?.excluded).toEqual([]);
-    expect(built?.tsquery).toBe('one & two:*');
+    expect(built?.excludedPatterns).toEqual(['%car%']);
   });
 
   it('is still a query when only exclusions are given', () => {
-    expect(toTsQuery('-car')?.tsquery).toBe('!car');
+    expect(searchTermsOf('-car')?.excluded).toEqual(['car']);
   });
 
-  /** A bare dash is punctuation, not an operator with nothing to negate. */
   it('ignores a lone dash', () => {
-    expect(toTsQuery('-')).toBeNull();
+    expect(searchTermsOf('-')?.terms).toEqual(['-']);
   });
 
   /**
-   * The security-shaped case, and the reason nothing is escaped rather than
-   * dropped: escaping is a thing to get subtly wrong.
-   *
-   * Every one of these is syntax `to_tsquery` would either act on or throw
-   * over. None of it may survive into the query as anything but a lexeme.
+   * The one concession to what a search box teaches people to type. Not phrase
+   * search — the quotes are dropped and both words must appear independently.
    */
-  it.each([
-    '&',
-    '|',
-    '!',
-    '(',
-    ')',
-    '<->',
-    'a & !(b)',
-    "'; DROP TABLE verse.verse; --",
-    'a:*:*',
-    '\\',
-    'café & (mañana',
-  ])('never emits an operator from typed text (%j)', (text) => {
-    const built = toTsQuery(text);
-    if (built === null) return;
-
-    // The only operators present are the ones this module joined with, and the
-    // single trailing `:*` it may have added.
-    const withoutOurs = built.tsquery
-      .replaceAll(' & ', ' ')
-      .replaceAll('!', '')
-      .replace(/:\*$/, '');
-    expect(withoutOurs).toMatch(/^[\p{L}\p{N} ]*$/u);
+  it('drops quotes rather than searching for them', () => {
+    expect(searchTermsOf('"red bus"')?.terms).toEqual(['red', 'bus']);
+    expect(searchTermsOf('"olives"')?.terms).toEqual(['olives']);
+    expect(searchTermsOf('-"car"')?.excluded).toEqual(['car']);
   });
 
-  /** A long ramble must not become a query with hundreds of clauses. */
-  it('handles a lot of words without producing anything strange', () => {
-    const built = toTsQuery(Array.from({ length: 50 }, (_, i) => `w${i}`).join(' '));
-    expect(built?.terms).toHaveLength(50);
-    expect(built?.tsquery.endsWith('w49:*')).toBe(true);
+  it('leaves a quote in the middle of a term alone', () => {
+    expect(searchTermsOf("don't")?.terms).toEqual(["don't"]);
+    expect(searchTermsOf('a"b')?.terms).toEqual(['a"b']);
+  });
+});
+
+describe('likePattern', () => {
+  it('wraps the term so it matches anywhere', () => {
+    expect(likePattern('oliv')).toBe('%oliv%');
+  });
+
+  /**
+   * Someone typing `100%` is looking for "100%", not "100 followed by
+   * anything". The wildcards belong to `LIKE`, not to them.
+   */
+  it('defangs the wildcards LIKE would otherwise act on', () => {
+    expect(likePattern('100%')).toBe('%100\\%%');
+    expect(likePattern('a_b')).toBe('%a\\_b%');
+  });
+
+  /**
+   * The backslash goes first. Escaping it last would double-escape the
+   * backslashes the other two rules introduce, and `%` would stop being
+   * literal again.
+   */
+  it('escapes a literal backslash without eating the other escapes', () => {
+    expect(likePattern('a\\b')).toBe('%a\\\\b%');
+    expect(likePattern('50%\\')).toBe('%50\\%\\\\%');
   });
 });

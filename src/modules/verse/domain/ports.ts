@@ -119,13 +119,19 @@ export interface SearchQuery {
   readonly from?: Date | null;
   readonly to?: Date | null;
   readonly hasMedia?: boolean | null;
-  /** Postgres text-search configuration: 'english', 'spanish', 'french'. */
-  readonly language?: string;
 }
 
+/**
+ * A verse the search matched.
+ *
+ * A wrapper around one field, deliberately kept. It used to carry a relevance
+ * rank as well; substring matching has no relevance to report, and results are
+ * ordered newest-first. Collapsing this to `Verse` would make the port say
+ * "search returns verses" when what it returns is *hits* — and the next thing
+ * a hit wants to carry (which field matched, where) has nowhere to go.
+ */
 export interface SearchHit {
   readonly verse: Verse;
-  readonly rank: number;
 }
 
 export interface VerseRepository {
@@ -165,20 +171,18 @@ export interface TimelineRepository {
   timeline(query: TimelineQuery): Promise<Page<Verse>>;
 }
 
-/** Full-text search (2.7). */
+/**
+ * Text search (2.7).
+ *
+ * One method, and that is the point. The tsvector version needed a second —
+ * `refreshSearchForTag`, to rewrite the denormalised copy of a tag's name into
+ * every verse carrying it after a rename. Reading the tag names through a join
+ * at query time removed the copy, and with it the obligation to maintain it:
+ * a rename is now correct because nothing was duplicated, not because something
+ * remembered to fix it.
+ */
 export interface SearchRepository {
   search(query: SearchQuery): Promise<Page<SearchHit>>;
-
-  /**
-   * Rewrites the search vectors of every verse carrying a tag.
-   *
-   * The vector denormalises tag names (§8.2), so renaming a tag has to rewrite
-   * its verses or they stay findable under a name that no longer exists. On the
-   * port rather than hidden in the adapter because the *tag* use case has to
-   * call it — a denormalisation nobody is obliged to maintain is a bug waiting
-   * for the first rename.
-   */
-  refreshSearchForTag(tagId: string): Promise<void>;
 }
 
 /**

@@ -15,7 +15,7 @@ import {
 } from '@/modules/verse';
 
 /**
- * Search: what it finds, how it ranks, how the filters compose, and — the part
+ * Search: what it finds, in what order, how the filters compose, and — the part
  * §8.2 warns about — that it is filtered by the same visibility rule as
  * everything else rather than by a bespoke fast query.
  */
@@ -138,7 +138,7 @@ describe.skipIf(!DATABASE_URL)('search', () => {
     return {
       status: response.status,
       body: (await response.json()) as {
-        verses: { id: string; xp: string | null; rank: number }[];
+        verses: { id: string; xp: string | null }[];
         nextCursor: string | null;
       },
     };
@@ -180,16 +180,14 @@ describe.skipIf(!DATABASE_URL)('search', () => {
     });
 
     /**
-     * Relevance is still computed and still reported — it is simply not what
-     * decides the order any more.
+     * A denser match does not jump the queue, and a match on a tag name sits
+     * in the same order as a match on xp.
      *
-     * The dates here are deliberately the wrong way round for ranking: the
-     * better match is the *older* verse, so a result ordered by rank would put
-     * it first. This test used to assert exactly that, and passed for the
-     * wrong reason once the ordering changed — the two rows happened to be
-     * created newest-last.
+     * The dates are deliberately the wrong way round for relevance: the better
+     * match is the *older* verse. There is no rank any more to be tempted by
+     * it, and this pins that the ordering does not quietly grow one back.
      */
-    it('reports a stronger match without letting it jump the queue', async () => {
+    it('orders by date, not by how well a verse matched', async () => {
       const { token } = await signUp('d@example.com');
       const named = await makeTag(token, 'barcelona-trip');
       const plain = await makeTag(token, 'diary');
@@ -210,9 +208,6 @@ describe.skipIf(!DATABASE_URL)('search', () => {
       expect(body.verses).toHaveLength(2);
       // Newest first, even though the older one matches better.
       expect(body.verses.map((v) => v.id)).toEqual([recent.id, strong.id]);
-
-      const ranks = body.verses.map((v) => v.rank);
-      expect(ranks[1]).toBeGreaterThan(ranks[0] as number);
     });
 
     /**
@@ -264,7 +259,8 @@ describe.skipIf(!DATABASE_URL)('search', () => {
      *
      * Phrase search is gone with `websearch_to_tsquery`; `"red bus"` is now
      * `red AND bus`, which finds the same row here and would also find a verse
-     * saying "the bus, then the red one".
+     * saying "the bus, then the red one". The quotes are dropped rather than
+     * searched for — a literal `"` would make the term match nothing at all.
      */
     it('excludes a word written with a leading dash', async () => {
       const { token } = await signUp('f@example.com');
@@ -334,9 +330,85 @@ describe.skipIf(!DATABASE_URL)('search', () => {
       }
     });
 
+    /**
+     * The reason full text was dropped (§8.2).
+     *
+     * Chinese is written without spaces, so Postgres tokenises
+     * `我今天去了巴塞罗那吃饭` into exactly one lexeme — the whole sentence —
+     * and no tsquery for 巴塞罗那 ever matches it. Verified directly against
+     * this database before the change, not assumed. A substring match has no
+     * such blind spot because it never tokenises anything.
+     */
+    it('finds a Chinese word inside a sentence written without spaces', async () => {
+      const { token } = await signUp('zh@example.com');
+      const tag = await makeTag(token, 'diary');
+      const verse = await makeVerse(token, {
+        tagIds: [tag.id],
+        xp: '我今天去了巴塞罗那吃饭',
+      });
+      await makeVerse(token, { tagIds: [tag.id], xp: '昨天在家里' });
+
+      for (const typed of ['巴塞罗那', '巴塞', '吃饭', '今天']) {
+        const { body } = await search(token, `?q=${encodeURIComponent(typed)}`);
+        expect(
+          body.verses.map((v) => v.id),
+          `typed ${typed}`,
+        ).toEqual([verse.id]);
+      }
+    });
+
+    /**
+     * Mid-word, not merely a prefix. The tsquery version could do prefixes
+     * (`oliv:*`) and nothing else, so someone half-remembering the middle of a
+     * word — or writing in a language where the meaningful part is not at the
+     * front — got nothing.
+     */
+    it('finds a word by a fragment from the middle of it', async () => {
+      const { token } = await signUp('mid@example.com');
+      const tag = await makeTag(token, 'diary');
+      const verse = await makeVerse(token, { tagIds: [tag.id], xp: 'Barcelona again' });
+
+      for (const typed of ['arcelon', 'celona', 'elon']) {
+        const { body } = await search(token, `?q=${encodeURIComponent(typed)}`);
+        expect(
+          body.verses.map((v) => v.id),
+          `typed ${typed}`,
+        ).toEqual([verse.id]);
+      }
+    });
+
+    /**
+     * `%` and `_` are LIKE's wildcards, not the user's. Someone searching for
+     * "100%" means the string; if the escaping in `likePattern` were dropped,
+     * `100%` would match "100 euros" and `a_b` would match "axb", and both
+     * would look like fuzziness nobody asked for.
+     */
+    it('treats a typed % or _ as the character, not as a wildcard', async () => {
+      const { token } = await signUp('wildcard@example.com');
+      const tag = await makeTag(token, 'diary');
+      const literal = await makeVerse(token, {
+        tagIds: [tag.id],
+        xp: 'battery at 100% on arrival',
+      });
+      await makeVerse(token, { tagIds: [tag.id], xp: '100 euros for the taxi' });
+      await makeVerse(token, { tagIds: [tag.id], xp: 'seat a4b by the window' });
+
+      expect(
+        (await search(token, `?q=${encodeURIComponent('100%')}`)).body.verses.map(
+          (v) => v.id,
+        ),
+      ).toEqual([literal.id]);
+
+      expect(
+        (await search(token, `?q=${encodeURIComponent('a_b')}`)).body.verses,
+      ).toHaveLength(0);
+    });
+
     it('does not blow up on syntax a person might type', async () => {
-      // websearch_to_tsquery never raises; to_tsquery would turn a stray
-      // ampersand into a 500.
+      // A substring search has no syntax to get wrong, so none of these mean
+      // anything special — they are searched for literally. The test stays
+      // because the tsquery version turned a stray ampersand into a 500, and
+      // a future query builder could do it again.
       const { token } = await signUp('g@example.com');
       for (const q of ['&', '|', '!', '(((', 'a & & b', '"unclosed']) {
         const { status } = await search(token, `?q=${encodeURIComponent(q)}`);
@@ -374,8 +446,9 @@ describe.skipIf(!DATABASE_URL)('search', () => {
     });
 
     it('follows a renamed tag', async () => {
-      // The denormalisation the vector carries is only correct if something
-      // maintains it. This is that something being tested.
+      // Free, now that tag names are read through a join instead of copied
+      // into each verse — but the copy is exactly the kind of thing that gets
+      // reintroduced for speed, so the test outlives it.
       const { token } = await signUp('j@example.com');
       const tag = await makeTag(token, 'movies');
       await makeVerse(token, { tagIds: [tag.id] });

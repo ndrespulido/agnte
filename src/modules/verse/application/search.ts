@@ -35,22 +35,18 @@ export interface SearchDeps {
   media: MediaResolver;
 }
 
-export interface RankedVerse extends VisibleVerse {
-  readonly rank: number;
-}
-
 /**
  * Search, filtered by the same visibility resolver as every other read path.
  *
  * §8.2 names search as the single most likely place for a disclosure bug,
  * "because it's tempting to write a fast bespoke query". So the results go
- * through `visibleMany` exactly like a timeline page does, and the ranking is
- * carried alongside rather than being a reason to take a different route.
+ * through `visibleMany` exactly like a timeline page does — the search path
+ * has nothing of its own to justify a different route.
  */
 export async function searchVerses(
   input: SearchInput,
   deps: SearchDeps,
-): Promise<Result<Page<RankedVerse>, DomainError>> {
+): Promise<Result<Page<VisibleVerse>, DomainError>> {
   const text = input.text.trim();
 
   if (text.length === 0) return err(searchQueryInvalid('it is empty'));
@@ -85,13 +81,5 @@ export async function searchVerses(
     deps,
   );
 
-  // Re-attached by id rather than by position: `visibleMany` drops rows, so the
-  // two lists are not the same length and zipping them would silently pair a
-  // verse with another's rank.
-  const rankById = new Map(page.items.map((hit) => [hit.verse.id, hit.rank]));
-
-  return ok({
-    items: allowed.map((v) => ({ ...v, rank: rankById.get(v.verse.id) ?? 0 })),
-    nextCursor: page.nextCursor,
-  });
+  return ok({ items: allowed, nextCursor: page.nextCursor });
 }
