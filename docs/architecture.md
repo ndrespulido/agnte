@@ -686,6 +686,61 @@ Two layers:
 Password reset returns the same response whether or not the account exists —
 otherwise the endpoint is an account-enumeration oracle.
 
+### 8.6.1 Languages
+
+The interface is offered in **English, Spanish, French and Mandarin**, and the
+set is meant to grow by adding a file.
+
+- **String tables in TypeScript**, one per language, under `src/shared/i18n`.
+  `Strings` is derived from the English table (`type Strings = typeof en`), so
+  a missing key, a misspelled one, or a function whose arguments moved are all
+  compile errors. A JSON catalogue would defer every one of those to the moment
+  someone opens that screen, in a language nobody here reads.
+- **Anything carrying a value is a function**, not a template with holes:
+  `nothingMatches(text)` rather than `"Nothing matches {text}"`. No format
+  parser, no runtime key errors, and word order is the table's to decide —
+  which matters more than the words. `dates.dayMonth(day, date, month)` is how
+  Spanish gets "lunes, 3 de marzo" and Chinese gets 3月1日 星期日 out of the
+  same three parts.
+- **Counting is per noun.** English and Spanish need two forms, French agrees
+  except at zero, Chinese has one and a measure word instead. One `{n, plural}`
+  syntax would encode English's rules in the key.
+- **Deep time regroups rather than translates.** Chinese counts in 万 (10⁴) and
+  亿 (10⁸), so 13.8 billion years is 138亿年 — the number changes, not just the
+  unit after it. `deepTime` hands over a magnitude and lets each table say what
+  it wants. A shared "{n} {unit}" template would have been wrong in a way no
+  English reader would notice.
+- **The preference is a column on the user** (`identity.user.locale`), not only
+  browser state. The writer that most needs it has no request to read a header
+  from: the nightly reminder tick composes an email from a Cloud Scheduler
+  callback. `contactFor(userId)` carries the address and the language together
+  across the module boundary — the same narrow surface `contactEmailFor`
+  already used, rather than exporting the user repository.
+- **The browser does not wait for the server.** `app/_client/locale.ts` is an
+  external store read through `useSyncExternalStore`, the same shape as the
+  session and for the same reason: state set in an effect renders one frame in
+  the wrong language on every open. Resolution is an explicit choice, then
+  `navigator.languages` with the region dropped, then English. Signing in
+  adopts the account's language only when this browser has no explicit choice
+  of its own.
+- **Formatters take the table as an argument.** `headerLabel(placement, now, s)`
+  — no hook, no ambient "current locale". A formatter that reads ambient state
+  renders differently depending on when it is called, which is the property the
+  "clock passed in" rule already exists to prevent.
+
+> **The one thing not translated: the API.** Server error text reaches the
+> client in English and is shown as-is; only the client's own fallback
+> sentences are localised. Domain errors already carry stable codes
+> (`verse.verse_id_taken`), so mapping codes to translated sentences on the
+> client is the way to close it. Until then a failed request reads in English
+> inside a screen that is otherwise not.
+>
+> **The Mandarin table has not been reviewed by a native speaker.** The
+> structure is compiler-checked and the number regrouping is tested, but
+> fluency is not something a type can assert. It ships as a first draft because
+> the alternative was offering the language in the picker and rendering
+> English.
+
 ### 8.7 GDPR
 
 You're EU-based, this is multi-user, and it stores health notes, financial

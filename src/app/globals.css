@@ -1272,6 +1272,61 @@ button.danger {
   flex-direction: column;
 }
 
+/*
+ * The language picker, in the menu.
+ *
+ * Pill buttons rather than a `<select>`: the native control arrives with the
+ * platform's own box, which is the one thing the hairline-ruled UI direction
+ * rules out, and every option has to be readable at once — someone reaching
+ * for this is quite possibly looking at a language they do not speak.
+ *
+ * `flex-wrap` rather than a sideways scroll because four names fit on one line
+ * at 390px. Past what fits, this wants the tag bar's two-row scroller, not a
+ * dropdown.
+ */
+.language-picker {
+  padding-top: var(--space-md);
+}
+
+.language-heading {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--text-small);
+  color: var(--color-ink-faint);
+}
+
+.language-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.language-option {
+  background: none;
+  border: var(--hairline) solid var(--color-rule);
+  border-radius: var(--radius-pill);
+  padding: var(--space-xs) var(--space-md);
+  min-height: var(--size-min-tap-target);
+  cursor: pointer;
+  font: inherit;
+  color: var(--color-ink);
+}
+
+/*
+ * The one in force takes the accent on its text as well as its border. A
+ * border alone at this weight is close to invisible on a page made of
+ * hairlines — the same lesson the filter chips learned.
+ */
+.language-option[aria-pressed='true'] {
+  border-color: var(--color-accent-text);
+  color: var(--color-accent-text);
+  font-weight: 500;
+}
+
+.language-option:focus-visible {
+  outline: var(--hairline) solid var(--color-accent-text);
+  outline-offset: var(--space-xxs);
+}
+
 .menu-row {
   width: 100%;
   padding: var(--space-md) 0;

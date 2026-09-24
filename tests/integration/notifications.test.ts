@@ -1,7 +1,11 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDatabase } from '@/shared/infra/database';
 import { resetConfigForTests } from '@/shared/infra/config';
-import { uuidv7 } from '@/shared/kernel';
+import { systemClock, uuidv7 } from '@/shared/kernel';
+import { resetEmailTransportForTests } from '@/shared/infra/email';
+import { createVerifiedUser } from '@/modules/identity/domain/user';
+import { PrismaUserRepository } from '@/modules/identity/infrastructure/prisma-user-repository';
+import { EmailNotificationDelivery } from '@/modules/notifications/infrastructure/email-delivery';
 import { PrismaNotificationRepository } from '@/modules/notifications/infrastructure/prisma-notification-repository';
 import { PrismaPreferenceRepository } from '@/modules/notifications/infrastructure/prisma-preference-repository';
 import { PrismaPushSubscriptionRepository } from '@/modules/notifications/infrastructure/prisma-push-subscription-repository';
@@ -381,5 +385,98 @@ describe.skipIf(!DATABASE_URL)('push subscriptions', () => {
 
   it('refuses a row with no key material', async () => {
     await expect(subscriptions.upsert(record({ p256dh: '' }))).rejects.toThrow();
+  });
+});
+
+/**
+ * A reminder email, in the recipient's language.
+ *
+ * This is the reason the preference is a column on the user rather than
+ * something the browser knows: this path runs from the scheduled tick, with no
+ * request and therefore no `Accept-Language` to read. Verified end to end —
+ * through the real user row, the real cross-module lookup, and the real
+ * transport — because every one of those links is where it could quietly fall
+ * back to English.
+ */
+describe.skipIf(!DATABASE_URL)('reminder emails follow the account language', () => {
+  const users = new PrismaUserRepository();
+  const delivery = new EmailNotificationDelivery();
+
+  let sent: string[] = [];
+
+  beforeEach(async () => {
+    process.env.APP_ENV = 'local';
+    delete process.env.RESEND_API_KEY;
+    delete process.env.EMAIL_FROM;
+    resetConfigForTests();
+    resetEmailTransportForTests();
+
+    sent = [];
+    vi.spyOn(console, 'info').mockImplementation((...args: unknown[]) => {
+      sent.push(args.join(' '));
+    });
+
+    await getDatabase()!.$executeRawUnsafe('DELETE FROM identity."user"');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    process.env = { ...ORIGINAL_ENV };
+    resetConfigForTests();
+    resetEmailTransportForTests();
+  });
+
+  const account = async (locale: string) => {
+    const user = createVerifiedUser({
+      email: `reader-${locale}@example.com` as never,
+      passwordHash: null,
+      locale,
+      clock: systemClock,
+    });
+    await users.create(user);
+    return user;
+  };
+
+  const send = async (userId: string) => {
+    await delivery.send({
+      userId,
+      title: 'Tomar la pastilla',
+      body: null,
+      verseId: null,
+    });
+    return sent.join('\n');
+  };
+
+  it.each([
+    ['es', 'Programaste este recordatorio en Agnte.'],
+    ['fr', 'Vous avez programmé ce rappel dans Agnte.'],
+    ['zh', '这条提醒是你在 Agnte 中设置的。'],
+    ['en', 'You set this reminder in Agnte.'],
+  ])('writes the footer in %s', async (locale, expected) => {
+    const user = await account(locale);
+
+    expect(await send(user.id)).toContain(expected);
+  });
+
+  /**
+   * The person's own words are not translated — only the app's sentences
+   * around them. A reminder someone wrote in Spanish must not be rephrased
+   * because their interface is in English.
+   */
+  it('leaves the title exactly as it was written', async () => {
+    const user = await account('en');
+
+    expect(await send(user.id)).toContain('Tomar la pastilla');
+  });
+
+  /**
+   * A row written by a newer build offering a language this one does not have.
+   * English rather than a crash: a reminder is a promise to interrupt someone,
+   * and the wrong language is a far smaller failure than no email.
+   */
+  it('falls back to English for a language it has no strings for', async () => {
+    const user = await account('ja');
+
+    expect(await send(user.id)).toContain('You set this reminder in Agnte.');
   });
 });

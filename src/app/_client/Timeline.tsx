@@ -27,6 +27,8 @@ import {
 } from './format';
 import { withPending, type TimelineVerse } from './pending';
 import { emptyMessage, showsCatalogue } from './timeline-filter';
+import { useStrings } from './locale';
+import type { Strings } from '@/shared/i18n';
 import {
   discard,
   outboxSnapshot,
@@ -74,11 +76,30 @@ const PAGE = 10;
  * exceptional one (§8.1), so it gets a sentence that says what is true and what
  * happens next — and specifically that nothing they write is being lost.
  */
-function reasonFor(cause: unknown): string {
-  if (cause instanceof TypeError) {
-    return 'Cannot reach the server. Anything you write is kept here and sent when you are back.';
-  }
-  return cause instanceof Error ? cause.message : 'Could not load the timeline.';
+type Failure =
+  { kind: 'offline' } | { kind: 'said'; message: string } | { kind: 'unknown' };
+
+function reasonFor(cause: unknown): Failure {
+  if (cause instanceof TypeError) return { kind: 'offline' };
+  return cause instanceof Error
+    ? { kind: 'said', message: cause.message }
+    : { kind: 'unknown' };
+}
+
+/**
+ * The failure in words, chosen where the language is known.
+ *
+ * Classifying in the `catch` and phrasing at render is not ceremony: the
+ * catches live inside effects and callbacks, and reading a string from the
+ * table there would make the current language a dependency of the fetch —
+ * change the language and the timeline refetches itself for no reason.
+ *
+ * The server's own message is passed through untranslated, which is the same
+ * gap `failureMessage` documents: the API answers in English.
+ */
+function failureText(failure: Failure, s: Strings): string {
+  if (failure.kind === 'offline') return s.timeline.offline;
+  return failure.kind === 'said' ? failure.message : s.timeline.couldNotLoad;
 }
 
 export function Timeline({
@@ -179,7 +200,8 @@ export function Timeline({
   const [pastDone, setPastDone] = useState(false);
   const [futureDone, setFutureDone] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const s = useStrings();
+  const [error, setError] = useState<Failure | null>(null);
 
   /**
    * The first page of each direction, together.
@@ -429,7 +451,10 @@ export function Timeline({
     [future, past, queued],
   );
 
-  const sections = useMemo(() => groupIntoSections(verses, anchor), [verses, anchor]);
+  const sections = useMemo(
+    () => groupIntoSections(verses, anchor, s),
+    [verses, anchor, s],
+  );
 
   /**
    * Where the future stops and the past begins, as a section index.
@@ -475,10 +500,10 @@ export function Timeline({
       ...sections.map((section) => ({ key: section.key, label: section.label })),
       ...(withCatalogue ? catalogue : []).map((event) => ({
         key: event.id,
-        label: deepTimeLabel(event.timelineYears),
+        label: deepTimeLabel(event.timelineYears, s),
       })),
     ],
-    [sections, catalogue, withCatalogue],
+    [sections, catalogue, withCatalogue, s],
   );
 
   // Report whatever is currently under the header.
@@ -645,13 +670,13 @@ export function Timeline({
   if (error && verses.length === 0) {
     return (
       <p className="notice" role="alert">
-        {error}
+        {failureText(error, s)}
       </p>
     );
   }
 
   if (!loading && verses.length === 0) {
-    return <p className="notice">{emptyMessage(tagIds, tagLabels, settledText)}</p>;
+    return <p className="notice">{emptyMessage(tagIds, tagLabels, settledText, s)}</p>;
   }
 
   return (
@@ -660,12 +685,12 @@ export function Timeline({
           this browser's own copy, and saying so is the point. */}
       {error ? (
         <p className="notice" role="alert">
-          {error}
+          {failureText(error, s)}
         </p>
       ) : null}
 
       {futureDone && future.length > 0 ? (
-        <p className="notice end">That is as far ahead as you have written.</p>
+        <p className="notice end">{s.timeline.endOfFuture}</p>
       ) : null}
 
       <div ref={futureSentinel} aria-hidden="true" />
@@ -715,14 +740,14 @@ export function Timeline({
       <div ref={pastSentinel} aria-hidden="true" />
 
       {withCatalogue && catalogue.length > 0 ? (
-        <section className="catalogue" aria-label="Before your own record">
+        <section className="catalogue" aria-label={s.timeline.catalogue}>
           {/*
             The seam. Worth marking rather than letting the scroll slide from
             a person's own life into the history of the universe with nothing
             said — these rows are not theirs, cannot be opened, and did not
             happen to them.
           */}
-          <p className="catalogue-seam">Before your own record</p>
+          <p className="catalogue-seam">{s.timeline.catalogue}</p>
 
           <ul className="verses">
             {catalogue.map((event) => (
@@ -735,7 +760,7 @@ export function Timeline({
                     else headingsRef.current.delete(event.id);
                   }}
                 >
-                  {deepTimeLabel(event.timelineYears)}
+                  {deepTimeLabel(event.timelineYears, s)}
                 </span>
                 <div className="verse-body">
                   <p className="verse-xp">{event.title}</p>
@@ -747,9 +772,9 @@ export function Timeline({
         </section>
       ) : null}
 
-      {loading ? <p className="notice">Loading…</p> : null}
+      {loading ? <p className="notice">{s.common.loading}</p> : null}
       {withCatalogue && catalogueDone && catalogue.length > 0 ? (
-        <p className="notice end">That is the beginning.</p>
+        <p className="notice end">{s.timeline.endOfPast}</p>
       ) : null}
     </div>
   );
@@ -782,12 +807,20 @@ function oldestVerseYears(verse: VerseView | undefined): number | null {
  * trying must not still say "Saving", which is what it did when this was keyed
  * on the kind alone. Caught by looking at the screen rather than at the map.
  */
-const PENDING_LABEL = {
-  new: { queued: 'Saving', blocked: 'Not saved' },
-  edited: { queued: 'Saving the change', blocked: 'Change not saved' },
-  // Only ever shown blocked: a delete that is still queued takes the row away.
-  deleting: { queued: 'Deleting', blocked: 'Not deleted' },
-} as const;
+const pendingLabel = (
+  kind: 'new' | 'edited' | 'deleting',
+  blocked: boolean,
+  s: Strings,
+): string => {
+  // Only ever shown blocked for a delete: one that is still queued takes the
+  // row away.
+  if (kind === 'deleting')
+    return blocked ? s.timeline.queuedNotDeleted : s.timeline.queuedDeleting;
+  if (kind === 'edited') {
+    return blocked ? s.timeline.queuedEditNotSaved : s.timeline.queuedSavingEdit;
+  }
+  return blocked ? s.timeline.queuedNotSaved : s.timeline.queuedSaving;
+};
 
 function VerseRow({
   verse,
@@ -801,6 +834,7 @@ function VerseRow({
   tagIds?: readonly string[];
   onFilterTag?: (tagId: string) => void;
 }) {
+  const s = useStrings();
   const placement = placementOf(verse);
   const time = timeLabel(placement);
   const pending = verse.pending;
@@ -856,28 +890,28 @@ function VerseRow({
         {pending ? (
           <p className="verse-pending">
             <span className="pending-label">
-              {PENDING_LABEL[pending.kind][pending.blocked ? 'blocked' : 'queued']}
+              {pendingLabel(pending.kind, pending.blocked, s)}
             </span>
             {pending.blocked ? (
               <>
                 {/* The server's own words. A queue that swallowed the reason
                     would leave the only person who can fix it guessing. */}
                 <span className="pending-reason">
-                  {pending.reason ?? 'It did not go through.'}
+                  {pending.reason ?? s.timeline.queuedFailed}
                 </span>
                 <button
                   type="button"
                   className="quiet"
                   onClick={() => void retryNow(pending.entryId)}
                 >
-                  Try again
+                  {s.timeline.tryAgain}
                 </button>
                 <button
                   type="button"
                   className="quiet"
                   onClick={() => void discard(pending.entryId)}
                 >
-                  Discard
+                  {s.timeline.discard}
                 </button>
               </>
             ) : null}
@@ -943,6 +977,7 @@ function VerseRow({
  * out entirely — there is nothing to show and nothing the reader can do.
  */
 function VerseMedia({ verse }: { verse: VerseView }) {
+  const s = useStrings();
   const shown = verse.media.filter((media) => media.status !== 'failed');
   if (shown.length === 0) return null;
 
@@ -957,14 +992,22 @@ function VerseMedia({ verse }: { verse: VerseView }) {
             <img src={media.thumbUrl} alt="" loading="lazy" />
           </li>
         ) : (
-          <li key={media.id} className="pending" aria-label="Photo still processing" />
+          <li
+            key={media.id}
+            className="pending"
+            aria-label={s.timeline.photoProcessing}
+          />
         ),
       )}
     </ul>
   );
 }
 
-function groupIntoSections(verses: readonly TimelineVerse[], now: Date): Section[] {
+function groupIntoSections(
+  verses: readonly TimelineVerse[],
+  now: Date,
+  s: Strings,
+): Section[] {
   const sections: Section[] = [];
 
   for (const verse of verses) {
@@ -975,7 +1018,7 @@ function groupIntoSections(verses: readonly TimelineVerse[], now: Date): Section
     // The API already returns them in order, so a run of the same key is one
     // section. Grouping into a map instead would lose that order.
     if (last?.key === key) last.verses.push(verse);
-    else sections.push({ key, label: headerLabel(placement, now), verses: [verse] });
+    else sections.push({ key, label: headerLabel(placement, now, s), verses: [verse] });
   }
 
   return sections;

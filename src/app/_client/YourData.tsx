@@ -12,6 +12,7 @@ import {
   type ExportStatusView,
   type ImportSummaryView,
 } from './api';
+import { failureMessage, useStrings } from './locale';
 
 /**
  * Your data: take a copy, read one back, or leave (§8.5, §8.7).
@@ -33,8 +34,6 @@ import {
 const GRACE_DAYS = 30;
 
 /** "1 tag", "2 tags". Small, but "1 tags" reads as a machine talking. */
-const count = (n: number, one: string, many = `${one}s`): string =>
-  `${n} ${n === 1 ? one : many}`;
 
 export function YourData({
   onClose,
@@ -43,6 +42,7 @@ export function YourData({
   onClose: () => void;
   onErased: () => void;
 }) {
+  const s = useStrings();
   const [exported, setExported] = useState<ExportStatusView | null>(null);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
@@ -64,7 +64,7 @@ export function YourData({
       })
       .catch((cause: unknown) => {
         if (!cancelled) {
-          setError(cause instanceof Error ? cause.message : 'Could not read the status.');
+          setError(cause instanceof Error ? cause.message : '');
         }
       })
       .finally(() => {
@@ -98,15 +98,10 @@ export function YourData({
       });
       // The server says so when nothing will ever build it; repeating it here
       // is the difference between waiting and waiting for nothing.
-      setNotice(
-        requested.warning ??
-          'Building it now. It usually takes a moment; the page will not update on its own, so come back and reopen this.',
-      );
+      setNotice(requested.warning ?? s.yourData.building);
     } catch (cause) {
       setError(
-        cause instanceof ExportTooSoon || cause instanceof Error
-          ? cause.message
-          : 'Could not ask for a copy.',
+        cause instanceof ExportTooSoon || cause instanceof Error ? cause.message : '',
       );
     }
   }
@@ -130,7 +125,7 @@ export function YourData({
       link.click();
       URL.revokeObjectURL(url);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not download it.');
+      setError(cause instanceof Error ? cause.message : '');
     }
   }
 
@@ -147,13 +142,13 @@ export function YourData({
       try {
         document = JSON.parse(text);
       } catch {
-        setError('That file is not JSON.');
+        setError(s.yourData.notJson);
         return;
       }
 
       setImported(await importDocument(document));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not import that.');
+      setError(cause instanceof Error ? cause.message : '');
     } finally {
       setImporting(false);
       // Cleared so choosing the same file again still fires a change event —
@@ -168,7 +163,7 @@ export function YourData({
       setErased(await eraseAccount());
     } catch (cause) {
       setConfirmingDelete(false);
-      setError(cause instanceof Error ? cause.message : 'Could not delete the account.');
+      setError(cause instanceof Error ? cause.message : '');
     }
   }
 
@@ -178,20 +173,24 @@ export function YourData({
         className="sheet"
         role="dialog"
         aria-modal="true"
-        aria-label="Your data"
+        aria-label={s.yourData.heading}
         onClick={(event) => event.stopPropagation()}
       >
-        <h2 className="sheet-title">Your data</h2>
+        <h2 className="sheet-title">{s.yourData.heading}</h2>
 
-        {error ? (
+        {error !== null ? (
           <p className="notice" role="alert">
-            {error}
+            {/* One banner for every failure on this sheet — reading the
+                status, asking for a copy, importing, deleting — so the
+                fallback is the most general of them. The specific ones are
+                the server's, which arrive with their own words. */}
+            {failureMessage(error, s.yourData.couldNotRead)}
           </p>
         ) : null}
 
         {/* ------------------------------------------------------------- */}
         <section className="data-section">
-          <h3>A copy of everything</h3>
+          <h3>{s.yourData.copyHeading}</h3>
           <p className="data-note">
             Every verse, tag and reminder as one JSON file. Photos are linked rather than
             included, and those links expire — so act on it within a day rather than
@@ -199,12 +198,12 @@ export function YourData({
           </p>
 
           {loading ? (
-            <p className="data-note">Checking…</p>
+            <p className="data-note">{s.yourData.checking}</p>
           ) : exported === null ? (
-            <p className="data-note">You have not asked for one yet.</p>
+            <p className="data-note">{s.yourData.noneYet}</p>
           ) : (
             <p className="data-note">
-              Last asked {new Date(exported.requestedAt).toLocaleString()} —{' '}
+              {s.yourData.lastAsked(new Date(exported.requestedAt).toLocaleString())}
               <strong>{exported.status}</strong>
               {exported.error ? `: ${exported.error}` : ''}
             </p>
@@ -214,11 +213,11 @@ export function YourData({
 
           <div className="data-actions">
             <button type="button" className="quiet" onClick={() => void ask()}>
-              Ask for a copy
+              {s.yourData.askForACopy}
             </button>
             {exported?.status === 'ready' ? (
               <button type="button" className="quiet" onClick={() => void save()}>
-                Download
+                {s.yourData.download}
               </button>
             ) : null}
           </div>
@@ -226,12 +225,8 @@ export function YourData({
 
         {/* ------------------------------------------------------------- */}
         <section className="data-section">
-          <h3>Read one back in</h3>
-          <p className="data-note">
-            An <code>agnte.export.v1</code> file — one of yours, or one someone shared.
-            Running the same file twice changes nothing, so it is safe to fix what was
-            refused and try again.
-          </p>
+          <h3>{s.yourData.importHeading}</h3>
+          <p className="data-note">{s.yourData.importNote}</p>
 
           {/* The same styled picker the add sheet uses, for the same reason:
               the browser's default control is the one element on the screen
@@ -247,17 +242,23 @@ export function YourData({
                 if (file) void read(file);
               }}
             />
-            Choose a file
+            {s.yourData.chooseAFile}
           </label>
 
-          {importing ? <p className="data-note">Reading it…</p> : null}
+          {importing ? <p className="data-note">{s.yourData.readingIt}</p> : null}
 
           {imported ? (
             <div className="import-summary">
               <p className="data-note">
-                {count(imported.tags, 'tag')} and {count(imported.verses, 'verse')} added.{' '}
+                {s.yourData.importedSummary(
+                  s.count.tags(imported.tags),
+                  s.count.verses(imported.verses),
+                )}{' '}
                 {imported.skipped > 0
-                  ? `${count(imported.skipped, 'row')} ${imported.skipped === 1 ? 'was' : 'were'} already here.`
+                  ? s.yourData.alreadyHere(
+                      s.count.rows(imported.skipped),
+                      imported.skipped,
+                    )
                   : null}
               </p>
               <p className="data-note">{imported.note}</p>
@@ -267,7 +268,7 @@ export function YourData({
                   {/* Listed rather than counted. A refused row is the one thing
                       the person can actually act on, and "3 rejected" tells
                       them nothing about which three or why. */}
-                  <p className="data-note">Refused:</p>
+                  <p className="data-note">{s.yourData.refused}</p>
                   <ul className="rejected">
                     {imported.rejected.map((row, index) => (
                       <li key={`${row.what}-${index}`}>
@@ -283,7 +284,7 @@ export function YourData({
 
         {/* ------------------------------------------------------------- */}
         <section className="data-section danger">
-          <h3>Delete this account</h3>
+          <h3>{s.yourData.deleteHeading}</h3>
 
           {erased ? (
             /*
@@ -296,46 +297,40 @@ export function YourData({
              */
             <>
               <p className="data-note">
-                Done. Your verses, tags, photos and reminders are gone (
-                {count(erased.modulesPurged, 'part')} of the app purged
+                {s.yourData.erasedDone} (
+                {s.yourData.erasedPurged(s.count.parts(erased.modulesPurged))}
                 {erased.modulesFailed > 0
-                  ? `, ${erased.modulesFailed} could not and will be retried before the account is removed`
+                  ? s.yourData.erasedFailed(erased.modulesFailed)
                   : ''}
-                ). The account record itself is removed after {GRACE_DAYS} days.
+                ). {s.yourData.erasedRecordRemoved(GRACE_DAYS)}
               </p>
               <div className="data-actions">
                 <button type="button" className="quiet" onClick={onErased}>
-                  Sign out
+                  {s.menu.signOut}
                 </button>
               </div>
             </>
           ) : confirmingDelete ? (
             <>
               <p className="data-note">
-                <strong>
-                  This deletes your verses, tags, photos and reminders now, not in{' '}
-                  {GRACE_DAYS} days.
-                </strong>{' '}
-                There is no undo in the app. Only the account record waits {GRACE_DAYS}{' '}
-                days before it is removed too.
+                <strong>{s.yourData.deleteWarning(GRACE_DAYS)}</strong>
+                {s.yourData.deleteNoUndo(GRACE_DAYS)}
               </p>
-              <p className="data-note">
-                If you want to keep any of it, ask for a copy above and download it first.
-              </p>
+              <p className="data-note">{s.yourData.deleteKeepFirst}</p>
               <div className="data-actions">
                 <button
                   type="button"
                   className="danger-button"
                   onClick={() => void erase()}
                 >
-                  Delete everything
+                  {s.yourData.deleteEverything}
                 </button>
                 <button
                   type="button"
                   className="quiet"
                   onClick={() => setConfirmingDelete(false)}
                 >
-                  Keep my account
+                  {s.yourData.keepMyAccount}
                 </button>
               </div>
             </>

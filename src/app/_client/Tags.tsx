@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { fetchTags, type TagView } from './api';
+import { failureMessage, useStrings } from './locale';
 
 /**
  * Every tag, as a way in to its dashboard.
@@ -32,6 +33,7 @@ export function Tags({
    */
   covered: boolean;
 }) {
+  const s = useStrings();
   const [tags, setTags] = useState<TagView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,7 +48,7 @@ export function Tags({
       })
       .catch((cause: unknown) => {
         if (!cancelled) {
-          setError(cause instanceof Error ? cause.message : 'Could not load tags.');
+          setError(cause instanceof Error ? cause.message : '');
         }
       });
 
@@ -71,26 +73,23 @@ export function Tags({
         className="sheet tag-list"
         role="dialog"
         aria-modal="true"
-        aria-label="Tags"
+        aria-label={s.tags.heading}
         onClick={(event) => event.stopPropagation()}
       >
-        <h2 className="dashboard-title">Tags</h2>
+        <h2 className="dashboard-title">{s.tags.heading}</h2>
 
-        {error ? (
+        {error !== null ? (
           <p className="notice error" role="alert">
-            {error}
+            {failureMessage(error, s.tags.couldNotLoad)}
           </p>
         ) : null}
 
         {tags === null ? (
           error ? null : (
-            <p className="notice">Loading…</p>
+            <p className="notice">{s.common.loading}</p>
           )
         ) : tags.length === 0 ? (
-          <p className="notice">
-            No tags yet. Every verse needs at least one, so the first one you add will
-            show up here.
-          </p>
+          <p className="notice">{s.tags.none}</p>
         ) : (
           <ul className="tag-rows">
             {tags.map((tag) => (
@@ -108,7 +107,7 @@ export function Tags({
 
         <div className="sheet-actions">
           <button type="button" className="quiet" onClick={onClose}>
-            Close
+            {s.common.close}
           </button>
         </div>
       </div>

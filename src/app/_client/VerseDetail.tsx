@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { deleteVerse, fetchVerse, type VerseView } from './api';
 import { VerseSheet } from './VerseSheet';
 import { deepTimeLabel, headerLabel, placementOf, timeLabel } from './format';
+import { failureMessage, useStrings } from './locale';
+import type { Strings } from '@/shared/i18n';
 
 /**
  * One verse, in full.
@@ -27,6 +29,7 @@ export function VerseDetail({
   /** A write happened: the timeline behind this needs to refetch. */
   onChanged: () => void;
 }) {
+  const s = useStrings();
   const [verse, setVerse] = useState<VerseView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -41,7 +44,7 @@ export function VerseDetail({
       })
       .catch((cause: unknown) => {
         if (!cancelled) {
-          setError(cause instanceof Error ? cause.message : 'Could not open that verse.');
+          setError(cause instanceof Error ? cause.message : '');
         }
       });
 
@@ -71,7 +74,7 @@ export function VerseDetail({
       onClose();
     } catch (cause) {
       setConfirmingDelete(false);
-      setError(cause instanceof Error ? cause.message : 'Could not delete it.');
+      setError(cause instanceof Error ? cause.message : '');
     }
   }
 
@@ -98,22 +101,22 @@ export function VerseDetail({
         className="sheet verse-detail"
         role="dialog"
         aria-modal="true"
-        aria-label="Verse"
+        aria-label={s.verse.label}
         onClick={(event) => event.stopPropagation()}
       >
-        {error ? (
+        {error !== null ? (
           <p className="notice error" role="alert">
-            {error}
+            {failureMessage(error, s.verse.couldNotOpen)}
           </p>
         ) : null}
 
         {verse === null ? (
           error ? null : (
-            <p className="notice">Loading…</p>
+            <p className="notice">{s.common.loading}</p>
           )
         ) : (
           <>
-            <p className="detail-date">{whenOf(verse)}</p>
+            <p className="detail-date">{whenOf(verse, s)}</p>
 
             {verse.media.length > 0 ? (
               <ul className="detail-media">
@@ -128,8 +131,8 @@ export function VerseDetail({
                   ) : (
                     <li key={media.id} className="pending">
                       {media.status === 'failed'
-                        ? 'This photo could not be processed.'
-                        : 'Still processing…'}
+                        ? s.verse.photoUnprocessable
+                        : s.verse.stillProcessing}
                     </li>
                   ),
                 )}
@@ -141,23 +144,23 @@ export function VerseDetail({
             <dl className="detail-facts">
               {verse.location ? (
                 <div>
-                  <dt>Where</dt>
+                  <dt>{s.verse.where}</dt>
                   <dd>{verse.location}</dd>
                 </div>
               ) : null}
               {verse.rating !== null ? (
                 <div>
-                  <dt>Rating</dt>
+                  <dt>{s.verse.rating}</dt>
                   <dd>{verse.rating}/10</dd>
                 </div>
               ) : null}
               <div>
-                <dt>Visibility</dt>
+                <dt>{s.verse.visibility}</dt>
                 <dd>
-                  {verse.visibility}
+                  {visibilityLabel(verse.visibility, s)}
                   {/* Worth saying which of the two identical-looking cases
                       this is — an inherited value moves when a tag changes. */}
-                  {verse.explicitVisibility === null ? ' (from its tags)' : ''}
+                  {verse.explicitVisibility === null ? s.verse.fromItsTags : ''}
                 </dd>
               </div>
               {Object.entries(verse.properties).map(([key, value]) => (
@@ -178,7 +181,7 @@ export function VerseDetail({
 
             <div className="sheet-actions">
               <button type="button" className="quiet" onClick={onClose}>
-                Close
+                {s.common.close}
               </button>
               {confirmingDelete ? (
                 <>
@@ -190,7 +193,7 @@ export function VerseDetail({
                     Keep
                   </button>
                   <button type="button" className="danger" onClick={() => void remove()}>
-                    Delete for good
+                    {s.verse.deleteForGood}
                   </button>
                 </>
               ) : (
@@ -200,14 +203,14 @@ export function VerseDetail({
                     className="quiet"
                     onClick={() => setConfirmingDelete(true)}
                   >
-                    Delete
+                    {s.common.delete}
                   </button>
                   <button
                     type="button"
                     className="primary"
                     onClick={() => setEditing(true)}
                   >
-                    Edit
+                    {s.verse.edit}
                   </button>
                 </>
               )}
@@ -226,12 +229,25 @@ export function VerseDetail({
  * view opened at a moment rather than a list rendered against one anchor, so
  * the clock is read here — the one place in this file that does.
  */
-function whenOf(verse: VerseView): string {
+function whenOf(verse: VerseView, s: Strings): string {
   const placement = placementOf(verse);
-  if (placement.kind === 'deep-time') return deepTimeLabel(placement.years);
-  if (placement.kind === 'undated') return 'No date';
+  if (placement.kind === 'deep-time') return deepTimeLabel(placement.years, s);
+  if (placement.kind === 'undated') return s.common.noDate;
 
-  const day = headerLabel(placement, new Date());
+  const day = headerLabel(placement, new Date(), s);
   const time = timeLabel(placement);
   return time ? `${day}, ${time}` : day;
+}
+
+/**
+ * The resolved visibility, in words.
+ *
+ * A lookup rather than the raw value, which is an API token (`private`) that
+ * happened to read as English. It stops reading as anything at all in a
+ * Chinese interface, and a value the server chose is not a value to print.
+ */
+function visibilityLabel(visibility: string, s: Strings): string {
+  if (visibility === 'shared') return s.verse.visibilityShared;
+  if (visibility === 'public') return s.verse.visibilityPublic;
+  return s.verse.visibilityPrivate;
 }

@@ -11,6 +11,7 @@ import {
   handleRegister,
   handleResetPassword,
   handleVerifyEmail,
+  handleUpdateMe,
 } from '@/modules/identity';
 
 /**
@@ -644,8 +645,90 @@ describe.skipIf(!DATABASE_URL)('auth routes', () => {
       'email',
       'emailVerifiedAt',
       'id',
+      'locale',
     ]);
     expect(JSON.stringify(body)).not.toContain('argon2');
+  });
+
+  /**
+   * The language preference, which exists so that a *second* device and the
+   * reminder emails agree with what was chosen on screen. The browser keeps
+   * its own copy and does not wait for any of this.
+   */
+  describe('the language preference', () => {
+    const setLocale = (token: string, body: unknown) =>
+      handleUpdateMe(
+        new Request('https://agnte.test/v1/me', {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json', ...bearer(token) },
+          body: JSON.stringify(body),
+        }),
+      );
+
+    it('starts as English and comes back as what was set', async () => {
+      const pair = await signUpAndIn('locale@example.com');
+
+      expect(await (await me(bearer(pair.accessToken))).json()).toMatchObject({
+        locale: 'en',
+      });
+
+      const written = await setLocale(pair.accessToken, { locale: 'zh' });
+      expect(written.status).toBe(200);
+
+      expect(await (await me(bearer(pair.accessToken))).json()).toMatchObject({
+        locale: 'zh',
+      });
+    });
+
+    /**
+     * The guard that matters. An unvalidated value is written to the row and
+     * read back by the email sender, where it falls through to English for the
+     * rest of that account's life — a setting that appears to save and does
+     * nothing.
+     */
+    it('refuses a language it has no strings for', async () => {
+      const pair = await signUpAndIn('badlocale@example.com');
+
+      for (const body of [{ locale: 'ja' }, { locale: 'es-ES' }, { locale: 7 }, {}]) {
+        expect(
+          (await setLocale(pair.accessToken, body)).status,
+          JSON.stringify(body),
+        ).toBe(400);
+      }
+
+      expect(await (await me(bearer(pair.accessToken))).json()).toMatchObject({
+        locale: 'en',
+      });
+    });
+
+    /**
+     * No `expectedVersion`, unlike every other write in this codebase. Two
+     * devices disagreeing about a language is one person changing their mind,
+     * not a conflict — and a 409 would mean refusing to change a language
+     * because it had already been changed.
+     */
+    it('lets the last write win rather than answering 409', async () => {
+      const pair = await signUpAndIn('racelocale@example.com');
+
+      expect((await setLocale(pair.accessToken, { locale: 'es' })).status).toBe(200);
+      expect((await setLocale(pair.accessToken, { locale: 'fr' })).status).toBe(200);
+
+      expect(await (await me(bearer(pair.accessToken))).json()).toMatchObject({
+        locale: 'fr',
+      });
+    });
+
+    it('needs a token, like everything else here', async () => {
+      const response = await handleUpdateMe(
+        new Request('https://agnte.test/v1/me', {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ locale: 'es' }),
+        }),
+      );
+
+      expect(response.status).toBe(401);
+    });
   });
 
   it('refuses a request with no Authorization header', async () => {

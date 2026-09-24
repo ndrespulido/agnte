@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { VerseSheet } from './VerseSheet';
+import { useStrings } from './locale';
 
 /**
  * The add button.
@@ -16,6 +17,7 @@ import { VerseSheet } from './VerseSheet';
  * for why there is only one.
  */
 export function QuickAdd({ onAdded }: { onAdded: () => void }) {
+  const s = useStrings();
   const [open, setOpen] = useState(false);
 
   return (
@@ -23,7 +25,7 @@ export function QuickAdd({ onAdded }: { onAdded: () => void }) {
       <button
         type="button"
         className="add-button"
-        aria-label="Add a verse"
+        aria-label={s.timeline.addAVerse}
         aria-expanded={open}
         onClick={() => setOpen(true)}
       >

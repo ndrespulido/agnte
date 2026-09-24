@@ -4,6 +4,7 @@ import {
   showsCatalogue,
   toggleFilterTag,
 } from '@/app/_client/timeline-filter';
+import { en } from '@/shared/i18n';
 
 /**
  * Filtering the timeline by tag.
@@ -57,7 +58,7 @@ describe('toggleFilterTag', () => {
 
 describe('emptyMessage', () => {
   it('invites a first verse on an empty timeline', () => {
-    expect(emptyMessage([], [])).toContain('Add the first verse');
+    expect(emptyMessage([], [], '', en)).toContain('Add the first verse');
   });
 
   /**
@@ -66,21 +67,25 @@ describe('emptyMessage', () => {
    * though their record had been lost.
    */
   it('never says that under a filter', () => {
-    expect(emptyMessage(['t-flight'], ['.flight'])).not.toContain('Add the first verse');
+    expect(emptyMessage(['t-flight'], ['.flight'], '', en)).not.toContain(
+      'Add the first verse',
+    );
   });
 
   it('names the tag rather than counting it', () => {
-    expect(emptyMessage(['t-flight'], ['.flight'])).toBe('Nothing filed under .flight.');
+    expect(emptyMessage(['t-flight'], ['.flight'], '', en)).toBe(
+      'Nothing filed under .flight.',
+    );
   });
 
   it('names both when there are two', () => {
-    expect(emptyMessage(['t-a', 't-b'], ['.flight', '.hotel'])).toBe(
+    expect(emptyMessage(['t-a', 't-b'], ['.flight', '.hotel'], '', en)).toBe(
       'Nothing filed under .flight and .hotel.',
     );
   });
 
   /** Labels can be missing while the tag list is still loading. */
   it('still says something useful with no labels to hand', () => {
-    expect(emptyMessage(['t-flight'], [])).toBe('Nothing filed under that tag.');
+    expect(emptyMessage(['t-flight'], [], '', en)).toBe('Nothing filed under that tag.');
   });
 });

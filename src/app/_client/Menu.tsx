@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect } from 'react';
+import { LanguagePicker } from './LanguagePicker';
+import { useStrings } from './locale';
 
 /**
  * The header's actions, behind one button.
@@ -32,6 +34,8 @@ export function Menu({
   onSignOut: () => void;
   onClose: () => void;
 }) {
+  const s = useStrings();
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
@@ -46,23 +50,23 @@ export function Menu({
         className="sheet menu-sheet"
         role="dialog"
         aria-modal="true"
-        aria-label="Menu"
+        aria-label={s.menu.label}
         onClick={(event) => event.stopPropagation()}
       >
         <ul className="menu-rows">
           <li>
             <button type="button" className="menu-row" onClick={onTags}>
-              Tags
+              {s.menu.tags}
             </button>
           </li>
           <li>
             <button type="button" className="menu-row" onClick={onReminders}>
-              Reminders
+              {s.menu.reminders}
             </button>
           </li>
           <li>
             <button type="button" className="menu-row" onClick={onPassword}>
-              Password
+              {s.menu.password}
             </button>
           </li>
           <li>
@@ -71,19 +75,25 @@ export function Menu({
                 something to put a thumb's width from the thing you tap when
                 you are done. */}
             <button type="button" className="menu-row" onClick={onYourData}>
-              Your data
+              {s.menu.yourData}
             </button>
           </li>
           <li>
             <button type="button" className="menu-row" onClick={onSignOut}>
-              Sign out
+              {s.menu.signOut}
             </button>
           </li>
         </ul>
 
+        {/* Below the rows and above Close: it is a setting, not a
+            destination, and it is the one row someone reaches for when the
+            app is in a language they cannot read — so it must be visible
+            without first understanding any of the words above it. */}
+        <LanguagePicker />
+
         <div className="sheet-actions">
           <button type="button" className="quiet" onClick={onClose}>
-            Close
+            {s.common.close}
           </button>
         </div>
       </div>

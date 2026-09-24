@@ -14,6 +14,7 @@ import {
 } from './api';
 import { downscaleImage } from './downscale';
 import { fromDateTimeInput, splitTagNames, toDateTimeInput } from './format';
+import { failureMessage, useStrings } from './locale';
 
 /**
  * The sheet that writes a Verse — one component for both creating and
@@ -45,6 +46,7 @@ export function VerseSheet({
   const [selected, setSelected] = useState<string[]>(
     initial ? initial.tags.map((t) => t.id) : [],
   );
+  const s = useStrings();
   const [newTag, setNewTag] = useState('');
   const [xp, setXp] = useState(initial?.xp ?? '');
   const [location, setLocation] = useState(initial?.location ?? '');
@@ -73,7 +75,10 @@ export function VerseSheet({
   useEffect(() => {
     void fetchTags()
       .then(setTags)
-      .catch(() => setError('Could not load your tags.'));
+      // `''` rather than the sentence: this effect has an empty dependency
+      // list, and reading the table here would make the language a dependency
+      // of a fetch that should run once. Phrased at render instead.
+      .catch(() => setError(''));
     firstFieldRef.current?.focus();
   }, []);
 
@@ -144,7 +149,7 @@ export function VerseSheet({
           ),
         );
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : 'Could not add that image.');
+        setError(cause instanceof Error ? cause.message : s.verse.couldNotAddImage);
         setImages((current) =>
           current.map((image) =>
             image.key === key ? { ...image, status: 'failed' } : image,
@@ -218,13 +223,13 @@ export function VerseSheet({
       setNewTag('');
 
       if (tagIds.length === 0) {
-        setError('A verse needs at least one tag.');
+        setError(s.verse.needsATag);
         return;
       }
 
       const parsedRating = rating.trim() === '' ? null : Number(rating);
       if (parsedRating !== null && (Number.isNaN(parsedRating) || parsedRating < 0)) {
-        setError('A rating is a number from 0 to 10.');
+        setError(s.verse.ratingRange);
         return;
       }
 
@@ -268,7 +273,7 @@ export function VerseSheet({
 
       onSaved();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not save.');
+      setError(cause instanceof Error ? cause.message : s.verse.couldNotSave);
     } finally {
       setSaving(false);
     }
@@ -280,27 +285,27 @@ export function VerseSheet({
         className="sheet"
         role="dialog"
         aria-modal="true"
-        aria-label={editing ? 'Edit this verse' : 'Add a verse'}
+        aria-label={editing ? s.verse.editHeading : s.verse.addHeading}
         onClick={(event) => event.stopPropagation()}
       >
         <label className="field">
-          <span>What happened</span>
+          <span>{s.verse.whatHappened}</span>
           <textarea
             ref={firstFieldRef}
             value={xp}
             onChange={(event) => setXp(event.target.value)}
             rows={3}
-            placeholder="Optional — a verse can be just a tag."
+            placeholder={s.verse.xpPlaceholder}
           />
         </label>
 
         <LocationField value={location} onChange={setLocation} />
 
         <fieldset className="field">
-          <legend>When</legend>
+          <legend>{s.verse.when}</legend>
           <div className="field-pair">
             <label>
-              <span>Starts</span>
+              <span>{s.verse.starts}</span>
               <input
                 type="datetime-local"
                 value={eventStart}
@@ -310,7 +315,7 @@ export function VerseSheet({
             <label>
               {/* A range, not a second event: leaving it empty is the common
                   case, because most things happen at a moment. */}
-              <span>Ends</span>
+              <span>{s.verse.ends}</span>
               <input
                 type="datetime-local"
                 value={eventEnd}
@@ -322,19 +327,19 @@ export function VerseSheet({
 
         <div className="field-pair">
           <label className="field">
-            <span>Rating</span>
+            <span>{s.verse.rating}</span>
             <input
               type="number"
               min={0}
               max={10}
               value={rating}
               onChange={(event) => setRating(event.target.value)}
-              placeholder="0–10"
+              placeholder={s.verse.ratingPlaceholder}
             />
           </label>
 
           <label className="field">
-            <span>Visibility</span>
+            <span>{s.verse.visibility}</span>
             <select
               value={visibility}
               onChange={(event) => setVisibility(event.target.value)}
@@ -342,16 +347,16 @@ export function VerseSheet({
               {/* Empty is not "private", it is "inherit" — the verse takes the
                   most restrictive of its tags. They look identical until a tag
                   changes, which is exactly when the difference matters. */}
-              <option value="">Inherit from tags</option>
-              <option value="private">Private</option>
-              <option value="shared">Shared</option>
-              <option value="public">Public</option>
+              <option value="">{s.verse.inheritFromTags}</option>
+              <option value="private">{s.verse.private}</option>
+              <option value="shared">{s.verse.shared}</option>
+              <option value="public">{s.verse.public}</option>
             </select>
           </label>
         </div>
 
         <fieldset className="field">
-          <legend>Photos</legend>
+          <legend>{s.verse.photos}</legend>
           {images.length > 0 ? (
             <ul className="picked-images">
               {images.map((image) => (
@@ -365,7 +370,7 @@ export function VerseSheet({
                   <button
                     type="button"
                     className="remove"
-                    aria-label="Remove this photo"
+                    aria-label={s.verse.removePhoto}
                     onClick={() => removeImage(image.key)}
                   >
                     ×
@@ -376,7 +381,7 @@ export function VerseSheet({
                     </span>
                   ) : null}
                   {image.status === 'failed' ? (
-                    <span className="badge failed">Failed</span>
+                    <span className="badge failed">{s.verse.photoFailed}</span>
                   ) : null}
                 </li>
               ))}
@@ -400,12 +405,12 @@ export function VerseSheet({
                 void addFiles(files);
               }}
             />
-            <span>{images.length === 0 ? 'Add photos' : 'Add another'}</span>
+            <span>{images.length === 0 ? s.verse.addPhotos : s.verse.addAnother}</span>
           </label>
         </fieldset>
 
         <fieldset className="field">
-          <legend>Tags</legend>
+          <legend>{s.verse.tags}</legend>
           <div className="tag-picker">
             {tags.map((tag) => (
               <button
@@ -422,22 +427,22 @@ export function VerseSheet({
           <input
             value={newTag}
             onChange={(event) => setNewTag(event.target.value)}
-            placeholder="or new ones: .barcelona, .restaurant"
-            aria-label="New tag"
+            placeholder={s.verse.newTagsPlaceholder}
+            aria-label={s.verse.newTag}
           />
         </fieldset>
 
         <Properties rows={properties} onChange={setProperties} />
 
-        {error ? (
+        {error !== null ? (
           <p className="notice error" role="alert">
-            {error}
+            {failureMessage(error, s.verse.couldNotSave)}
           </p>
         ) : null}
 
         <div className="sheet-actions">
           <button type="button" className="quiet" onClick={onClose}>
-            Cancel
+            {s.common.cancel}
           </button>
           {/* Blocked while a photo is still going up, rather than saving
               without it: a verse that quietly loses the picture it was
@@ -448,7 +453,13 @@ export function VerseSheet({
             onClick={save}
             disabled={saving || uploading}
           >
-            {saving ? 'Saving…' : uploading ? 'Uploading…' : editing ? 'Save' : 'Add'}
+            {saving
+              ? s.common.saving
+              : uploading
+                ? s.verse.uploading
+                : editing
+                  ? s.common.save
+                  : s.verse.add}
           </button>
         </div>
       </div>
@@ -483,6 +494,7 @@ function LocationField({
   value: string;
   onChange: (value: string) => void;
 }) {
+  const s = useStrings();
   const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>([]);
   const [open, setOpen] = useState(false);
 
@@ -543,12 +555,12 @@ function LocationField({
   return (
     <div className="field location-field">
       <label>
-        <span>Where</span>
+        <span>{s.verse.where}</span>
         <input
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onFocus={() => setOpen(suggestions.length > 0)}
-          placeholder="Optional"
+          placeholder={s.verse.wherePlaceholder}
           // The browser's own history dropdown would sit on top of this one.
           autoComplete="off"
           role="combobox"
@@ -660,31 +672,32 @@ function Properties({
   rows: PropertyRow[];
   onChange: (rows: PropertyRow[]) => void;
 }) {
+  const s = useStrings();
   const set = (key: string, patch: Partial<PropertyRow>) =>
     onChange(rows.map((row) => (row.key === key ? { ...row, ...patch } : row)));
 
   return (
     <fieldset className="field">
-      <legend>Details</legend>
+      <legend>{s.verse.details}</legend>
 
       {rows.map((row) => (
         <div className="field-pair property-row" key={row.key}>
           <input
             value={row.name}
             onChange={(event) => set(row.key, { name: event.target.value })}
-            placeholder="e.g. seat"
-            aria-label="Detail name"
+            placeholder={s.verse.detailNamePlaceholder}
+            aria-label={s.verse.detailName}
           />
           <input
             value={row.value}
             onChange={(event) => set(row.key, { value: event.target.value })}
-            placeholder="e.g. 14A"
-            aria-label="Detail value"
+            placeholder={s.verse.detailValuePlaceholder}
+            aria-label={s.verse.detailValue}
           />
           <button
             type="button"
             className="quiet"
-            aria-label={`Remove ${row.name || 'this detail'}`}
+            aria-label={s.verse.removeDetail(row.name || s.verse.thisDetail)}
             onClick={() => onChange(rows.filter((other) => other.key !== row.key))}
           >
             ×
@@ -699,7 +712,7 @@ function Properties({
           onChange([...rows, { key: crypto.randomUUID(), name: '', value: '' }])
         }
       >
-        Add a detail
+        {s.verse.addADetail}
       </button>
     </fieldset>
   );

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { resetPassword } from './session';
+import { useStrings } from './locale';
 
 /**
  * Setting a new password from a mailed link.
@@ -18,6 +19,7 @@ import { resetPassword } from './session';
  * is the sign-in screen with the password they just chose.
  */
 export function ResetPassword() {
+  const s = useStrings();
   const [token, setToken] = useState<string | null>(null);
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -73,7 +75,7 @@ export function ResetPassword() {
       await resetPassword(token, password);
       setDone(true);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Something went wrong.');
+      setError(cause instanceof Error ? cause.message : s.common.somethingWentWrong);
     } finally {
       setBusy(false);
     }
@@ -82,12 +84,10 @@ export function ResetPassword() {
   if (done) {
     return (
       <div className="auth">
-        <h1>Password changed</h1>
-        <p className="lede">
-          Every device was signed out, including this one. Sign in with the new password.
-        </p>
+        <h1>{s.password.changed}</h1>
+        <p className="lede">{s.password.signedOutEverywhere}</p>
         <Link className="google-sign-in" href="/">
-          Go to sign in
+          {s.password.goToSignIn}
         </Link>
       </div>
     );
@@ -98,13 +98,10 @@ export function ResetPassword() {
   if (token === null) {
     return (
       <div className="auth">
-        <h1>No reset link</h1>
-        <p className="lede">
-          This page needs the link from the email. Ask for a fresh one if that link is old
-          — they expire.
-        </p>
+        <h1>{s.password.noResetLink}</h1>
+        <p className="lede">{s.password.needsTheLink}</p>
         <Link className="google-sign-in" href="/">
-          Back to sign in
+          {s.password.backToSignIn}
         </Link>
       </div>
     );
@@ -112,11 +109,11 @@ export function ResetPassword() {
 
   return (
     <div className="auth">
-      <h1>Set a new password</h1>
+      <h1>{s.password.setNew}</h1>
 
       <form onSubmit={submit}>
         <label className="field">
-          <span>New password</span>
+          <span>{s.password.next}</span>
           <input
             type="password"
             value={password}
@@ -133,7 +130,7 @@ export function ResetPassword() {
         ) : null}
 
         <button type="submit" className="primary" disabled={busy}>
-          {busy ? 'Working…' : 'Set password'}
+          {busy ? s.common.working : s.password.setPassword}
         </button>
       </form>
     </div>

@@ -25,6 +25,8 @@ import {
   splitTagNames,
   toLocalDateTimeInput,
 } from './format';
+import { failureMessage, useStrings } from './locale';
+import type { Strings } from '@/shared/i18n';
 import { disablePush, enablePush, pushState, type PushState } from './push';
 
 /**
@@ -37,18 +39,42 @@ import { disablePush, enablePush, pushState, type PushState } from './push';
  * should be asked to type.
  */
 
-/** What the picker offers, as the RRULE each one stands for. */
-const REPEATS: { label: string; rule: string | null }[] = [
-  { label: 'Once', rule: null },
-  { label: 'Every day', rule: 'FREQ=DAILY' },
-  { label: 'Every weekday', rule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR' },
-  { label: 'Every week', rule: 'FREQ=WEEKLY' },
-  { label: 'Every month', rule: 'FREQ=MONTHLY' },
-  { label: 'Every year', rule: 'FREQ=YEARLY' },
-];
+/**
+ * What the picker offers, as the RRULE each one stands for.
+ *
+ * The rule is the identity and the label is looked up, rather than the pair
+ * being one translated constant: the RRULE goes to the server and must not
+ * move when the language does.
+ */
+const REPEAT_RULES = [
+  null,
+  'FREQ=DAILY',
+  'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR',
+  'FREQ=WEEKLY',
+  'FREQ=MONTHLY',
+  'FREQ=YEARLY',
+] as const;
 
-const labelForRule = (rule: string | null): string =>
-  REPEATS.find((r) => r.rule === rule)?.label ?? rule ?? 'Once';
+function labelForRule(rule: string | null, s: Strings): string {
+  switch (rule) {
+    case null:
+      return s.reminders.once;
+    case 'FREQ=DAILY':
+      return s.reminders.everyDay;
+    case 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR':
+      return s.reminders.everyWeekday;
+    case 'FREQ=WEEKLY':
+      return s.reminders.everyWeek;
+    case 'FREQ=MONTHLY':
+      return s.reminders.everyMonth;
+    case 'FREQ=YEARLY':
+      return s.reminders.everyYear;
+    // A rule created through the API that this picker does not offer: shown
+    // as itself rather than hidden or mislabelled as "Once".
+    default:
+      return rule;
+  }
+}
 
 /** Minutes from midnight as "22:00", for a time input. */
 const toTimeInput = (minutes: number): string =>
@@ -71,6 +97,7 @@ export function Reminders({
   /** A reminder was scheduled, so the timeline behind has a new verse on it. */
   onScheduled: () => void;
 }) {
+  const s = useStrings();
   const [reminders, setReminders] = useState<ReminderView[] | null>(null);
   const [quiet, setQuiet] = useState<QuietHoursView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -99,7 +126,7 @@ export function Reminders({
         setQuiet(hours);
       })
       .catch((cause: unknown) => {
-        setError(cause instanceof Error ? cause.message : 'Could not load reminders.');
+        setError(cause instanceof Error ? cause.message : '');
       });
   };
 
@@ -122,10 +149,10 @@ export function Reminders({
         className="sheet reminders"
         role="dialog"
         aria-modal="true"
-        aria-label="Reminders"
+        aria-label={s.reminders.heading}
         onClick={(event) => event.stopPropagation()}
       >
-        <h2 className="dashboard-title">Reminders</h2>
+        <h2 className="dashboard-title">{s.reminders.heading}</h2>
 
         <PushToggle
           state={push}
@@ -135,19 +162,15 @@ export function Reminders({
             (next === 'on' ? enablePush() : disablePush())
               .then(setPush)
               .catch((cause: unknown) => {
-                setError(
-                  cause instanceof Error
-                    ? cause.message
-                    : 'Could not change notifications.',
-                );
+                setError(cause instanceof Error ? cause.message : '');
               })
               .finally(() => setPushBusy(false));
           }}
         />
 
-        {error ? (
+        {error !== null ? (
           <p className="notice error" role="alert">
-            {error}
+            {failureMessage(error, s.reminders.couldNotLoad)}
           </p>
         ) : null}
 
@@ -190,10 +213,14 @@ function ReminderList({
   error: string | null;
   onOpenVerse: (verseId: string) => void;
 }) {
-  if (reminders === null) return error ? null : <p className="notice">Loading…</p>;
+  const s = useStrings();
+
+  if (reminders === null) {
+    return error !== null ? null : <p className="notice">{s.common.loading}</p>;
+  }
 
   if (reminders.length === 0) {
-    return <p className="notice">Nothing scheduled.</p>;
+    return <p className="notice">{s.reminders.none}</p>;
   }
 
   return (
@@ -203,7 +230,8 @@ function ReminderList({
           <span className="quiet-note">
             {/* Local, not UTC — see format.ts for why reminders break with the
                 rest of the display layer on this. */}
-            {localMomentLabel(reminder.fireAt)} · {labelForRule(reminder.recurrence)}
+            {localMomentLabel(reminder.fireAt, s)} ·{' '}
+            {labelForRule(reminder.recurrence, s)}
             {reminder.status !== 'pending' ? (
               // `failed` keeps the reason the dispatcher gave up, which is the
               // only place someone can find out a reminder stopped working.
@@ -253,6 +281,7 @@ function AddReminder({
   onCancel: () => void;
   onAdded: () => void;
 }) {
+  const s = useStrings();
   const [title, setTitle] = useState('');
   const [fireAt, setFireAt] = useState(() => {
     // An hour from now, rounded: the server refuses a time in the past, and
@@ -298,7 +327,7 @@ function AddReminder({
 
     try {
       const when = fromLocalDateTimeInput(fireAt);
-      if (!when) throw new Error('Pick a date and time.');
+      if (!when) throw new Error(s.reminders.pickADateAndTime);
 
       /*
        * `.reminder` first, then whatever was chosen or typed.
@@ -351,7 +380,7 @@ function AddReminder({
       setNewTag('');
       onAdded();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not save that.');
+      setError(cause instanceof Error ? cause.message : '');
     } finally {
       setBusy(false);
     }
@@ -360,18 +389,18 @@ function AddReminder({
   return (
     <form className="reminder-form" onSubmit={submit}>
       <label className="field">
-        Reminder
+        {s.reminders.reminderLabel}
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder="Take the tablet"
+          placeholder={s.reminders.titlePlaceholder}
           required
           autoFocus
         />
       </label>
 
       <label className="field">
-        When
+        {s.reminders.when}
         <input
           type="datetime-local"
           value={fireAt}
@@ -381,25 +410,22 @@ function AddReminder({
       </label>
 
       <label className="field">
-        Repeats
+        {s.reminders.repeats}
         <select
           value={rule ?? ''}
           onChange={(e) => setRule(e.target.value === '' ? null : e.target.value)}
         >
-          {REPEATS.map((option) => (
-            <option key={option.label} value={option.rule ?? ''}>
-              {option.label}
+          {REPEAT_RULES.map((option) => (
+            <option key={option ?? 'once'} value={option ?? ''}>
+              {labelForRule(option, s)}
             </option>
           ))}
         </select>
       </label>
 
       <fieldset className="field">
-        <legend>Tags</legend>
-        <p className="quiet-note">
-          It lands on the timeline as a verse, tagged <code>.reminder</code>. Add more to
-          file it with the rest of the trip.
-        </p>
+        <legend>{s.reminders.tags}</legend>
+        <p className="quiet-note">{s.reminders.landsAsAVerse}</p>
         <div className="tag-picker">
           {/*
             `.reminder` is not offered as a chip, because it is not optional —
@@ -430,22 +456,22 @@ function AddReminder({
         <input
           value={newTag}
           onChange={(e) => setNewTag(e.target.value)}
-          placeholder="or new ones: .barcelona, .flight"
+          placeholder={s.reminders.newTagsPlaceholder}
         />
       </fieldset>
 
-      {error ? (
+      {error !== null ? (
         <p className="notice error" role="alert">
-          {error}
+          {failureMessage(error, s.reminders.couldNotSave)}
         </p>
       ) : null}
 
       <div className="sheet-actions">
         <button type="submit" disabled={busy}>
-          {busy ? 'Saving…' : 'Schedule'}
+          {busy ? s.common.saving : s.reminders.schedule}
         </button>
         <button type="button" className="quiet" onClick={onCancel}>
-          Cancel
+          {s.common.cancel}
         </button>
       </div>
     </form>
@@ -467,6 +493,7 @@ function QuietHoursField({
   quiet: QuietHoursView | null;
   onSaved: (quiet: QuietHoursView | null) => void;
 }) {
+  const s = useStrings();
   const [start, setStart] = useState(() => toTimeInput(quiet?.startMinute ?? 22 * 60));
   const [end, setEnd] = useState(() => toTimeInput(quiet?.endMinute ?? 7 * 60));
   const [error, setError] = useState<string | null>(null);
@@ -477,19 +504,19 @@ function QuietHoursField({
     try {
       onSaved(await saveQuietHours(next));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not save that.');
+      setError(cause instanceof Error ? cause.message : '');
     }
   }
 
   return (
     <section className="dashboard-section">
-      <h3>Quiet hours</h3>
+      <h3>{s.reminders.quietHours}</h3>
 
       {enabled ? (
         <>
           <div className="quiet-range">
             <label className="field">
-              From
+              {s.reminders.from}
               <input
                 type="time"
                 value={start}
@@ -497,14 +524,15 @@ function QuietHoursField({
               />
             </label>
             <label className="field">
-              To
+              {s.reminders.to}
               <input type="time" value={end} onChange={(e) => setEnd(e.target.value)} />
             </label>
           </div>
 
           <p className="quiet-note">
-            {Intl.DateTimeFormat().resolvedOptions().timeZone}. A reminder that falls
-            inside this window waits until it ends rather than being dropped.
+            {s.reminders.quietWindowNote(
+              Intl.DateTimeFormat().resolvedOptions().timeZone,
+            )}
           </p>
 
           <div className="sheet-actions">
@@ -513,7 +541,9 @@ function QuietHoursField({
               onClick={() => {
                 const from = fromTimeInput(start);
                 const to = fromTimeInput(end);
-                if (from === null || to === null) return setError('Pick two times.');
+                if (from === null || to === null) {
+                  return setError(s.reminders.pickTwoTimes);
+                }
                 void save({
                   startMinute: from,
                   endMinute: to,
@@ -521,10 +551,10 @@ function QuietHoursField({
                 });
               }}
             >
-              Save
+              {s.common.save}
             </button>
             <button type="button" className="quiet" onClick={() => void save(null)}>
-              Turn off
+              {s.reminders.turnOff}
             </button>
           </div>
         </>
@@ -540,13 +570,13 @@ function QuietHoursField({
             })
           }
         >
-          Set quiet hours
+          {s.reminders.setQuietHours}
         </button>
       )}
 
-      {error ? (
+      {error !== null ? (
         <p className="notice error" role="alert">
-          {error}
+          {failureMessage(error, s.reminders.couldNotSave)}
         </p>
       ) : null}
     </section>
@@ -575,40 +605,32 @@ function PushToggle({
   busy: boolean;
   onChange: (next: 'on' | 'off') => void;
 }) {
+  const s = useStrings();
+
   if (state === null) return null;
 
   if (state === 'unsupported') {
-    return (
-      <p className="data-note">
-        This browser cannot show notifications here, so reminders arrive by email. On an
-        iPhone, add Agnte to your home screen first.
-      </p>
-    );
+    return <p className="data-note">{s.reminders.notificationsUnsupported}</p>;
   }
 
   if (state === 'denied') {
-    return (
-      <p className="data-note">
-        Notifications are blocked for this site, so reminders arrive by email. Your
-        browser&rsquo;s site settings are the only place that can undo it.
-      </p>
-    );
+    return <p className="data-note">{s.reminders.notificationsBlocked}</p>;
   }
 
   return (
     <p className="data-note push-toggle">
-      <span>
-        {state === 'on'
-          ? 'Reminders show as notifications on this device.'
-          : 'Reminders arrive by email. Notifications are quicker.'}
-      </span>
+      <span>{state === 'on' ? s.reminders.onThisDevice : s.reminders.byEmail}</span>
       <button
         type="button"
         className="quiet"
         disabled={busy}
         onClick={() => onChange(state === 'on' ? 'off' : 'on')}
       >
-        {busy ? 'Just a moment…' : state === 'on' ? 'Turn off' : 'Turn on'}
+        {busy
+          ? s.reminders.justAMoment
+          : state === 'on'
+            ? s.reminders.turnOff
+            : s.reminders.turnOn}
       </button>
     </p>
   );
