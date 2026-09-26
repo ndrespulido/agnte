@@ -1,3 +1,5 @@
+import type { Strings } from '@/shared/i18n';
+
 /**
  * Filtering the timeline by tag.
  *
@@ -58,19 +60,20 @@ export function toggleFilterTag(
 export function emptyMessage(
   tagIds: readonly string[],
   labels: readonly string[],
-  text = '',
+  text: string,
+  s: Strings,
 ): string {
   const typed = text.trim();
 
-  if (tagIds.length === 0 && typed === '') {
-    return 'Nothing on the timeline yet. Add the first verse with the button below.';
-  }
+  if (tagIds.length === 0 && typed === '') return s.timeline.empty;
 
   // Named rather than counted: "Nothing under 2 tags" makes someone go back and
-  // look at the chips to find out which two.
-  const named = labels.join(' and ');
+  // look at the chips to find out which two. The joining word comes from the
+  // table, because it is a word — English "and", Spanish "y", and Chinese's
+  // enumeration comma 、, which is punctuation rather than a word at all.
+  const named = labels.join(s.timeline.andJoin);
 
-  if (typed !== '' && named !== '') return `Nothing under ${named} matches “${typed}”.`;
-  if (typed !== '') return `Nothing matches “${typed}”.`;
-  return named === '' ? 'Nothing filed under that tag.' : `Nothing filed under ${named}.`;
+  if (typed !== '' && named !== '') return s.timeline.nothingMatchesUnder(named, typed);
+  if (typed !== '') return s.timeline.nothingMatches(typed);
+  return named === '' ? s.timeline.emptyUnderTag : s.timeline.emptyUnderTags(named);
 }

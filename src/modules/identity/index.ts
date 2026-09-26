@@ -11,7 +11,7 @@ export { handleVerifyEmail } from './api/verify-email-route';
 export { handleLogin, handleLogout, handleRefresh } from './api/session-routes';
 export { handleForgotPassword, handleResetPassword } from './api/password-reset-routes';
 export { handleChangePassword } from './api/change-password-route';
-export { handleMe } from './api/me-route';
+export { handleMe, handleUpdateMe } from './api/me-route';
 export {
   handleGoogleStart,
   handleGoogleCallback,
@@ -25,7 +25,8 @@ export type { Authenticated } from './api/authenticate';
 export { IdentityErrorCode } from './domain/errors';
 export { MIN_PASSWORD_LENGTH, MAX_PASSWORD_LENGTH } from './domain/password';
 export { MAX_EMAIL_LENGTH } from './domain/email';
-export { contactEmailFor } from './application/contact';
+export { contactEmailFor, contactFor } from './application/contact';
+export type { Contact } from './application/contact';
 
 export {
   ERASURE_GRACE_MS,

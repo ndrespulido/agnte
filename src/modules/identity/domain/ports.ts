@@ -72,6 +72,16 @@ export interface UserRepository {
     expectedVersion: number;
     now: Date;
   }): Promise<boolean>;
+
+  /**
+   * Writes the language preference, unconditionally.
+   *
+   * No expected version and no boolean outcome, deliberately: two devices
+   * disagreeing about a language is not a conflict, it is a person who changed
+   * their mind on one of them, and the last write is the right answer. See the
+   * adapter for why this differs from `updatePassword`.
+   */
+  updateLocale(input: { userId: string; locale: string; now: Date }): Promise<void>;
 }
 
 /**

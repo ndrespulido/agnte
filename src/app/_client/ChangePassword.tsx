@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useStrings } from './locale';
 import { changePassword } from './session';
 
 /**
@@ -17,6 +18,7 @@ import { changePassword } from './session';
  * end of the flow.
  */
 export function ChangePassword({ onClose }: { onClose: () => void }) {
+  const s = useStrings();
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [busy, setBusy] = useState(false);
@@ -40,7 +42,7 @@ export function ChangePassword({ onClose }: { onClose: () => void }) {
       // No success state: clearing the tokens above already told the shell,
       // and it is replacing this screen as this resolves.
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not change it.');
+      setError(cause instanceof Error ? cause.message : s.password.failed);
       setBusy(false);
     }
   }
@@ -51,19 +53,16 @@ export function ChangePassword({ onClose }: { onClose: () => void }) {
         className="sheet"
         role="dialog"
         aria-modal="true"
-        aria-label="Change your password"
+        aria-label={s.password.heading}
         onClick={(event) => event.stopPropagation()}
       >
-        <h2 className="detail-date">Change your password</h2>
+        <h2 className="detail-date">{s.password.heading}</h2>
 
-        <p className="notice">
-          Every device is signed out, including this one. You will sign in again with the
-          new password.
-        </p>
+        <p className="notice">{s.password.everyDeviceSignedOut}</p>
 
         <form onSubmit={submit}>
           <label className="field">
-            <span>Current password</span>
+            <span>{s.password.current}</span>
             <input
               type="password"
               value={current}
@@ -74,7 +73,7 @@ export function ChangePassword({ onClose }: { onClose: () => void }) {
           </label>
 
           <label className="field">
-            <span>New password</span>
+            <span>{s.password.next}</span>
             <input
               type="password"
               value={next}
@@ -95,10 +94,10 @@ export function ChangePassword({ onClose }: { onClose: () => void }) {
 
           <div className="sheet-actions">
             <button type="button" className="quiet" onClick={onClose}>
-              Cancel
+              {s.common.cancel}
             </button>
             <button type="submit" className="primary" disabled={busy}>
-              {busy ? 'Changing…' : 'Change password'}
+              {busy ? s.password.changing : s.password.change}
             </button>
           </div>
         </form>

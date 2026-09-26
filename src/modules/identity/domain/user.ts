@@ -19,6 +19,23 @@ export interface User {
   readonly displayName: string | null;
 
   /**
+   * The language this person reads, as a locale code.
+   *
+   * Here rather than in a settings module because it is not only a display
+   * preference: `notifications` composes a reminder email in it, from a
+   * scheduled tick that has no request and therefore no `Accept-Language`. A
+   * preference nothing but the browser could read would leave those emails in
+   * English for everyone.
+   *
+   * A plain string, validated at the edges rather than by the type. The domain
+   * has no opinion on which languages exist — that list lives in
+   * `shared/i18n` and is meant to grow — and an unrecognised value resolves to
+   * English when the strings are looked up, so a stale row degrades rather
+   * than throwing.
+   */
+  readonly locale: string;
+
+  /**
    * Null until the address is proven. This is the *only* fact about
    * verification — deriving `isVerified` from it means there is no second
    * field that can disagree with it.
@@ -62,6 +79,8 @@ export function createVerifiedUser(input: {
   email: Email;
   passwordHash: string | null;
   displayName?: string | null;
+  /** What the browser asked for at registration, if this app speaks it. */
+  locale?: string | undefined;
   clock: Clock;
 }): User {
   const now = input.clock.now();
@@ -70,6 +89,9 @@ export function createVerifiedUser(input: {
     email: input.email,
     passwordHash: input.passwordHash,
     displayName: input.displayName ?? null,
+    // English unless something knew better, matching the column's default so
+    // a row inserted by either path says the same thing.
+    locale: input.locale ?? 'en',
     emailVerifiedAt: now,
     // A new account is never mid-erasure; the column exists for the accounts
     // that later ask to be.

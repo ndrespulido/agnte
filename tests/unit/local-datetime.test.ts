@@ -14,6 +14,7 @@ process.env.TZ = 'Europe/Madrid';
 
 const { fromLocalDateTimeInput, toLocalDateTimeInput, localMomentLabel } =
   await import('@/app/_client/format');
+const { en } = await import('@/shared/i18n');
 
 describe('reminder times are local, not UTC', () => {
   it('reads a summer wall-clock time as the instant it really is', () => {
@@ -32,7 +33,7 @@ describe('reminder times are local, not UTC', () => {
   });
 
   it('shows the moment in the reader zone', () => {
-    expect(localMomentLabel('2026-07-15T15:00:00.000Z')).toBe('15 July 2026, 17:00');
+    expect(localMomentLabel('2026-07-15T15:00:00.000Z', en)).toBe('15 July 2026, 17:00');
   });
 
   it('answers empty for nothing rather than inventing a date', () => {

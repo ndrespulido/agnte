@@ -11,6 +11,7 @@ interface UserRow {
   email: string;
   password_hash: string;
   display_name: string | null;
+  locale: string;
   email_verified_at: Date | null;
   erasure_requested_at: Date | null;
   created_at: Date;
@@ -23,6 +24,7 @@ const toUser = (row: UserRow): User => ({
   email: row.email as Email,
   passwordHash: row.password_hash,
   displayName: row.display_name,
+  locale: row.locale,
   emailVerifiedAt: row.email_verified_at,
   erasureRequestedAt: row.erasure_requested_at,
   createdAt: row.created_at,
@@ -68,12 +70,13 @@ export class PrismaUserRepository implements UserRepository {
     try {
       await requireDatabase().$executeRaw`
         INSERT INTO identity."user"
-          (id, email, password_hash, display_name, email_verified_at, created_at, updated_at, version)
+          (id, email, password_hash, display_name, locale, email_verified_at, created_at, updated_at, version)
         VALUES (
           ${user.id}::uuid,
           ${user.email},
           ${user.passwordHash},
           ${user.displayName},
+          ${user.locale},
           ${user.emailVerifiedAt},
           ${user.createdAt},
           ${user.updatedAt},
@@ -112,6 +115,30 @@ export class PrismaUserRepository implements UserRepository {
     `;
 
     return updated > 0;
+  }
+
+  /**
+   * Writes the language preference.
+   *
+   * Unconditional — no expected version, unlike `updatePassword`. Two devices
+   * disagreeing about a language is not a conflict worth a 409: the answer is
+   * "whichever was picked last", and a stale-write error here would mean
+   * telling someone their language could not be changed because they had
+   * changed it somewhere else. `version` still moves, so anything that *does*
+   * care about concurrency sees that the row was touched.
+   */
+  async updateLocale(input: {
+    userId: string;
+    locale: string;
+    now: Date;
+  }): Promise<void> {
+    await requireDatabase().$executeRaw`
+      UPDATE identity."user"
+      SET locale = ${input.locale},
+          updated_at = ${input.now},
+          version = version + 1
+      WHERE id = ${input.userId}::uuid
+    `;
   }
 }
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { failureMessage, useStrings } from './locale';
 import { fetchTagDashboard, type DashboardView } from './api';
 import { dayLabel } from './format';
 
@@ -18,6 +19,7 @@ import { dayLabel } from './format';
  * more honest about the precision on offer and much easier to read at 390px.
  */
 export function Dashboard({ tagId, onClose }: { tagId: string; onClose: () => void }) {
+  const s = useStrings();
   const [data, setData] = useState<DashboardView | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,9 +32,7 @@ export function Dashboard({ tagId, onClose }: { tagId: string; onClose: () => vo
       })
       .catch((cause: unknown) => {
         if (!cancelled) {
-          setError(
-            cause instanceof Error ? cause.message : 'Could not open that dashboard.',
-          );
+          setError(cause instanceof Error ? cause.message : '');
         }
       });
 
@@ -55,18 +55,18 @@ export function Dashboard({ tagId, onClose }: { tagId: string; onClose: () => vo
         className="sheet dashboard"
         role="dialog"
         aria-modal="true"
-        aria-label={data ? `Dashboard for ${data.tag.label}` : 'Dashboard'}
+        aria-label={data ? s.dashboard.forTag(data.tag.label) : s.dashboard.heading}
         onClick={(event) => event.stopPropagation()}
       >
-        {error ? (
+        {error !== null ? (
           <p className="notice error" role="alert">
-            {error}
+            {failureMessage(error, s.dashboard.couldNotOpen)}
           </p>
         ) : null}
 
         {data === null ? (
           error ? null : (
-            <p className="notice">Loading…</p>
+            <p className="notice">{s.common.loading}</p>
           )
         ) : (
           <>
@@ -76,8 +76,7 @@ export function Dashboard({ tagId, onClose }: { tagId: string; onClose: () => vo
               // Said outright rather than left for someone to wonder about. A
               // total computed over part of the data is worse than no total.
               <p className="notice" role="status">
-                This tag holds more than one dashboard reads. The figures below cover the
-                most recent entries only.
+                {s.dashboard.truncated}
               </p>
             ) : null}
 
@@ -90,7 +89,7 @@ export function Dashboard({ tagId, onClose }: { tagId: string; onClose: () => vo
 
         <div className="sheet-actions">
           <button type="button" className="quiet" onClick={onClose}>
-            Close
+            {s.common.close}
           </button>
         </div>
       </div>
@@ -100,29 +99,30 @@ export function Dashboard({ tagId, onClose }: { tagId: string; onClose: () => vo
 
 /** The headline counts: how much is here, and over what span. */
 function Figures({ data }: { data: DashboardView }) {
+  const s = useStrings();
   const { summary } = data;
 
   const span =
     summary.firstEvent && summary.lastEvent
       ? summary.firstEvent === summary.lastEvent
-        ? dayLabel(new Date(summary.firstEvent))
-        : `${dayLabel(new Date(summary.firstEvent))} — ${dayLabel(new Date(summary.lastEvent))}`
+        ? dayLabel(new Date(summary.firstEvent), s)
+        : `${dayLabel(new Date(summary.firstEvent), s)} — ${dayLabel(new Date(summary.lastEvent), s)}`
       : null;
 
   return (
     <dl className="figures">
-      <Figure label="Verses" value={String(summary.verseCount)} />
-      {span ? <Figure label="Span" value={span} /> : null}
+      <Figure label={s.dashboard.verses} value={String(summary.verseCount)} />
+      {span ? <Figure label={s.dashboard.span} value={span} /> : null}
       {summary.undatedCount > 0 ? (
-        <Figure label="Undated" value={String(summary.undatedCount)} />
+        <Figure label={s.dashboard.undated} value={String(summary.undatedCount)} />
       ) : null}
       {summary.deepTimeCount > 0 ? (
-        <Figure label="Deep time" value={String(summary.deepTimeCount)} />
+        <Figure label={s.dashboard.deepTime} value={String(summary.deepTimeCount)} />
       ) : null}
       {summary.mediaCount > 0 ? (
         <Figure
-          label="Photos"
-          value={`${summary.mediaCount} across ${summary.withMediaCount}`}
+          label={s.dashboard.photos}
+          value={s.dashboard.mediaAcross(summary.mediaCount, summary.withMediaCount)}
         />
       ) : null}
     </dl>
@@ -145,15 +145,21 @@ function Figure({ label, value }: { label: string; value: string }) {
  * rows — an empty chart reads as a broken one.
  */
 function Ratings({ data }: { data: DashboardView }) {
+  const s = useStrings();
   const { summary } = data;
-  if (summary.ratedCount === 0) return null;
+  // `averageRating` is null exactly when nothing is rated, so the second half
+  // never fires on its own — it is here because the type says it can, and
+  // asserting the invariant is better than rendering "average " with a hole
+  // in it the way the untyped interpolation used to.
+  if (summary.ratedCount === 0 || summary.averageRating === null) return null;
 
   const peak = Math.max(...summary.ratingHistogram);
 
   return (
     <section className="dashboard-section">
       <h3>
-        Rating <span className="quiet-note">average {summary.averageRating}</span>
+        {s.dashboard.ratingHeading}{' '}
+        <span className="quiet-note">{s.dashboard.average(summary.averageRating)}</span>
       </h3>
       <ul className="bars">
         {summary.ratingHistogram.map((count, rating) => (
@@ -174,7 +180,7 @@ function Ratings({ data }: { data: DashboardView }) {
       </ul>
       {summary.ratedCount < summary.verseCount ? (
         <p className="quiet-note">
-          {summary.ratedCount} of {summary.verseCount} rated
+          {s.dashboard.ratedOf(summary.ratedCount, summary.verseCount)}
         </p>
       ) : null}
     </section>
@@ -183,12 +189,13 @@ function Ratings({ data }: { data: DashboardView }) {
 
 /** What the tag's properties add up to — the reason this screen exists. */
 function Properties({ data }: { data: DashboardView }) {
+  const s = useStrings();
   const { summary } = data;
   if (summary.properties.length === 0) return null;
 
   return (
     <section className="dashboard-section">
-      <h3>Properties</h3>
+      <h3>{s.dashboard.properties}</h3>
       <dl className="figures">
         {summary.properties.map((property) => (
           <div className="figure" key={property.key}>
@@ -204,14 +211,17 @@ function Properties({ data }: { data: DashboardView }) {
                     // over 9 of 12 values is not a sum over 12.
                     <span className="quiet-note">
                       {' '}
-                      from {property.numericCount} of {property.verseCount}
+                      {s.dashboard.fromOf(property.numericCount, property.verseCount)}
                     </span>
                   ) : (
-                    <span className="quiet-note"> across {property.verseCount}</span>
+                    <span className="quiet-note">
+                      {' '}
+                      {s.dashboard.across(property.verseCount)}
+                    </span>
                   )}
                 </>
               ) : (
-                <span className="quiet-note">on {property.verseCount}</span>
+                <span className="quiet-note">{s.dashboard.on(property.verseCount)}</span>
               )}
             </dd>
           </div>
@@ -223,12 +233,13 @@ function Properties({ data }: { data: DashboardView }) {
 
 /** Which other tags these verses are also filed under. */
 function CoTags({ data }: { data: DashboardView }) {
+  const s = useStrings();
   const { summary } = data;
   if (summary.coTags.length === 0) return null;
 
   return (
     <section className="dashboard-section">
-      <h3>Also tagged</h3>
+      <h3>{s.dashboard.alsoTagged}</h3>
       <ul className="co-tags">
         {summary.coTags.map((tag) => (
           <li key={tag.id}>

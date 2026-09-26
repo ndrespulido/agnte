@@ -1,6 +1,7 @@
-import { contactEmailFor } from '@/modules/identity';
+import { contactFor } from '@/modules/identity';
 import { getEmailTransport } from '@/shared/infra/email';
 import { loadConfig } from '@/shared/infra/config';
+import { isLocale, stringsFor, DEFAULT_LOCALE } from '@/shared/i18n';
 import type { NotificationDelivery } from '../domain/ports';
 
 /**
@@ -28,21 +29,34 @@ export class EmailNotificationDelivery implements NotificationDelivery {
     // whether to retry, and it can only do that if failure reaches it.
     if (!transport) throw new Error('No email transport is configured.');
 
-    const to = await contactEmailFor(input.userId);
-    if (!to) throw new Error('That user no longer has an address to send to.');
+    const contact = await contactFor(input.userId);
+    if (!contact) throw new Error('That user no longer has an address to send to.');
+
+    /*
+     * The language the *recipient* chose, not the sender's and not the
+     * server's. There is no request here to read a header from — this runs
+     * from the scheduled tick — which is why identity stores it on the user.
+     *
+     * An unrecognised value falls back to English rather than throwing: a row
+     * written by a newer version of the app that offers a language this
+     * instance does not have yet should still get its reminder.
+     */
+    const s = stringsFor(isLocale(contact.locale) ? contact.locale : DEFAULT_LOCALE);
 
     const origin = loadConfig().APP_BASE_URL?.replace(/\/+$/, '');
     const link = input.verseId && origin ? `${origin}/?verse=${input.verseId}` : null;
 
     await transport.send({
-      to,
+      to: contact.email,
+      // The title and body are the person's own words, from their own verse,
+      // so they are not translated — only the app's sentences around them are.
       subject: input.title,
       text: [
         input.title,
         ...(input.body ? ['', input.body] : []),
-        ...(link ? ['', 'Open it in Agnte:', link] : []),
+        ...(link ? ['', s.email.openInAgnte, link] : []),
         '',
-        'You set this reminder in Agnte. Change or cancel it from the Reminders screen.',
+        s.email.reminderFooter,
       ].join('\n'),
     });
   }

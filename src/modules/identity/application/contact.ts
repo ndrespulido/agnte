@@ -15,7 +15,31 @@ import { PrismaUserRepository } from '../infrastructure/prisma-user-repository';
  * to send" rather than as an error: a reminder outliving its owner by a few
  * seconds is an ordinary race with account deletion, not a fault.
  */
-export async function contactEmailFor(userId: string): Promise<string | null> {
+export interface Contact {
+  readonly email: string;
+  /**
+   * The language to write to them in.
+   *
+   * Why it is stored rather than read from a request: the caller that needs it
+   * most is the nightly reminder tick, which runs from a Cloud Scheduler
+   * callback with no browser and no `Accept-Language` to consult. Without a
+   * stored preference every scheduled email would be in English regardless of
+   * what the person had chosen on screen.
+   *
+   * A raw string, resolved against the string tables by the caller. Identity
+   * has no list of supported languages and should not grow one — that list
+   * changes whenever a translation is added, and this module would have no way
+   * to know.
+   */
+  readonly locale: string;
+}
+
+export async function contactFor(userId: string): Promise<Contact | null> {
   const user = await new PrismaUserRepository().findById(userId);
-  return user?.email ?? null;
+  return user ? { email: user.email, locale: user.locale } : null;
+}
+
+/** Just the address, for a caller with nothing to say in a language. */
+export async function contactEmailFor(userId: string): Promise<string | null> {
+  return (await contactFor(userId))?.email ?? null;
 }

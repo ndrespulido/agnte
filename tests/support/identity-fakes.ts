@@ -71,6 +71,24 @@ export class FakeUserRepository implements UserRepository {
     });
     return true;
   }
+
+  async updateLocale(input: {
+    userId: string;
+    locale: string;
+    now: Date;
+  }): Promise<void> {
+    const user = this.users.get(input.userId);
+    // Unconditional, like the real one: no version check, and a missing user
+    // is a no-op rather than a throw.
+    if (!user) return;
+
+    this.users.set(input.userId, {
+      ...user,
+      locale: input.locale,
+      updatedAt: input.now,
+      version: user.version + 1,
+    });
+  }
 }
 
 export class FakePasswordResetTokenRepository implements PasswordResetTokenRepository {

@@ -22,7 +22,15 @@ import { startSync } from './sync';
 import { purgeCaches, registerServiceWorker } from './service-worker';
 import { verseIdFromSearch, withoutVerse } from './deep-link';
 import { toggleFilterTag } from './timeline-filter';
-import { fetchTags, type TagView } from './api';
+import { fetchStoredLocale, fetchTags, saveLocale, type TagView } from './api';
+import {
+  adoptStoredLocale,
+  failureMessage,
+  hasChosenLocale,
+  useLocale,
+  useStrings,
+} from './locale';
+import { isLocale } from '@/shared/i18n';
 
 /**
  * The shell: a glass date header pinned to the top, the timeline beneath it,
@@ -41,6 +49,8 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
     getServerSessionSnapshot,
   );
 
+  const s = useStrings();
+  const locale = useLocale();
   const [googleError, setGoogleError] = useState<string | null>(null);
 
   /**
@@ -50,10 +60,19 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
    * person clicking it landed on raw JSON. It now sends a browser back here
    * with a flag, and this is what turns the flag into a sentence.
    */
-  const [verifyNotice, setVerifyNotice] = useState<{
-    text: string;
-    tone: 'error' | 'success';
-  } | null>(null);
+  /*
+   * Which of the three it was, not the sentence itself.
+   *
+   * The effect below runs once with an empty dependency list — it strips the
+   * query string, so re-running would wipe what it just read — and a sentence
+   * pulled from the string table inside it would make the current language a
+   * dependency of that effect. Storing the outcome and phrasing it at render
+   * also means the message follows a language change, which a string captured
+   * at mount would not.
+   */
+  const [verifyOutcome, setVerifyOutcome] = useState<
+    'confirmed' | 'expired' | 'invalid' | null
+  >(null);
 
   /**
    * The same guard ResetPassword documents, for the same reason: this effect
@@ -76,16 +95,8 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
     // cannot cascade, and a lazy initialiser would have to touch `window`
     // during server rendering.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setVerifyNotice(
-      verified
-        ? { text: 'Email confirmed. Sign in to start.', tone: 'success' }
-        : {
-            text:
-              failed === 'expired'
-                ? 'That confirmation link has expired. Register again to get a new one.'
-                : 'That confirmation link is not valid. Check you copied the whole address.',
-            tone: 'error',
-          },
+    setVerifyOutcome(
+      verified ? 'confirmed' : failed === 'expired' ? 'expired' : 'invalid',
     );
 
     // Out of the address bar, so a refresh does not re-announce it.
@@ -103,7 +114,9 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
   useEffect(() => {
     completeGoogleSignIn().catch((cause: unknown) => {
       setGoogleError(
-        cause instanceof Error ? cause.message : 'Could not finish signing in.',
+        // Classified here, phrased at render — same reason as the verify
+        // outcome above: this effect must not depend on the language.
+        cause instanceof Error ? cause.message : '',
       );
     });
   }, []);
@@ -131,7 +144,16 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
     registerServiceWorker();
   }, []);
 
-  const [dateLabel, setDateLabel] = useState('Today');
+  /*
+   * Null until the timeline reports where the scroll is, rather than seeding
+   * "Today" into state.
+   *
+   * Seeding it means the seed is in the language that was current when this
+   * mounted, and switching language leaves the header reading the old one
+   * until something scrolls. Holding null and resolving at render makes the
+   * fallback follow the language for free.
+   */
+  const [dateLabel, setDateLabel] = useState<string | null>(null);
   /**
    * The timeline's anchor. Replacing it is how a write refetches: a new Date
    * both re-runs the query and moves the centre to now, which is where a
@@ -253,6 +275,53 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
     await signOut();
   }, []);
 
+  /**
+   * Reconciling this browser's language with the account's, once signed in.
+   *
+   * Two directions, and which one wins is decided by whether this browser has
+   * an *explicit* choice. A device with nothing stored takes the server's, so
+   * signing in on a second phone arrives in the language already chosen. A
+   * device where someone has picked one keeps it and pushes it up — the
+   * explicit tap is the more recent statement of intent than a preference set
+   * on another device at some unknown time.
+   *
+   * Failures are swallowed on both paths. The language on screen is already
+   * right; the server copy only decides what a *future* device and the
+   * reminder emails see, and interrupting someone who has just signed in to
+   * report that a preference could not be synced would be noise.
+   */
+  useEffect(() => {
+    if (session !== 'signed-in') return;
+    let cancelled = false;
+
+    void fetchStoredLocale()
+      .then((stored) => {
+        if (cancelled) return;
+        if (hasChosenLocale()) {
+          if (stored !== locale) void saveLocale(locale).catch(() => undefined);
+        } else if (isLocale(stored)) {
+          adoptStoredLocale(stored);
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session, locale]);
+
+  /** The outcome of the verification link, in the language now in force. */
+  const verifyNotice: { text: string; tone: 'error' | 'success' } | null =
+    verifyOutcome === null
+      ? null
+      : verifyOutcome === 'confirmed'
+        ? { text: s.signIn.emailConfirmed, tone: 'success' }
+        : {
+            text:
+              verifyOutcome === 'expired' ? s.signIn.linkExpired : s.signIn.linkInvalid,
+            tone: 'error',
+          };
+
   const onDateChange = useCallback((label: string) => setDateLabel(label), []);
   const onOpen = useCallback((verseId: string) => setOpenVerseId(verseId), []);
 
@@ -262,14 +331,21 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
       <SignIn
         onSignedIn={() => undefined}
         googleEnabled={googleEnabled}
-        notice={googleError ? { text: googleError, tone: 'error' } : verifyNotice}
+        notice={
+          googleError !== null
+            ? {
+                text: failureMessage(googleError, s.signIn.couldNotFinish),
+                tone: 'error',
+              }
+            : verifyNotice
+        }
       />
     );
 
   return (
     <>
       <header className="date-header">
-        <h1 className="date-label">{dateLabel}</h1>
+        <h1 className="date-label">{dateLabel ?? s.common.today}</h1>
         <div className="header-actions">
           {/*
             Search, permanently, beside the menu rather than inside it.
@@ -294,7 +370,7 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
                 return !open;
               })
             }
-            aria-label="Search"
+            aria-label={s.timeline.search}
             aria-expanded={searching}
           >
             <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false">
@@ -321,9 +397,9 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
             type="button"
             className="quiet sign-out"
             onClick={() => setMenuOpen(true)}
-            aria-label="Menu"
+            aria-label={s.menu.label}
           >
-            Menu
+            {s.menu.label}
           </button>
         </div>
       </header>
@@ -345,8 +421,8 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
                 className="filter-search"
                 value={filterText}
                 onChange={(event) => setFilterText(event.target.value)}
-                placeholder="Search the timeline"
-                aria-label="Search the timeline"
+                placeholder={s.timeline.searchPlaceholder}
+                aria-label={s.timeline.searchPlaceholder}
                 autoFocus
               />
             ) : null}
@@ -360,7 +436,7 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
                   onClick={() =>
                     setFilterTagIds((current) => toggleFilterTag(current, id))
                   }
-                  aria-label={`Stop filtering by ${filterLabels[index]}`}
+                  aria-label={s.timeline.stopFilteringBy(filterLabels[index] ?? '')}
                 >
                   {filterLabels[index]} ×
                 </button>
@@ -405,7 +481,7 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
                   setFilterText('');
                 }}
               >
-                Clear
+                {s.timeline.clear}
               </button>
             ) : null}
           </div>

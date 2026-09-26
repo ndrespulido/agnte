@@ -1,8 +1,17 @@
+import type { Strings } from '@/shared/i18n';
+
 /**
  * How a moment in time is written on the timeline.
  *
  * Pure functions with time passed in, never read from the clock here: a
  * "Today" that depends on when the test runs is a test that fails at midnight.
+ *
+ * The **language is passed in for the same reason**. Every function that
+ * produces words takes the string table rather than reaching for a hook or a
+ * module-level "current locale": a formatter that reads ambient state is one
+ * that renders differently depending on when it is called, which is exactly
+ * the property the clock rule above exists to prevent. It also keeps these
+ * testable in every language without mounting anything.
  */
 
 /**
@@ -77,31 +86,6 @@ const magnitude = (years: number): number => {
   return absolute < 1 ? 0 : Math.floor(Math.log10(absolute));
 };
 
-const MONTHS = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-];
-
-const DAYS = [
-  'Sunday',
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-];
-
 /**
  * The header line: what a paper planner's tab would say.
  *
@@ -109,22 +93,29 @@ const DAYS = [
  * mostly read near today, and a date the reader has to compute against the
  * calendar is a date they read twice.
  */
-export function headerLabel(placement: Placement, now: Date): string {
+export function headerLabel(placement: Placement, now: Date, s: Strings): string {
   switch (placement.kind) {
     case 'undated':
-      return 'No date';
+      return s.common.noDate;
     case 'deep-time':
-      return deepTimeLabel(placement.years);
+      return deepTimeLabel(placement.years, s);
     case 'date': {
       const days = calendarDaysBetween(now, placement.at);
-      if (days === 0) return 'Today';
-      if (days === 1) return 'Tomorrow';
-      if (days === -1) return 'Yesterday';
+      if (days === 0) return s.common.today;
+      if (days === 1) return s.common.tomorrow;
+      if (days === -1) return s.common.yesterday;
 
       const at = placement.at;
-      const sameYear = at.getUTCFullYear() === now.getUTCFullYear();
-      const base = `${DAYS[at.getUTCDay()]} ${at.getUTCDate()} ${MONTHS[at.getUTCMonth()]}`;
-      return sameYear ? base : `${base} ${at.getUTCFullYear()}`;
+      // The table arranges the parts, rather than being handed a finished
+      // string: Spanish needs "lunes, 3 de marzo" and Chinese runs
+      // largest-unit-first, and neither is reachable by translating words in
+      // an English order.
+      const day = s.dates.days[at.getUTCDay()] ?? '';
+      const month = s.dates.months[at.getUTCMonth()] ?? '';
+
+      return at.getUTCFullYear() === now.getUTCFullYear()
+        ? s.dates.dayMonth(day, at.getUTCDate(), month)
+        : s.dates.dayMonthYear(day, at.getUTCDate(), month, at.getUTCFullYear());
     }
   }
 }
@@ -144,8 +135,12 @@ export function headerLabel(placement: Placement, now: Date): string {
  * disagreed with the timeline above it about which day something happened
  * would be worse than one that is consistently off.
  */
-export function dayLabel(at: Date): string {
-  return `${at.getUTCDate()} ${MONTHS[at.getUTCMonth()]} ${at.getUTCFullYear()}`;
+export function dayLabel(at: Date, s: Strings): string {
+  return s.dates.dateMonthYear(
+    at.getUTCDate(),
+    s.dates.months[at.getUTCMonth()] ?? '',
+    at.getUTCFullYear(),
+  );
 }
 
 /** Whole calendar days between two instants, in UTC. */
@@ -163,19 +158,29 @@ function calendarDaysBetween(from: Date, to: Date): number {
  * fixed decimals: -13.8e9 is three significant figures of genuine knowledge,
  * and printing 13,800,000,000 implies ten.
  */
-export function deepTimeLabel(years: number): string {
+export function deepTimeLabel(years: number, s: Strings): string {
   const ago = years < 0;
   const magnitudeOf = Math.abs(years);
 
+  /*
+   * The scale word is the table's decision, not this function's.
+   *
+   * Chinese groups large numbers in 万 (10^4) and 亿 (10^8) rather than
+   * thousands and millions, so "1.4 billion years" is naturally 14亿年 — a
+   * regrouping, not a translation. Handing over the rounded number and letting
+   * each table say what it wants is what makes that expressible; a shared
+   * "{n} {unit}" template would force every language into English's powers of
+   * a thousand.
+   */
   const scaled = (() => {
-    if (magnitudeOf >= 1e9) return `${round(magnitudeOf / 1e9)} billion years`;
-    if (magnitudeOf >= 1e6) return `${round(magnitudeOf / 1e6)} million years`;
-    if (magnitudeOf >= 1e3) return `${round(magnitudeOf / 1e3)} thousand years`;
-    if (magnitudeOf >= 1) return `${Math.round(magnitudeOf)} years`;
-    return 'less than a year';
+    if (magnitudeOf >= 1e9) return s.deepTime.billionYears(round(magnitudeOf / 1e9));
+    if (magnitudeOf >= 1e6) return s.deepTime.millionYears(round(magnitudeOf / 1e6));
+    if (magnitudeOf >= 1e3) return s.deepTime.thousandYears(round(magnitudeOf / 1e3));
+    if (magnitudeOf >= 1) return s.deepTime.years(Math.round(magnitudeOf));
+    return s.deepTime.lessThanAYear;
   })();
 
-  return ago ? `${scaled} ago` : `in ${scaled}`;
+  return ago ? s.deepTime.ago(scaled) : s.deepTime.ahead(scaled);
 }
 
 /** One decimal place, but no trailing ".0" — "4.5 billion", "1 billion". */
@@ -301,12 +306,16 @@ export function fromLocalDateTimeInput(value: string): string | null {
 }
 
 /** A reminder's moment, in the reader's own zone: "15 September 2026, 17:00". */
-export function localMomentLabel(iso: string): string {
+export function localMomentLabel(iso: string, s: Strings): string {
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return '';
   const pad = (n: number) => String(n).padStart(2, '0');
-  return (
-    `${at.getDate()} ${MONTHS[at.getMonth()]} ${at.getFullYear()}, ` +
-    `${pad(at.getHours())}:${pad(at.getMinutes())}`
+  // Local parts, not UTC — see the note above `toLocalDateTimeInput` for why
+  // reminders are the one screen that disagrees with the rest.
+  const day = s.dates.dateMonthYear(
+    at.getDate(),
+    s.dates.months[at.getMonth()] ?? '',
+    at.getFullYear(),
   );
+  return `${day}, ${pad(at.getHours())}:${pad(at.getMinutes())}`;
 }

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { forgotPassword, register, signIn } from './session';
+import { useStrings } from './locale';
 
 /**
  * Sign in, or start registering.
@@ -30,6 +31,7 @@ export function SignIn({
    */
   notice?: { text: string; tone: 'error' | 'success' } | null;
 }) {
+  const s = useStrings();
   const [mode, setMode] = useState<'sign-in' | 'register' | 'forgot'>('sign-in');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -54,7 +56,7 @@ export function SignIn({
         setSent(true);
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Something went wrong.');
+      setError(cause instanceof Error ? cause.message : s.common.somethingWentWrong);
     } finally {
       setBusy(false);
     }
@@ -63,11 +65,11 @@ export function SignIn({
   if (sent) {
     return (
       <div className="auth">
-        <h1>Check your email</h1>
+        <h1>{s.signIn.checkYourEmail}</h1>
         <p className="lede">
           {mode === 'forgot'
-            ? `If ${email} has an account, a reset link is on its way.`
-            : `There is a link waiting at ${email}. The account exists once you click it.`}
+            ? s.signIn.resetLinkOnItsWay(email)
+            : s.signIn.linkWaitingAt(email)}
         </p>
         {/*
           Said plainly rather than left to be discovered. A verification mail
@@ -76,22 +78,19 @@ export function SignIn({
           simply gives up — which is the one outcome this screen cannot
           recover from.
         */}
-        <p className="notice">
-          If it is not there in a minute, look in spam or junk — and mark it as not spam,
-          so the next one arrives properly.
-        </p>
+        <p className="notice">{s.signIn.checkSpam}</p>
       </div>
     );
   }
 
   return (
     <div className="auth">
-      <h1>Agnte</h1>
-      <p className="lede">A timeline for your life.</p>
+      <h1>{s.signIn.appName}</h1>
+      <p className="lede">{s.signIn.tagline}</p>
 
       <form onSubmit={submit}>
         <label className="field">
-          <span>Email</span>
+          <span>{s.signIn.email}</span>
           <input
             type="email"
             value={email}
@@ -106,7 +105,7 @@ export function SignIn({
             submit over a field nobody can see. */}
         {mode === 'forgot' ? null : (
           <label className="field">
-            <span>Password</span>
+            <span>{s.signIn.password}</span>
             <input
               type="password"
               value={password}
@@ -131,12 +130,12 @@ export function SignIn({
 
         <button type="submit" className="primary" disabled={busy}>
           {busy
-            ? 'Working…'
+            ? s.common.working
             : mode === 'sign-in'
-              ? 'Sign in'
+              ? s.signIn.signIn
               : mode === 'forgot'
-                ? 'Send a reset link'
-                : 'Create account'}
+                ? s.signIn.forgotPassword
+                : s.signIn.createAccount}
         </button>
       </form>
 
@@ -146,9 +145,9 @@ export function SignIn({
           no button, and previews are permanently in that state. */}
       {googleEnabled ? (
         <>
-          <p className="or">or</p>
+          <p className="or">{s.signIn.or}</p>
           <a className="google-sign-in" href="/v1/auth/google">
-            Continue with Google
+            {s.signIn.continueWithGoogle}
           </a>
         </>
       ) : null}
@@ -161,7 +160,7 @@ export function SignIn({
           setError(null);
         }}
       >
-        {mode === 'sign-in' ? 'Create an account' : 'I already have an account'}
+        {mode === 'sign-in' ? s.signIn.createAnAccount : s.signIn.haveAnAccount}
       </button>
 
       {/* Only from sign-in. Offering it while registering would be noise, and
@@ -175,7 +174,7 @@ export function SignIn({
             setError(null);
           }}
         >
-          I forgot my password
+          {s.signIn.forgotMyPassword}
         </button>
       ) : null}
     </div>

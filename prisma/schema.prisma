@@ -102,6 +102,21 @@ model User {
 
   displayName String? @map("display_name")
 
+  /// The language the interface and this person's emails are written in.
+  ///
+  /// Stored on the user rather than read from a request header, because the
+  /// writer that most needs it has no request: the nightly reminder tick
+  /// composes an email from a Cloud Scheduler callback, with no browser and no
+  /// Accept-Language anywhere in sight. The browser keeps its own fast copy in
+  /// localStorage; this is the durable one, and the one a second device
+  /// inherits.
+  ///
+  /// A plain string, not an enum. The set of languages lives in
+  /// `src/shared/i18n/locales.ts` and is meant to grow by adding a file —
+  /// a Postgres enum would make each new language a migration, and an
+  /// unrecognised value here already falls back to English at read time.
+  locale String @default("en")
+
   /// Null until the address is proven. Nothing but verification sets it.
   emailVerifiedAt DateTime? @map("email_verified_at") @db.Timestamptz(3)
 

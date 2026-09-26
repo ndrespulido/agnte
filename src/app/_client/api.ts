@@ -624,3 +624,24 @@ export const unsubscribeFromPush = (endpoint: string): Promise<void> =>
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ endpoint }),
   }).then((r) => json<unknown>(r).then(() => undefined));
+
+/**
+ * The language stored on the account, and how to change it.
+ *
+ * The browser does not wait for either of these to render — `locale.ts` keeps
+ * its own copy in localStorage and switches on tap. These exist so the choice
+ * follows a person to a second device, and so the reminder emails composed by
+ * the nightly tick are written in it (there is no request there to read a
+ * header from).
+ */
+export const fetchStoredLocale = (): Promise<string | null> =>
+  authedFetch('/v1/me')
+    .then((r) => json<{ locale?: string | null }>(r))
+    .then((body) => body.locale ?? null);
+
+export const saveLocale = (locale: string): Promise<void> =>
+  authedFetch('/v1/me', {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ locale }),
+  }).then((r) => json<unknown>(r).then(() => undefined));
