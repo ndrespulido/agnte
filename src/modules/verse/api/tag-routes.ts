@@ -169,7 +169,6 @@ export async function handleUpdateTag(
     { ownerId: auth.userId, tagId, ...parsed.data },
     {
       tags: new PrismaTagRepository(),
-      search: new PrismaVerseRepository(),
       clock: systemClock,
     },
   );

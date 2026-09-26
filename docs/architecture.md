@@ -454,39 +454,60 @@ Still not built, in the worker: **thumbnails are not cached**. They are signed
 
 ### 8.2 Search
 
-Postgres full-text, no external search service.
+**Substring matching over the columns**, no external search service and no
+full-text index. Postgres full-text was built here first and then removed; the
+reason is below.
 
-- Generated `tsvector` column on Verse: `xp` + text values from `properties` +
-  denormalized tag names, weighted (xp highest).
-- **GIN index**; `pg_trgm` additionally for fuzzy tag/shortcut matching.
+- `ILIKE '%term%'` against `xp`, the text values of `properties`, and the names
+  of the tags the verse carries (hyphens read as spaces, so `.barcelona-trip`
+  is findable by either half).
+- **Whitespace splits terms, and every term must appear.** `-word` excludes. A
+  wrapping quote is dropped rather than searched for. Nothing else is syntax.
+- **Accents are folded on both sides** by `unaccent` (migration
+  `search_unaccent`), so `cafe` finds `Café` and `manana` finds `mañana`. On a
+  timeline written partly in Spanish that is not an edge case.
 - **Search runs through the same visibility resolver as every other read path**
   (§2). Search is the single most likely place for a disclosure bug, because
   it's tempting to write a fast bespoke query — don't.
 - Filters compose with search: tags (AND/OR), date range, rating, has-media.
-- Language config per user locale (`spanish`, `french`, `english`) — relevant
-  given the app is multilingual. **Still unbuilt**, and the reason "olives"
-  does not find "olive".
+- **Newest first.** There is no relevance score to order by, and none was
+  wanted: searching your own life is not searching a corpus.
 
-> **The query is built here, not by Postgres.** `websearch_to_tsquery` is
-> forgiving and never throws, which is why it was chosen — and it cannot do
-> prefix matching. That became the whole problem once the field filtered as you
-> type: every keystroke before the last is a partial word, so a whole-word
-> matcher answers "nothing" until the final letter lands, and the search reads
-> as broken when it is merely strict.
+> **Why full text was removed: it cannot see inside Chinese.**
 >
-> `to_tsquery` does prefixes and *throws* on malformed input, so nothing a
-> person types may reach it as syntax. `domain/search-query.ts` builds the
-> query out of lexemes it extracted itself: punctuation is dropped rather than
-> escaped, because escaping is a thing to get subtly wrong. The last term gets
-> `:*`; the earlier ones are finished words and stay exact.
+> Postgres tokenises on whitespace, and Chinese is written without it. Verified
+> directly against this database: `to_tsvector('simple', '我今天去了巴塞罗那吃饭')`
+> yields exactly **one lexeme** — the entire sentence — and a tsquery for
+> 巴塞罗那 does not match it. `ILIKE '%巴塞罗那%'` does. This is not a tuning
+> problem; it needs a segmenting extension (`zhparser`, `pg_jieba`), and
+> neither is available on Neon. With Mandarin a supported interface language,
+> a search that silently fails in it is not a search.
 >
-> `-word` exclusion is kept by hand. Phrase search is not: `"red bus"` is now
-> `red AND bus`.
+> Substring matching has no such blind spot, because it never tokenises. It
+> also fixed a second complaint in passing: a whole-word matcher answers
+> "nothing" to every keystroke before the last, so a field that filters as you
+> type reads as broken when it is merely strict. `to_tsquery` could do prefixes
+> (`oliv:*`) but only at the front of a word.
 >
-> **Accents are folded on both sides** by `unaccent` (migration
-> `search_unaccent`), so `cafe` finds `Café` and `manana` finds `mañana`. On a
-> timeline written partly in Spanish that is not an edge case. It is *not*
-> stemming, which is still the open item above.
+> **What was given up, plainly:** stemming (`olives` does not find `olive`, in
+> any language — it never worked for Chinese either), ranking, and phrase
+> search. Also gone with them: the `search_vector` column, its GIN index, the
+> vector rebuild on every verse write, and `refreshSearchForTag` — a
+> denormalised copy of each tag's name in every verse carrying it, which a
+> rename had to chase down. Reading the tag names through a join at query time
+> makes a rename correct because nothing was duplicated, rather than because
+> something remembered to fix it.
+>
+> **Escaping is real here in a way it was not before.** `%` and `_` are `LIKE`
+> wildcards, so a person typing `100%` must not get "100 followed by anything".
+> `domain/search-query.ts` escapes `\`, `%` and `_`, backslash first, and every
+> pattern reaches SQL as a bound parameter.
+>
+> **No trigram index yet.** `pg_trgm` is installed and a GIN index on
+> `xp` would speed these scans up, but it needs an IMMUTABLE wrapper around
+> `unaccent()` (which is STABLE) to be usable. At one person's timeline the
+> sequential scan is not worth the extra surface — revisit if it shows up in
+> the logs.
 >
 > **The timeline takes `q` too**, sharing this one predicate, so the two
 > surfaces cannot disagree about what a word matches — see §8.2's UI note.

@@ -93,10 +93,7 @@ export async function handleSearch(request: Request): Promise<Response> {
 
   return Response.json(
     {
-      verses: result.value.items.map((hit) => ({
-        ...verseBody(hit),
-        rank: hit.rank,
-      })),
+      verses: result.value.items.map((hit) => verseBody(hit)),
       nextCursor: result.value.nextCursor,
     },
     {

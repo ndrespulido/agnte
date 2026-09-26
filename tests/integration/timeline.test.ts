@@ -547,12 +547,21 @@ describe.skipIf(!DATABASE_URL)('timeline', () => {
       expect(body.verses.map((v) => v.id)).toEqual([olives.id]);
     });
 
-    /** The reported bug, on the surface it now lives on. */
+    /**
+     * The reported bug, on the surface it now lives on: the verse is present
+     * from the first keystroke rather than appearing only once the word is
+     * complete.
+     *
+     * `toContain` rather than `toEqual` for the short prefixes, and not a
+     * weakened assertion — a single `o` genuinely matches "Ramen near the
+     * stati**o**n" too. That is what a substring search means, and a test
+     * demanding otherwise would be demanding word-prefix matching back.
+     */
     it('matches the word still being typed', async () => {
       const { token } = await signUp('tq2@example.com');
       const { olives } = await seed(token);
 
-      for (const typed of ['o', 'oliv', 'olives']) {
+      for (const typed of ['o', 'ol', 'oliv', 'olives']) {
         const { body } = await timeline(
           token,
           `?anchor=2026-01-01T00:00:00Z&q=${encodeURIComponent(typed)}`,
@@ -560,8 +569,12 @@ describe.skipIf(!DATABASE_URL)('timeline', () => {
         expect(
           body.verses.map((v) => v.id),
           `typed ${typed}`,
-        ).toEqual([olives.id]);
+        ).toContain(olives.id);
       }
+
+      // And by the second letter it is the only one left.
+      const { body } = await timeline(token, '?anchor=2026-01-01T00:00:00Z&q=ol');
+      expect(body.verses.map((v) => v.id)).toEqual([olives.id]);
     });
 
     it('composes with the tag filter', async () => {
@@ -600,11 +613,13 @@ describe.skipIf(!DATABASE_URL)('timeline', () => {
     });
 
     /**
-     * Text with no words in it is a filter that matches nothing, not an absent
-     * filter. Widening back to the whole timeline would read as the filter
-     * having been silently ignored.
+     * Punctuation is searched for, not parsed. `&&&` held no *words* for the
+     * tsquery version and had to be special-cased so it did not widen back to
+     * the whole timeline; now it is simply a three-character string that no
+     * verse contains. Same answer, no special case — which is the shape of
+     * this whole change.
      */
-    it('matches nothing for text that holds no words', async () => {
+    it('searches punctuation literally rather than as syntax', async () => {
       const { token } = await signUp('tq5@example.com');
       await seed(token);
 
@@ -614,6 +629,28 @@ describe.skipIf(!DATABASE_URL)('timeline', () => {
       );
 
       expect(body.verses).toEqual([]);
+    });
+
+    /**
+     * The filter field and the search endpoint run the same predicate, so this
+     * is here to catch them drifting apart rather than to re-prove Chinese
+     * matching (search.test.ts does that).
+     */
+    it('finds a Chinese word inside an unspaced sentence, like search does', async () => {
+      const { token } = await signUp('tq7@example.com');
+      const tag = await makeTag(token, 'diary');
+      const verse = await makeVerse(token, {
+        tagIds: [tag.id],
+        xp: '我今天去了巴塞罗那吃饭',
+        eventStart: '2025-01-01T00:00:00Z',
+      });
+
+      const { body } = await timeline(
+        token,
+        `?anchor=2026-01-01T00:00:00Z&q=${encodeURIComponent('巴塞罗那')}`,
+      );
+
+      expect(body.verses.map((v) => v.id)).toEqual([verse.id]);
     });
 
     it('is no filter at all when q is absent or blank', async () => {
