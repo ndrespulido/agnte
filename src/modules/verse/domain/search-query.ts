@@ -1,112 +1,103 @@
 /**
- * Turning what a person types into a `tsquery` (§8.2).
+ * Turning what a person types into a substring match (§8.2).
  *
- * This exists because of one hard trade. `websearch_to_tsquery` is forgiving —
- * it takes quoted phrases, `or`, a leading `-`, and it never throws, so a typo
- * can never become a 500. What it cannot do is prefix matching.
+ * This replaced a `tsvector` full-text search, and the reason is Chinese.
+ * Postgres tokenises on whitespace, and Chinese has none — so
+ * `to_tsvector('simple', '我今天去了巴塞罗那吃饭')` produces exactly one lexeme,
+ * the whole sentence, and searching for 巴塞罗那 inside it matches nothing.
+ * That is not a tuning problem; without a segmenting extension (`zhparser`,
+ * `pg_jieba`, neither available on Neon) full-text search cannot see inside
+ * Chinese text at all.
  *
- * Prefix matching is not a nicety here. The search field filters as you type,
- * so every keystroke before the last one is a partial word: someone typing
- * "barcelona" asks for `b`, `ba`, `bar`… and a whole-word matcher answers
- * "nothing" to all of them. The search reads as broken until the instant the
- * final letter lands. That is the bug this file fixes.
+ * A substring match has no such blind spot: it treats text as text. It is also
+ * simply what most people mean by searching their own notes — find where I
+ * wrote this — and it behaves the same in every script, which a per-language
+ * stemming configuration never could.
  *
- * `to_tsquery` does prefix matching with `word:*` — and *throws* on malformed
- * input. A bare `&`, an unbalanced bracket, a leading `|`: syntax error, which
- * reaches the caller as a 500. So the text can never be handed to it directly.
- * Everything below exists to guarantee that what we pass is something
- * `to_tsquery` cannot object to: a list of lexemes we built ourselves, joined
- * by a single operator we chose.
- *
- * The rule is: **nothing the person typed survives as syntax.** Their
- * characters only ever appear inside a lexeme, and anything that could be an
- * operator is dropped rather than escaped — escaping is a thing to get subtly
- * wrong, and dropping is not.
+ * What is given up, stated plainly: stemming (`olives` will not find `olive`
+ * in any language), and ranking. Neither was working for Chinese anyway, and
+ * results are ordered newest-first rather than by relevance.
  */
 
 /**
- * Characters that can carry meaning to `to_tsquery`, plus whitespace.
+ * `LIKE` wildcards, escaped so typed text is only ever literal.
  *
- * Everything in here is a separator, so `a&b` searches for `a` and `b` rather
- * than being read as the AND operator. Unicode letters and digits are kept, so
- * accented and non-Latin text survives — `café` and `日本` are words, not
- * punctuation.
+ * The same principle the tsquery builder had, for a much smaller surface: a
+ * person typing `100%` is looking for "100%", not for "100 followed by
+ * anything". `\` goes first — escaping it after the others would double-escape
+ * the backslashes they introduce.
  */
-const SEPARATORS = /[^\p{L}\p{N}]+/u;
+const escapeLike = (term: string): string =>
+  term.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_');
 
 export interface SearchTerms {
-  /** The words that must be present, in the order they were typed. */
+  /** Substrings that must all appear, in the order they were typed. */
   readonly terms: readonly string[];
-  /** The words that must be absent. */
+  /** Substrings that must not appear. */
   readonly excluded: readonly string[];
-  /** The `to_tsquery` string, safe to interpolate as a parameter. */
-  readonly tsquery: string;
+  /** The same, as `%term%` patterns ready for `ILIKE`. */
+  readonly patterns: readonly string[];
+  readonly excludedPatterns: readonly string[];
 }
 
 /**
- * Splits typed text into the lexemes to search for.
+ * The one character that is not taken literally: a wrapping quote.
  *
- * Exported for its own test: this is the function standing between a text
- * field and a query language, so its edges are worth pinning individually
- * rather than only through a database.
+ * Not a phrase parser — `"red bus"` becomes `red` and `bus`, both of which
+ * must appear, which is not the same promise. It exists because a search box
+ * teaches people to type quotes, and a literal `"` makes the term unmatchable:
+ * `%"red%` finds nothing in "the red bus". Answering a reasonable query with
+ * silence is the exact bug this change set out to fix, so the quote is dropped
+ * rather than searched for.
+ *
+ * A quote at either end of a term goes, which is what `"red bus"` needs —
+ * there the quotes land on two different terms, so a whole-string rule would
+ * not see them as a pair. The cost, stated rather than hidden: `5"` searches
+ * for `5`, so an inch mark cannot be searched for at the end of a word. That
+ * is the trade, and it falls the right way round.
  */
-export function searchTerms(text: string): readonly string[] {
-  return text
-    .split(SEPARATORS)
-    .map((term) => term.trim().toLowerCase())
-    .filter((term) => term.length > 0);
-}
+const stripQuotes = (term: string): string => term.replace(/^"|"$/g, '');
+
+/** `%term%`, with the term's own wildcards defanged. */
+export const likePattern = (term: string): string => `%${escapeLike(term)}%`;
 
 /**
- * The query for a piece of typed text, or null when there is nothing to ask.
+ * The terms for a piece of typed text, or null when there is nothing to ask.
  *
- * Every term is ANDed, and the **last** term is a prefix. Only the last,
- * deliberately: it is the word still being typed, and the ones before it are
- * finished words the person would expect to match exactly. Making them all
- * prefixes would quietly turn "cat food" into a search for everything starting
- * with "cat", which is a different question.
+ * Split on whitespace, and **every** term must appear somewhere in the verse.
+ * Splitting rather than matching the whole string as one substring is the one
+ * concession to convenience: "dinner olives" should find a note saying "olives
+ * at dinner", and requiring the exact phrase would not. For Chinese, which has
+ * no spaces, the split is a no-op and the whole phrase is one term — so the
+ * same rule reads correctly in every language.
  *
- * Even a single letter is a prefix. The first instinct was to require two,
- * on the grounds that `a:*` matches most of a timeline — but that is what a
- * one-letter filter *means*, and the person watching it narrow as they type
- * can see that. Answering "nothing" to the first keystroke is the same
- * complaint this file exists to fix, one letter earlier.
+ * `-word` excludes, carried over from the full-text version because it worked
+ * and people rely on what worked.
  *
- * The cost is a wide index scan on a common letter. On a personal timeline
- * that is small, and the limit caps what comes back; if it ever stops being
- * small, the answer is a minimum length *with* a message saying so, not
- * silence.
- *
- * **`-word` excludes**, which is the one piece of `websearch_to_tsquery`'s
- * syntax kept by hand. It was already supported and already tested, and
- * dropping a working feature while fixing a broken one is not a trade anyone
- * asked for. Phrase search (`"red bus"`) is *not* kept — see the note below.
+ * Nothing else is syntax: no operators, no prefix markers, and no phrase
+ * search — a substring match has nothing to parse, which is the point. A
+ * wrapping quote is *removed* rather than honoured (see `stripQuotes`), which
+ * is not the same as supporting one.
  */
-export function toTsQuery(text: string): SearchTerms | null {
+export function searchTermsOf(text: string): SearchTerms | null {
   const terms: string[] = [];
   const excluded: string[] = [];
 
-  /*
-   * Split on whitespace first, so a leading `-` can be seen before punctuation
-   * is stripped. `SEPARATORS` would eat it, and `-car` would become an
-   * ordinary `car` — the exact opposite of what was asked for.
-   *
-   * A hyphen *inside* a word is not an exclusion: `one-two` is one raw token
-   * that does not start with `-`, so it sanitises into two ordinary words.
-   */
   for (const raw of text.split(/\s+/)) {
+    // A lone `-` is punctuation, not an exclusion with nothing to exclude.
     const negated = raw.startsWith('-') && raw.length > 1;
-    const words = searchTerms(negated ? raw.slice(1) : raw);
-    (negated ? excluded : terms).push(...words);
+    const term = stripQuotes(negated ? raw.slice(1) : raw).trim();
+    if (term === '') continue;
+
+    (negated ? excluded : terms).push(term);
   }
 
   if (terms.length === 0 && excluded.length === 0) return null;
 
-  const positives = terms.map((term, index) =>
-    index === terms.length - 1 ? `${term}:*` : term,
-  );
-
-  const clauses = [...positives, ...excluded.map((term) => `!${term}`)];
-
-  return { terms, excluded, tsquery: clauses.join(' & ') };
+  return {
+    terms,
+    excluded,
+    patterns: terms.map(likePattern),
+    excludedPatterns: excluded.map(likePattern),
+  };
 }

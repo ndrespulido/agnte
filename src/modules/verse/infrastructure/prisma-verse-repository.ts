@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { getDatabase } from '@/shared/infra/database';
 import { constraintName, isUniqueViolation } from '@/shared/infra/postgres-errors';
 import type {
@@ -11,7 +12,7 @@ import type {
   VerseRepository,
 } from '../domain/ports';
 import { decodeCursor, encodeCursor, timelineYears } from '../domain/timeline';
-import { toTsQuery } from '../domain/search-query';
+import { searchTermsOf } from '../domain/search-query';
 import type { Tag, Vertical } from '../domain/tag';
 import type { Verse } from '../domain/verse';
 import type { Visibility } from '../domain/visibility';
@@ -19,10 +20,13 @@ import type { Visibility } from '../domain/visibility';
 /**
  * Columns are listed explicitly everywhere in this file rather than `SELECT *`.
  *
- * Not style: adding the `search_vector` column broke every read at once, because
- * the driver cannot deserialize a tsvector and `SELECT *` had been quietly
- * promising to return whatever the table happened to hold. A column list is a
- * contract between the query and `VerseRow`.
+ * Not style, and the lesson was paid for: adding a `search_vector` column once
+ * broke every read at once, because the driver cannot deserialize a tsvector
+ * and `SELECT *` had been quietly promising to return whatever the table
+ * happened to hold. The column is gone again — see the substring-search
+ * migration — and the rule it taught is what stayed: a column list is a
+ * contract between the query and `VerseRow`, and adding a column to the table
+ * should change nothing that does not name it.
  */
 interface VerseRow {
   id: string;
@@ -99,6 +103,54 @@ const requireDatabase = () => {
   if (!db) throw new Error('verse requires a database; DATABASE_URL is not set');
   return db;
 };
+
+/**
+ * The SQL a text filter becomes: every term a substring somewhere in the verse.
+ *
+ * "Somewhere" is xp, the values of its properties, and the names of its tags —
+ * the same three places the old `search_vector` weighted A, B and C. The
+ * difference is that they are read from the columns now instead of from a copy
+ * maintained alongside them, so there is nothing to keep in step and nothing
+ * to drift.
+ *
+ * `unaccent` on both sides, so `cafe` finds `Café` and the reverse. `ILIKE`
+ * for case. Neither is fuzziness: the match is still an exact substring, just
+ * not a fussy one about how it was typed.
+ *
+ * Built as a `Prisma.Sql` fragment rather than interpolated text — every
+ * pattern is a bound parameter, and the only characters this builds are the
+ * operators it chose itself.
+ */
+function matchesText(pattern: string): Prisma.Sql {
+  return Prisma.sql`(
+    unaccent(coalesce(v.xp, '')) ILIKE unaccent(${pattern})
+    OR unaccent(
+         coalesce((SELECT string_agg(value, ' ') FROM jsonb_each_text(v.properties)), '')
+       ) ILIKE unaccent(${pattern})
+    OR EXISTS (
+      SELECT 1 FROM verse.verse_tag vt
+      JOIN verse.tag t ON t.id = vt.tag_id
+      WHERE vt.verse_id = v.id
+        AND unaccent(replace(t.name, '-', ' ')) ILIKE unaccent(${pattern})
+    )
+  )`;
+}
+
+/**
+ * Every term ANDed, every exclusion negated — or `TRUE` when there is no
+ * filter, so the caller can always interpolate it.
+ */
+function textFilter(text: string | null | undefined): Prisma.Sql {
+  const built = text ? searchTermsOf(text) : null;
+  if (!built) return Prisma.sql`TRUE`;
+
+  const clauses = [
+    ...built.patterns.map((pattern) => matchesText(pattern)),
+    ...built.excludedPatterns.map((pattern) => Prisma.sql`NOT ${matchesText(pattern)}`),
+  ];
+
+  return clauses.length === 0 ? Prisma.sql`TRUE` : Prisma.join(clauses, ' AND ');
+}
 
 export class PrismaVerseRepository
   implements VerseRepository, TimelineRepository, SearchRepository
@@ -186,10 +238,6 @@ export class PrismaVerseRepository
       `;
 
       await insertTags(tx, verse.id, verse.tagIds);
-
-      // After the tag rows, because the vector includes tag names. Same
-      // transaction, so a verse is never briefly present but unfindable.
-      await refreshSearch(tx, verse.id);
     });
   }
 
@@ -225,7 +273,6 @@ export class PrismaVerseRepository
 
       await tx.$executeRaw`DELETE FROM verse.verse_tag WHERE verse_id = ${verse.id}::uuid`;
       await insertTags(tx, verse.id, verse.tagIds);
-      await refreshSearch(tx, verse.id);
 
       return true;
     });
@@ -290,23 +337,15 @@ export class PrismaVerseRepository
     const requireAll = query.matchAllTags === true && tagFilter !== null;
 
     /*
-     * The text filter, as a nullable parameter rather than a second query.
+     * The text filter, built by the same helper `search` uses.
      *
-     * `@@` against a null tsquery is null, not false, so the predicate has to
-     * be written as "no filter OR it matches" — the same shape the tag filter
-     * already uses here. Building the tsquery through the domain means the
-     * timeline and `search` agree about what a word matches, which they would
-     * not if this grew its own `websearch_to_tsquery` call.
+     * Sharing it is the whole reason it is a function: the timeline's filter
+     * field and the search endpoint are two ways into one question, and they
+     * would drift apart within a release if each wrote its own predicate.
+     * With no filter it is the literal `TRUE`, so the shape of the query does
+     * not change with the presence of text.
      */
-    const built = query.text ? toTsQuery(query.text) : null;
-
-    // Text that held no words at all (`&&&`) is a filter that matches nothing,
-    // not an absent filter — otherwise it silently widens to the whole
-    // timeline, which reads as the filter having been ignored.
-    if (query.text && query.text.trim() !== '' && built === null) {
-      return { items: [], nextCursor: null };
-    }
-    const tsquery = built?.tsquery ?? null;
+    const text = textFilter(query.text);
 
     const rows =
       query.direction === 'past'
@@ -329,8 +368,7 @@ export class PrismaVerseRepository
                 SELECT count(DISTINCT vt.tag_id) FROM verse.verse_tag vt
                 WHERE vt.verse_id = v.id AND vt.tag_id = ANY(${tagFilter}::uuid[])
               ) = ${tagFilter === null ? 0 : tagFilter.length})
-              AND (${tsquery}::text IS NULL
-                   OR v.search_vector @@ to_tsquery('simple', unaccent(${tsquery})))
+              AND ${text}
             ORDER BY v.timeline_years DESC, v.id DESC
             LIMIT ${limit}
           `
@@ -353,8 +391,7 @@ export class PrismaVerseRepository
                 SELECT count(DISTINCT vt.tag_id) FROM verse.verse_tag vt
                 WHERE vt.verse_id = v.id AND vt.tag_id = ANY(${tagFilter}::uuid[])
               ) = ${tagFilter === null ? 0 : tagFilter.length})
-              AND (${tsquery}::text IS NULL
-                   OR v.search_vector @@ to_tsquery('simple', unaccent(${tsquery})))
+              AND ${text}
             ORDER BY v.timeline_years ASC, v.id ASC
             LIMIT ${limit}
           `;
@@ -375,26 +412,18 @@ export class PrismaVerseRepository
   }
 
   /**
-   * Full-text search (§8.2), with the filters composing.
+   * Text search (§8.2), with the filters composing.
    *
    * **Newest first**, on the same `(timeline_years, id)` axis the timeline
-   * pages by. The relevance score is still computed and still returned, so a
-   * caller can see how well a row matched, but it no longer decides the order.
-   *
-   * It used to. Relevance is the right default for searching a corpus, and the
-   * wrong one for searching your own life: a person looking for "barcelona"
-   * knows what they wrote and wants the most recent one, not whichever mentions
-   * the word most densely. Ranked order also put a note from four years ago
-   * above yesterday's for no reason the screen could explain.
+   * pages by. There is no relevance score to order by any more, and there was
+   * no longer one to want: relevance is the right default for searching a
+   * corpus and the wrong one for searching your own life, where a person
+   * looking for "barcelona" knows what they wrote and wants the most recent
+   * one rather than whichever mentions the word most densely.
    *
    * Sharing the timeline's cursor axis is the other half of that: one ordering
    * means one pagination, and a cursor that means the same thing on both
    * surfaces.
-   *
-   * The query text goes through `websearch_to_tsquery`, which accepts what a
-   * person actually types — quoted phrases, `or`, a leading `-` to exclude —
-   * and, crucially, never throws on malformed input. `to_tsquery` raises a
-   * syntax error on a bare `&`, which would turn a typo into a 500.
    *
    * Ownership is a WHERE clause and is not the access decision: the application
    * layer resolves visibility over what comes back, the same as the timeline. A
@@ -406,19 +435,13 @@ export class PrismaVerseRepository
     const limit = query.limit + 1;
 
     /*
-     * Built in the domain, never handed the raw text.
-     *
-     * `to_tsquery` does the prefix matching the search field needs and throws
-     * on malformed input; `domain/search-query.ts` exists so that what reaches
-     * it is a string this codebase assembled out of lexemes, with nothing the
-     * person typed surviving as syntax.
-     *
-     * Null means the text held no words at all — `&&&`. That matches nothing
-     * rather than erroring, which is also what it looks like on screen.
+     * Blank text is a search with nothing to search for, and `search` — unlike
+     * the timeline's optional filter — has no unfiltered meaning to fall back
+     * to. Answering with an empty page rather than the whole timeline: asking
+     * for nothing should not return everything.
      */
-    const built = toTsQuery(query.text);
-    if (built === null) return { items: [], nextCursor: null };
-    const tsquery = built.tsquery;
+    if (searchTermsOf(query.text) === null) return { items: [], nextCursor: null };
+    const text = textFilter(query.text);
 
     const cursor = query.cursor ? decodeCursor(query.cursor) : null;
     // The same slot the timeline's cursor uses, and now the same meaning:
@@ -429,16 +452,14 @@ export class PrismaVerseRepository
     const tagFilter = query.tagIds && query.tagIds.length > 0 ? [...query.tagIds] : null;
     const requireAll = query.matchAllTags === true && tagFilter !== null;
 
-    const rows = await requireDatabase().$queryRaw<(VerseRow & { rank: number })[]>`
+    const rows = await requireDatabase().$queryRaw<VerseRow[]>`
       WITH matched AS (
         SELECT v.id, v.owner_id, v.event_start, v.event_end, v.deep_time_years, v.location,
-                   v.rating, v.xp, v.properties, v.visibility, v.media_ids,
-                   v.timeline_years, v.created_at, v.updated_at, v.version,
-               ts_rank_cd(v.search_vector, q.query) AS rank
-        FROM verse.verse v,
-             to_tsquery('simple', unaccent(${tsquery})) AS q(query)
+               v.rating, v.xp, v.properties, v.visibility, v.media_ids,
+               v.timeline_years, v.created_at, v.updated_at, v.version
+        FROM verse.verse v
         WHERE v.owner_id = ${query.ownerId}::uuid
-          AND v.search_vector @@ q.query
+          AND ${text}
           AND (${tagFilter}::uuid[] IS NULL OR EXISTS (
             SELECT 1 FROM verse.verse_tag vt
             WHERE vt.verse_id = v.id AND vt.tag_id = ANY(${tagFilter}::uuid[])
@@ -476,27 +497,9 @@ export class PrismaVerseRepository
     return {
       items: page.map((row) => ({
         verse: toVerse(row, tagsByVerse.get(row.id) ?? []),
-        rank: row.rank,
       })),
       nextCursor,
     };
-  }
-
-  /**
-   * Rewrites the search vectors of every verse carrying a tag.
-   *
-   * Renaming `.movies` to `.films` has to make its verses findable under the
-   * new name and not the old one. The vector holds tag names because §8.2 asks
-   * for them, and that denormalisation is only correct if something maintains
-   * it — this is that something.
-   */
-  async refreshSearchForTag(tagId: string): Promise<void> {
-    const db = requireDatabase();
-    const rows = await db.$queryRaw<{ verse_id: string }[]>`
-      SELECT verse_id FROM verse.verse_tag WHERE tag_id = ${tagId}::uuid
-    `;
-
-    for (const row of rows) await refreshSearch(db, row.verse_id);
   }
 
   /** Tag ids only, for building a page of verses without loading whole tags. */
@@ -581,60 +584,6 @@ export class PrismaVerseRepository
 
     return out;
   }
-}
-
-/**
- * Rebuilds one verse's search vector from the row and its tags.
- *
- * Written here rather than as a Postgres GENERATED column because a generated
- * column may only reference its own row, and the tag names it needs live in
- * another table. That is the whole reason renaming a tag has to rewrite its
- * verses (`refreshSearchForTag`).
- *
- * Weights, highest first: `xp` is what the person actually wrote, then the
- * property values, then the tag names — so a note *about* Barcelona ranks above
- * one merely tagged `.barcelona-trip`.
- *
- * Hyphens become spaces so `.barcelona-trip` is two searchable words. Without
- * it the only query that ever matches the tag is the tag's exact full name,
- * which is the one query a user would have used the tag filter for instead.
- */
-async function refreshSearch(
-  tx: { $executeRaw: (q: TemplateStringsArray, ...v: unknown[]) => Promise<number> },
-  verseId: string,
-): Promise<void> {
-  await tx.$executeRaw`
-    UPDATE verse.verse v
-    SET search_vector =
-      setweight(to_tsvector('simple', unaccent(coalesce(v.xp, ''))), 'A') ||
-      setweight(
-        to_tsvector(
-          'simple',
-          unaccent(
-            coalesce((SELECT string_agg(value, ' ') FROM jsonb_each_text(v.properties)), '')
-          )
-        ),
-        'B'
-      ) ||
-      setweight(
-        to_tsvector(
-          'simple',
-          unaccent(
-            coalesce(
-              (
-                SELECT string_agg(replace(t.name, '-', ' '), ' ')
-                FROM verse.verse_tag vt
-                JOIN verse.tag t ON t.id = vt.tag_id
-                WHERE vt.verse_id = v.id
-              ),
-              ''
-            )
-          )
-        ),
-        'C'
-      )
-    WHERE v.id = ${verseId}::uuid
-  `;
 }
 
 /**
