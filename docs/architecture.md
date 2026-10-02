@@ -138,6 +138,112 @@ wins; otherwise the **most restrictive** among its tags; default `private`.
 > and bank screenshots; the failure mode of getting it wrong is disclosure, so
 > it fails closed and it gets tested directly.
 
+### 2.1 How the database works
+
+The rules above are what the data *means*. This is the machinery under them —
+written down because it was spread across `prisma/schema.prisma`,
+`prisma.config.ts`, `shared/infra/database.ts` and a dozen migration comments,
+and three of the decisions here have already been rediscovered the hard way.
+
+**Seven schemas: six modules plus `platform`.** No cross-schema foreign keys
+and no cross-schema joins (§1.1). A module reaches another's data through its
+`index.ts`, never its tables — `notifications` asking identity for an address
+and a language goes through `contactFor(userId)`, not a join. The consequence
+worth naming: some invariants cannot be database constraints. "A verse has at
+least one tag" is one, which is why `countVersesOnlyTaggedWith` exists and the
+application asks before deleting a tag.
+
+**One Prisma client, through a driver adapter.** Prisma 7 connects via
+`PrismaPg` rather than a bundled native engine, which also removed the
+arm64/amd64 engine-binary mismatch between a Snapdragon dev machine and an
+amd64 container. The client is cached on `globalThis` because Next reloads
+modules on every edit in development and would otherwise open a pool per edit
+until Postgres refused connections.
+
+**`getDatabase()` returns `undefined`, not a throw, when `DATABASE_URL` is
+unset.** `npm run dev` has to work with no database at all (§7.1), and a
+preview legitimately runs ahead of the database it will later use. Callers that
+genuinely require one say so themselves — `requireDatabase()` in each
+repository — so the failure names the module rather than surfacing from inside
+the driver.
+
+**Two connection URLs, and they are not interchangeable.** The application uses
+the pooled URL; migrations use `DIRECT_URL`. The migration engine takes
+advisory locks and runs multi-statement DDL in a session, both of which
+PgBouncer's transaction pooling breaks. `prisma.config.ts` falls back with `||`
+rather than `??` deliberately: an empty-string `DIRECT_URL` is unset in every
+way that matters, and `??` would only catch `undefined`.
+
+**Repositories write raw SQL, not the typed client.** Every query in
+`modules/*/infrastructure/` is `$queryRaw` or `$executeRaw`. That is a choice,
+not an omission: the queries here are keyset pagination, conditional updates
+and visibility predicates, all of which read more clearly as SQL than as a
+query-builder expression, and the domain ports already define the shape the
+application wants back. The cost is that nothing type-checks the column list
+against the table, which leads directly to the next rule.
+
+> **Columns are always listed explicitly. Never `SELECT *`.** Paid for once:
+> adding a `tsvector` column broke every read in the verse module at once,
+> because the driver cannot deserialize a tsvector and `SELECT *` had been
+> quietly promising to return whatever the table happened to hold. A column
+> list is a contract between the query and its row interface, and adding a
+> column should change nothing that does not name it.
+
+**CHECK constraints are a backstop, not the validation.** There are 44 of them.
+The real rules live in the domain constructors; the constraints exist so a
+write path that forgets to call one fails loudly instead of persisting
+something the domain would have refused. Several integration tests assert
+exactly that — "the database refuses what the domain refuses" — by inserting
+bad rows directly and expecting a rejection. Where a CHECK would have to
+re-implement real logic it is deliberately loose: the email constraint enforces
+normalisation and a crude shape, not RFC 5322.
+
+**Optimistic concurrency is a conditional UPDATE.** Writes carry the version
+they read, the UPDATE ends `AND version = $expected`, and zero rows affected
+means the row moved — which the application turns into `409` with the server's
+current state rather than a silent overwrite. One exception, argued where it
+lives: `updateLocale` is unconditional, because two devices disagreeing about
+an interface language is one person changing their mind, not a conflict.
+
+**Conventions worth knowing before writing a migration:**
+
+- Primary keys are client-generated UUIDv7 (§2), so `gen_random_uuid()` appears
+  only in tests and fixtures.
+- Timestamps are `timestamptz(3)`. Millisecond precision, always with a zone.
+- `version Int @default(0)` and `updatedAt` on every mutable row.
+- Indexes follow the read paths, not the columns: `(owner_id, timeline_years,
+  id)` is the timeline's keyset index and the `id` tiebreak is what makes
+  pagination stable when two verses share a position. Search deliberately has
+  **no** index right now — see §8.2 for why, and what it would cost to add one.
+
+**Migrations ship inside the image.** `prisma migrate deploy` runs in CI and in
+the production deploy; `migrate dev` is for authoring locally and needs a
+shadow database. The Dockerfile copies `prisma/migrations` into the runtime
+image so `shippedMigrations()` can read them at runtime, which is what makes
+the health check meaningful.
+
+> **The health check compares shipped migrations against applied ones**, and
+> that is the second version of it. The first asserted that the seven schemas
+> existed — and every migration after `platform` adds *tables* to schemas that
+> already exist, so a database migrated only as far as an older release still
+> reported every schema present. Verified at the time: a database with all
+> seven schemas and none of identity's tables passed. The deploy smoke test
+> gates on this check, so anything it does not look at can ship green.
+
+**Four environments, three kinds of Postgres.** Local is a native Postgres
+(no Docker on the dev machine); CI runs a `postgres:16` service container;
+previews get a Neon branch per PR; production is Neon. The database-backed
+suites skip silently when `DATABASE_URL` is missing or wrong — which looks
+exactly like a green run — so CI has an explicit step that **fails if any test
+was skipped**. Backups are §8.8.
+
+> **The local database can drift from the branch you are on**, and it has
+> twice. Migrations are per-branch, so switching between a branch that drops a
+> column and one that expects it leaves the database matching neither; the
+> symptom is a wall of failures in tests that have nothing to do with the
+> change. `prisma migrate status` against the branch is the first thing to
+> check when a suite fails on code that passed an hour ago.
+
 ---
 
 ## 3. Platform
