@@ -439,6 +439,19 @@ model Verse {
   /// anyway, and the order is the order the user attached them in.
   mediaIds String[] @map("media_ids") @db.Uuid
 
+  /// Whether the event columns above mean a calendar date or a real instant
+  /// (§2.1). Null exactly when `event_start` is null.
+  ///
+  /// 'date'   — the stored instant is exactly midnight UTC and only its UTC
+  ///            date parts are meaningful. "1 March" reads as 1 March to a
+  ///            reader in any zone, which a timestamptz alone cannot promise.
+  /// 'minute' — a real moment, rendered in the reader's own zone.
+  ///
+  /// A string with a CHECK rather than an enum, the same call the user's
+  /// `locale` makes: adding month-precision later should be a migration on the
+  /// constraint, not a Postgres type change that every client has to learn.
+  eventPrecision String? @map("event_precision")
+
   /// There is no `search_vector` column here any more (§8.2). Search reads the
   /// columns above through `ILIKE` instead of a denormalised copy of them —
   /// Postgres cannot tokenise Chinese, so the tsvector could not see inside it.

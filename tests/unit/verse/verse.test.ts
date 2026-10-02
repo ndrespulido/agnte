@@ -93,6 +93,87 @@ describe('parsePlacement', () => {
     expect(unwrap(parsePlacement({ eventStart: start }))).toEqual({
       kind: 'moment',
       at: start,
+      // Inferred: 10:00 is not midnight, so this is a real instant.
+      precision: 'minute',
+    });
+  });
+
+  /**
+   * The distinction this field exists for.
+   *
+   * "1 March" and "15 July at 17:00" are different kinds of fact. The first has
+   * no time and no zone and must read as 1 March to a reader anywhere; the
+   * second happened at one moment and must be shown in the reader's own zone.
+   * Storing both as a bare timestamp made each wrong in its own way — a typed
+   * time stored as though the typist lived in UTC, and a reminder's real fire
+   * time displayed two hours off the screen that set it.
+   */
+  describe('precision', () => {
+    const midnight = new Date('2026-03-01T00:00:00.000Z');
+
+    it('is taken from the caller when given', () => {
+      expect(
+        unwrap(parsePlacement({ eventStart: midnight, eventPrecision: 'date' })),
+      ).toEqual({ kind: 'moment', at: midnight, precision: 'date' });
+
+      // The same instant, claimed as a moment rather than a day. Both are
+      // legal: midnight local is a real time someone may have logged.
+      expect(
+        unwrap(parsePlacement({ eventStart: midnight, eventPrecision: 'minute' })),
+      ).toEqual({ kind: 'moment', at: midnight, precision: 'minute' });
+    });
+
+    /**
+     * What makes the migration a no-op on screen. The old client wrote a
+     * `datetime-local` value straight through as UTC, so a date-only entry
+     * landed on exactly midnight and a timed one did not — which is why
+     * inferring from the instant reproduces what those rows meant.
+     */
+    /** The union only carries a precision on the two calendar kinds. */
+    const precisionOf = (input: Parameters<typeof parsePlacement>[0]) => {
+      const placement = unwrap(parsePlacement(input));
+      if (placement.kind === 'moment' || placement.kind === 'range') {
+        return placement.precision;
+      }
+      throw new Error(`expected a calendar placement, got ${placement.kind}`);
+    };
+
+    it('is inferred from the instant for a caller that predates the field', () => {
+      expect(precisionOf({ eventStart: midnight })).toBe('date');
+      expect(precisionOf({ eventStart: start })).toBe('minute');
+    });
+
+    it('infers a date only when both ends are midnight', () => {
+      const alsoMidnight = new Date('2026-03-05T00:00:00.000Z');
+      expect(precisionOf({ eventStart: midnight, eventEnd: alsoMidnight })).toBe('date');
+      // One end carrying a time makes the whole range an instant range.
+      expect(precisionOf({ eventStart: midnight, eventEnd: end })).toBe('minute');
+    });
+
+    /**
+     * Refused, not truncated. Quietly moving the instant to midnight would hide
+     * the caller's bug while changing what the verse says — west of Greenwich,
+     * by a whole day.
+     */
+    it('refuses a date carrying a time of day', () => {
+      const bad = parsePlacement({ eventStart: start, eventPrecision: 'date' });
+      expect(bad.ok).toBe(false);
+      if (!bad.ok) expect(bad.error.code).toBe(VerseErrorCode.EventPrecisionInvalid);
+
+      const badEnd = parsePlacement({
+        eventStart: midnight,
+        eventEnd: end,
+        eventPrecision: 'date',
+      });
+      expect(badEnd.ok).toBe(false);
+    });
+
+    it('has no precision when there is no event, including in deep time', () => {
+      expect(unwrap(parsePlacement({}))).toEqual({ kind: 'none' });
+      expect(unwrap(parsePlacement({ deepTimeYears: -66e6 }))).toEqual({
+        kind: 'deep-time',
+        years: -66e6,
+      });
     });
   });
 
@@ -101,6 +182,7 @@ describe('parsePlacement', () => {
       kind: 'range',
       start,
       end,
+      precision: 'minute',
     });
   });
 
@@ -150,15 +232,14 @@ describe('placementOf', () => {
     const end = new Date('2026-03-02T10:00:00Z');
 
     expect(placementOf(base())).toEqual({ kind: 'none' });
-    expect(placementOf(base({ placement: { kind: 'moment', at } }))).toEqual({
-      kind: 'moment',
-      at,
-    });
-    expect(placementOf(base({ placement: { kind: 'range', start: at, end } }))).toEqual({
-      kind: 'range',
-      start: at,
-      end,
-    });
+    expect(
+      placementOf(base({ placement: { kind: 'moment', at, precision: 'minute' } })),
+    ).toEqual({ kind: 'moment', at, precision: 'minute' });
+    expect(
+      placementOf(
+        base({ placement: { kind: 'range', start: at, end, precision: 'minute' } }),
+      ),
+    ).toEqual({ kind: 'range', start: at, end, precision: 'minute' });
     expect(
       placementOf(base({ placement: { kind: 'deep-time', years: -13.8e9 } })),
     ).toEqual({

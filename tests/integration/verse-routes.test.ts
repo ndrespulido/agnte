@@ -306,6 +306,140 @@ describe.skipIf(!DATABASE_URL)('verse routes', () => {
       });
     });
 
+    /**
+     * A date is not an instant (§2.1), and this is the end-to-end proof: it
+     * goes through the API, the domain, the column and its CHECKs.
+     */
+    describe('event precision', () => {
+      it('stores and returns a date', async () => {
+        const { token } = await signUp('prec-date@example.com');
+        const tag = await makeTag(token, 'diary');
+
+        const body = (await (
+          await post(token, {
+            tagIds: [tag.id],
+            eventStart: '2026-03-01T00:00:00.000Z',
+            eventPrecision: 'date',
+          })
+        ).json()) as Record<string, unknown>;
+
+        expect(body).toMatchObject({
+          eventStart: '2026-03-01T00:00:00.000Z',
+          eventPrecision: 'date',
+        });
+      });
+
+      it('stores and returns an instant', async () => {
+        const { token } = await signUp('prec-minute@example.com');
+        const tag = await makeTag(token, 'diary');
+
+        const body = (await (
+          await post(token, {
+            tagIds: [tag.id],
+            eventStart: '2026-07-15T15:00:00.000Z',
+            eventPrecision: 'minute',
+          })
+        ).json()) as Record<string, unknown>;
+
+        expect(body).toMatchObject({ eventPrecision: 'minute' });
+      });
+
+      /**
+       * The compatibility path. A write queued offline by an older build
+       * carries no precision, and must still mean what it meant when queued —
+       * which is why midnight is read as a date and anything else as an
+       * instant.
+       */
+      it('infers precision when a client does not send it', async () => {
+        const { token } = await signUp('prec-infer@example.com');
+        const tag = await makeTag(token, 'diary');
+
+        const dated = (await (
+          await post(token, { tagIds: [tag.id], eventStart: '2026-03-01T00:00:00.000Z' })
+        ).json()) as Record<string, unknown>;
+        expect(dated.eventPrecision).toBe('date');
+
+        const timed = (await (
+          await post(token, { tagIds: [tag.id], eventStart: '2026-03-01T09:30:00.000Z' })
+        ).json()) as Record<string, unknown>;
+        expect(timed.eventPrecision).toBe('minute');
+      });
+
+      it('refuses a date carrying a time of day', async () => {
+        const { token } = await signUp('prec-bad@example.com');
+        const tag = await makeTag(token, 'diary');
+
+        const response = await post(token, {
+          tagIds: [tag.id],
+          eventStart: '2026-03-01T09:30:00.000Z',
+          eventPrecision: 'date',
+        });
+
+        expect(response.status).toBe(422);
+        expect(await response.json()).toMatchObject({
+          error: { code: 'verse.event_precision_invalid' },
+        });
+      });
+
+      it('refuses a precision it does not know', async () => {
+        const { token } = await signUp('prec-unknown@example.com');
+        const tag = await makeTag(token, 'diary');
+
+        const response = await post(token, {
+          tagIds: [tag.id],
+          eventStart: '2026-03-01T00:00:00.000Z',
+          eventPrecision: 'second',
+        });
+
+        expect(response.status).toBe(422);
+      });
+
+      it('leaves a deep-time verse with no precision at all', async () => {
+        const { token } = await signUp('prec-deep@example.com');
+        const tag = await makeTag(token, 'prehistory');
+
+        const body = (await (
+          await post(token, { tagIds: [tag.id], deepTimeYears: -66_000_000 })
+        ).json()) as Record<string, unknown>;
+
+        expect(body.eventPrecision).toBeNull();
+      });
+
+      /**
+       * The constraints, hit directly. The domain is the real validator; these
+       * exist so a raw write path that forgot cannot persist a date carrying a
+       * time — whose symptom would be a verse that moves day when read from
+       * another zone.
+       */
+      describe('the database refuses what the domain refuses', () => {
+        const insert = (columns: string, values: string) =>
+          getDatabase()!.$executeRawUnsafe(
+            `INSERT INTO verse.verse (id, owner_id, timeline_years, updated_at, ${columns})
+             VALUES (gen_random_uuid(), gen_random_uuid(), 0, now(), ${values})`,
+          );
+
+        it('refuses a date with a time of day', async () => {
+          await expect(
+            insert('event_start, event_precision', "'2026-03-01T09:30:00Z', 'date'"),
+          ).rejects.toThrow();
+        });
+
+        it('refuses a start with no precision', async () => {
+          await expect(insert('event_start', "'2026-03-01T00:00:00Z'")).rejects.toThrow();
+        });
+
+        it('refuses a precision with no start', async () => {
+          await expect(insert('event_precision', "'date'")).rejects.toThrow();
+        });
+
+        it('refuses a precision it does not know', async () => {
+          await expect(
+            insert('event_start, event_precision', "'2026-03-01T00:00:00Z', 'second'"),
+          ).rejects.toThrow();
+        });
+      });
+    });
+
     it('accepts a deep-time verse', async () => {
       const { token } = await signUp('h@example.com');
       const tag = await makeTag(token, 'prehistory');

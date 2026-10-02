@@ -9,6 +9,7 @@ import {
 import type { Visibility } from './visibility';
 import { parseDeepTimeYears } from './deep-time';
 import {
+  eventPrecisionInvalid,
   eventRangeInverted,
   locationInvalid,
   noTags,
@@ -43,6 +44,26 @@ export interface Verse {
 
   /** Set only for a range; null for a moment. */
   readonly eventEnd: Date | null;
+
+  /**
+   * Whether the event fields above mean a calendar date or a real instant.
+   * Null exactly when `eventStart` is null.
+   *
+   * **This is the distinction the app spent its first year conflating**, and it
+   * is a domain concern rather than a display one. "1 March" and "15 July at
+   * 17:00" are different kinds of fact: the first has no time and no zone and
+   * must read as 1 March to every reader anywhere, while the second is a moment
+   * that happened once and must be shown in the reader's own zone. Storing both
+   * as a bare `timestamptz` and rendering it in UTC made each one wrong in a
+   * different way — a typed time was stored as if the typist lived in UTC, and
+   * a genuine instant (a reminder's fire time) was displayed two hours off the
+   * screen that set it.
+   *
+   * At `'date'` precision the stored instant is **exactly midnight UTC** and
+   * only its UTC date parts carry meaning; the database has a CHECK that says
+   * so, and `parsePlacement` refuses anything else rather than truncating.
+   */
+  readonly eventPrecision: EventPrecision | null;
 
   /**
    * Mutually exclusive with the event fields above (see `parsePlacement`). Null
@@ -100,19 +121,54 @@ const PROPERTY_KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
  * The nullable fields on Verse are the storage shape; this is the shape callers
  * construct.
  */
+/**
+ * How precisely an event is placed.
+ *
+ * Two values, not a number of significant fields: a journal needs "a day" and
+ * "a time on a day", and nothing between them has ever been asked for. If
+ * month-precision is ever wanted ("sometime in March 2019"), it joins here —
+ * which is the reason this is a named union rather than a boolean.
+ */
+export type EventPrecision = 'date' | 'minute';
+
 export type Placement =
   | { readonly kind: 'none' }
-  | { readonly kind: 'moment'; readonly at: Date }
-  | { readonly kind: 'range'; readonly start: Date; readonly end: Date }
+  | {
+      readonly kind: 'moment';
+      readonly at: Date;
+      readonly precision: EventPrecision;
+    }
+  | {
+      readonly kind: 'range';
+      readonly start: Date;
+      readonly end: Date;
+      readonly precision: EventPrecision;
+    }
   | { readonly kind: 'deep-time'; readonly years: number };
+
+/** Midnight UTC, which is what `'date'` precision is required to store. */
+export const isUtcMidnight = (at: Date): boolean =>
+  at.getUTCHours() === 0 &&
+  at.getUTCMinutes() === 0 &&
+  at.getUTCSeconds() === 0 &&
+  at.getUTCMilliseconds() === 0;
 
 export function placementOf(verse: Verse): Placement {
   if (verse.deepTimeYears !== null) {
     return { kind: 'deep-time', years: verse.deepTimeYears };
   }
   if (verse.eventStart === null) return { kind: 'none' };
-  if (verse.eventEnd === null) return { kind: 'moment', at: verse.eventStart };
-  return { kind: 'range', start: verse.eventStart, end: verse.eventEnd };
+
+  // `?? 'minute'` is unreachable for a row this domain wrote — the CHECK and
+  // `parsePlacement` both make precision non-null whenever a start exists — and
+  // is here so a row from an older release reads as an instant rather than
+  // throwing. That is the safe direction: an instant shown in the reader's zone
+  // is at worst off by their offset, where a bare date treated as an instant
+  // can move to a different day.
+  const precision = verse.eventPrecision ?? 'minute';
+
+  if (verse.eventEnd === null) return { kind: 'moment', at: verse.eventStart, precision };
+  return { kind: 'range', start: verse.eventStart, end: verse.eventEnd, precision };
 }
 
 /**
@@ -124,6 +180,16 @@ export function parsePlacement(input: {
   eventStart?: Date | null;
   eventEnd?: Date | null;
   deepTimeYears?: number | null;
+  /**
+   * Absent is **inferred**, not defaulted, and only for compatibility.
+   *
+   * A write queued offline by an older build carries no precision, and so does
+   * a row written before this field existed. Inferring midnight-UTC as a date
+   * and anything else as an instant reproduces exactly what those rows meant
+   * under the old rendering, which is the only reading that does not move
+   * somebody's existing entries. New clients always send it.
+   */
+  eventPrecision?: EventPrecision | null | undefined;
 }): Result<Placement, DomainError> {
   const { eventStart = null, eventEnd = null, deepTimeYears = null } = input;
 
@@ -145,28 +211,99 @@ export function parsePlacement(input: {
     return ok({ kind: 'none' });
   }
 
-  if (eventEnd === null) return ok({ kind: 'moment', at: eventStart });
+  const precision = input.eventPrecision ?? inferPrecision(eventStart, eventEnd);
+
+  /*
+   * Refused, not truncated. A caller claiming `'date'` while sending a real
+   * instant has a bug, and quietly moving their timestamp to midnight would
+   * hide it while silently changing what the verse says — in a zone west of
+   * UTC, by a whole day.
+   */
+  if (precision === 'date') {
+    if (!isUtcMidnight(eventStart)) {
+      return err(
+        eventPrecisionInvalid('a date has no time of day, so it must be midnight UTC'),
+      );
+    }
+    if (eventEnd !== null && !isUtcMidnight(eventEnd)) {
+      return err(
+        eventPrecisionInvalid('the end of a date range must also be midnight UTC'),
+      );
+    }
+  }
+
+  if (eventEnd === null) return ok({ kind: 'moment', at: eventStart, precision });
   if (eventEnd.getTime() < eventStart.getTime()) return err(eventRangeInverted());
 
-  return ok({ kind: 'range', start: eventStart, end: eventEnd });
+  return ok({ kind: 'range', start: eventStart, end: eventEnd, precision });
 }
+
+/**
+ * A precision as it arrives from outside — a request body, or an export file.
+ *
+ * In the domain rather than at each edge because it is a domain value with two
+ * legal spellings, and there are now two callers (the write path and the
+ * importer) that must agree about them.
+ *
+ * `undefined` survives as `undefined` so `parsePlacement` can infer it for a
+ * caller that predates the field. An unrecognised string is refused rather than
+ * falling back: a silent fallback to `'minute'` would render somebody's bare
+ * date in their own zone, which west of Greenwich moves it to the day before.
+ */
+export function parseEventPrecision(
+  value: string | null | undefined,
+): Result<EventPrecision | null | undefined, DomainError> {
+  if (value === undefined) return ok(undefined);
+  if (value === null) return ok(null);
+  if (value === 'date' || value === 'minute') return ok(value);
+  return err(eventPrecisionInvalid(`"${value}" is not a precision this app knows`));
+}
+
+/**
+ * What a placement meant before precision was recorded.
+ *
+ * Midnight UTC is a date, anything else is an instant. That is not a guess: the
+ * old client wrote a typed `datetime-local` straight through as UTC, so a
+ * date-only entry landed on exactly midnight and a timed one did not. Reading
+ * old rows this way is what makes the migration a no-op on screen.
+ */
+const inferPrecision = (start: Date, end: Date | null): EventPrecision =>
+  isUtcMidnight(start) && (end === null || isUtcMidnight(end)) ? 'date' : 'minute';
 
 const placementFields = (
   placement: Placement,
-): Pick<Verse, 'eventStart' | 'eventEnd' | 'deepTimeYears'> => {
+): Pick<Verse, 'eventStart' | 'eventEnd' | 'deepTimeYears' | 'eventPrecision'> => {
   switch (placement.kind) {
     case 'none':
-      return { eventStart: null, eventEnd: null, deepTimeYears: null };
+      return {
+        eventStart: null,
+        eventEnd: null,
+        deepTimeYears: null,
+        eventPrecision: null,
+      };
     case 'moment':
-      return { eventStart: placement.at, eventEnd: null, deepTimeYears: null };
+      return {
+        eventStart: placement.at,
+        eventEnd: null,
+        deepTimeYears: null,
+        eventPrecision: placement.precision,
+      };
     case 'range':
       return {
         eventStart: placement.start,
         eventEnd: placement.end,
         deepTimeYears: null,
+        eventPrecision: placement.precision,
       };
     case 'deep-time':
-      return { eventStart: null, eventEnd: null, deepTimeYears: placement.years };
+      return {
+        eventStart: null,
+        eventEnd: null,
+        deepTimeYears: placement.years,
+        // Deep time is its own scale and carries no time of day. Precision
+        // belongs to the calendar fields, which are null here.
+        eventPrecision: null,
+      };
   }
 };
 

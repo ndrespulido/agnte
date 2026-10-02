@@ -26,6 +26,7 @@ import { verseBody } from './verse-body';
 const Fields = {
   eventStart: z.string().nullish(),
   eventEnd: z.string().nullish(),
+  eventPrecision: z.string().nullish(),
   deepTimeYears: z.number().nullish(),
   location: z.string().nullish(),
   rating: z.number().nullish(),

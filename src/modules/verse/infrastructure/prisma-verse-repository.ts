@@ -14,7 +14,7 @@ import type {
 import { decodeCursor, encodeCursor, timelineYears } from '../domain/timeline';
 import { searchTermsOf } from '../domain/search-query';
 import type { Tag, Vertical } from '../domain/tag';
-import type { Verse } from '../domain/verse';
+import type { EventPrecision, Verse } from '../domain/verse';
 import type { Visibility } from '../domain/visibility';
 
 /**
@@ -33,6 +33,7 @@ interface VerseRow {
   owner_id: string;
   event_start: Date | null;
   event_end: Date | null;
+  event_precision: string | null;
   deep_time_years: number | null;
   location: string | null;
   rating: number | null;
@@ -85,6 +86,7 @@ const toVerse = (row: VerseRow, tagIds: readonly string[]): Verse => ({
   ownerId: row.owner_id,
   eventStart: row.event_start,
   eventEnd: row.event_end,
+  eventPrecision: row.event_precision as EventPrecision | null,
   deepTimeYears: row.deep_time_years,
   location: row.location,
   rating: row.rating,
@@ -159,7 +161,7 @@ export class PrismaVerseRepository
     const db = requireDatabase();
 
     const rows = await db.$queryRaw<VerseRow[]>`
-      SELECT id, owner_id, event_start, event_end, deep_time_years, location,
+      SELECT id, owner_id, event_start, event_end, event_precision, deep_time_years, location,
              rating, xp, properties, visibility, media_ids, timeline_years,
              created_at, updated_at, version
       FROM verse.verse WHERE id = ${id}::uuid LIMIT 1
@@ -215,7 +217,7 @@ export class PrismaVerseRepository
     await requireDatabase().$transaction(async (tx) => {
       await tx.$executeRaw`
         INSERT INTO verse.verse
-          (id, owner_id, event_start, event_end, deep_time_years, location,
+          (id, owner_id, event_start, event_end, event_precision, deep_time_years, location,
            rating, xp, properties, visibility, media_ids, timeline_years,
            created_at, updated_at, version)
         VALUES (
@@ -223,6 +225,7 @@ export class PrismaVerseRepository
           ${verse.ownerId}::uuid,
           ${verse.eventStart},
           ${verse.eventEnd},
+          ${verse.eventPrecision},
           ${verse.deepTimeYears},
           ${verse.location},
           ${verse.rating},
@@ -255,6 +258,7 @@ export class PrismaVerseRepository
         UPDATE verse.verse
         SET event_start = ${verse.eventStart},
             event_end = ${verse.eventEnd},
+            event_precision = ${verse.eventPrecision},
             deep_time_years = ${verse.deepTimeYears},
             location = ${verse.location},
             rating = ${verse.rating},
@@ -350,7 +354,7 @@ export class PrismaVerseRepository
     const rows =
       query.direction === 'past'
         ? await requireDatabase().$queryRaw<VerseRow[]>`
-            SELECT v.id, v.owner_id, v.event_start, v.event_end, v.deep_time_years, v.location,
+            SELECT v.id, v.owner_id, v.event_start, v.event_end, v.event_precision, v.deep_time_years, v.location,
                    v.rating, v.xp, v.properties, v.visibility, v.media_ids,
                    v.timeline_years, v.created_at, v.updated_at, v.version
             FROM verse.verse v
@@ -373,7 +377,7 @@ export class PrismaVerseRepository
             LIMIT ${limit}
           `
         : await requireDatabase().$queryRaw<VerseRow[]>`
-            SELECT v.id, v.owner_id, v.event_start, v.event_end, v.deep_time_years, v.location,
+            SELECT v.id, v.owner_id, v.event_start, v.event_end, v.event_precision, v.deep_time_years, v.location,
                    v.rating, v.xp, v.properties, v.visibility, v.media_ids,
                    v.timeline_years, v.created_at, v.updated_at, v.version
             FROM verse.verse v
@@ -454,7 +458,7 @@ export class PrismaVerseRepository
 
     const rows = await requireDatabase().$queryRaw<VerseRow[]>`
       WITH matched AS (
-        SELECT v.id, v.owner_id, v.event_start, v.event_end, v.deep_time_years, v.location,
+        SELECT v.id, v.owner_id, v.event_start, v.event_end, v.event_precision, v.deep_time_years, v.location,
                v.rating, v.xp, v.properties, v.visibility, v.media_ids,
                v.timeline_years, v.created_at, v.updated_at, v.version
         FROM verse.verse v

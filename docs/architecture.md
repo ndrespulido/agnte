@@ -205,6 +205,47 @@ current state rather than a silent overwrite. One exception, argued where it
 lives: `updateLocale` is unconditional, because two devices disagreeing about
 an interface language is one person changing their mind, not a conflict.
 
+**A date is not an instant, and the column says which.** `event_precision` is
+`'date'` or `'minute'`, non-null exactly when `event_start` is. At `'date'` the
+stored instant is exactly midnight UTC and only its UTC date parts carry
+meaning; at `'minute'` it is a real moment, rendered in the reader's own zone.
+
+> **Why this was worth a migration rather than a display fix.** Both kinds of
+> fact were stored in one `timestamptz` and rendered with UTC parts, which made
+> each of them wrong in a different way. A typed "14:00" was stored as 14:00Z
+> regardless of where the typist was standing — so it is not the moment they
+> meant, and the export says so. And a genuine instant, a reminder's fire time
+> written through the already zone-aware reminder path, was displayed with UTC
+> parts: a reminder set for 17:00 in Madrid read as **15:00 on the timeline**.
+> Same row, two times, one app. That one is demonstrable and was the trigger.
+>
+> Fixing only the display would have been smaller and worse. Rendering
+> everything local moves every existing entry by the reader's offset, and a
+> date-only verse — `2026-03-01T00:00:00Z` — gains a time it never had and, west
+> of Greenwich, lands on **28 February**. The data was ambiguous, so no
+> rendering rule could be right for both kinds of row; the ambiguity had to go.
+>
+> **The backfill is the point of the migration**, not an afterthought: midnight
+> UTC becomes `'date'`, anything else `'minute'`. That is not a guess — the old
+> client wrote a `datetime-local` value straight through as UTC, so a date-only
+> entry landed on exactly midnight and a timed one did not. Reading existing
+> rows that way is what makes the change a no-op on screen for everything
+> already written, which was the requirement.
+>
+> The same rule runs at the edges as an **inference, not a default**: a write
+> queued offline by an older build, or an export written before the field
+> existed, carries no precision and must still mean what it meant when it was
+> written. An *unrecognised* precision is refused rather than falling back,
+> because falling back to `'minute'` would render somebody's bare date in their
+> own zone and move the day. A `'date'` carrying a time of day is refused too,
+> rather than truncated: truncating hides the caller's bug while changing what
+> the verse says.
+>
+> Three CHECKs police it — presence (`precision IS NULL` iff `event_start IS
+> NULL`), the value set, and midnight-at-`'date'` — because the symptom of a
+> raw write path getting it wrong is a verse that silently moves day when read
+> from another zone.
+
 **Conventions worth knowing before writing a migration:**
 
 - Primary keys are client-generated UUIDv7 (§2), so `gen_random_uuid()` appears

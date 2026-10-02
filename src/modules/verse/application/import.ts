@@ -8,7 +8,12 @@ import {
   ok,
   uuidv7,
 } from '@/shared/kernel';
-import { createVerse, parsePlacement, parseProperties } from '../domain/verse';
+import {
+  createVerse,
+  parseEventPrecision,
+  parsePlacement,
+  parseProperties,
+} from '../domain/verse';
 import { isVisibility, type Visibility } from '../domain/visibility';
 import { parseTagName } from '../domain/tag';
 import type { TagRepository, VerseRepository } from '../domain/ports';
@@ -46,6 +51,7 @@ export interface ImportedTag {
 export interface ImportedVerse {
   readonly id?: unknown;
   readonly event_start?: unknown;
+  readonly event_precision?: unknown;
   readonly event_end?: unknown;
   readonly deep_time_years?: unknown;
   readonly location?: unknown;
@@ -322,9 +328,32 @@ export async function importVerses(
       continue;
     }
 
+    /*
+     * Refused with a reason rather than guessed, like every other field here
+     * (§8.5). An export written before precision existed has no such field,
+     * and `parsePlacement` infers it — which is exactly right for those rows,
+     * because they were written by the client that stored a typed date as
+     * midnight UTC.
+     */
+    const precision = parseEventPrecision(
+      typeof row.event_precision === 'string' ? row.event_precision : undefined,
+    );
+    if (!precision.ok) {
+      rejected.push({ what: `verse ${String(row.id)}`, why: precision.error.message });
+      continue;
+    }
+
     const placement = parsePlacement({
       eventStart: asDate(row.event_start),
       eventEnd: asDate(row.event_end),
+      /*
+       * Passed through for `parsePlacement` to validate, including the absent
+       * case. An export written before precision existed has no such field, and
+       * inferring it there is exactly right: those rows were written by the
+       * client that stored a typed date as midnight UTC, which is the rule the
+       * inference encodes.
+       */
+      eventPrecision: precision.value,
       deepTimeYears: typeof row.deep_time_years === 'number' ? row.deep_time_years : null,
     });
     if (!placement.ok) {
