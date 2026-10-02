@@ -571,15 +571,39 @@ ScheduledNotification { id, userId, verseId?, fireAt, kind, payload, status, att
 > duplicates that all buzz one device. Subscriptions are purged with the account
 > (§8.7): a subscription is an address for reaching someone.
 >
-> **Not proven end to end.** The encryption is checked against an independent
-> implementation, the fallback logic and the worker's handlers are unit-tested,
-> and the subscription endpoints are integration-tested — but no real push has
-> been delivered to a real device. Headless Chromium refuses to register with a
-> push service (`AbortError: Registration failed - permission denied`) and the
-> sandbox cannot reach FCM, so the last link is untested. This is precisely the
-> shape of the trap the reminder tick sat in for two days, and it is only closed
-> by doing it on a phone: set VAPID keys, open the app, Menu → Reminders → Turn
-> on, set a reminder a few minutes out, and watch for the notification.
+> **`POST /v1/push/test` exists so this can be answered at all.** Turning
+> notifications on used to produce no visible result: the subscription was
+> stored, and the next thing that would ever arrive was a reminder, at its own
+> fire time, dispatched by a five-minute cron. Nothing on screen distinguished a
+> working subscription from a dead one. The first report from a phone was "I
+> tried push but didn't understand how it works", which is what a feature with
+> no feedback feels like from outside.
+>
+> The endpoint is **push only — never the email fallback**. `PushWithEmailFallback`
+> is right for a reminder and exactly wrong here: an email arriving would let the
+> test answer "sent" while push itself was dead, retiring the one question the
+> button exists to settle. It reports per-subscription counts (`delivered`,
+> `removed`, `failures`) rather than a boolean, because the four answers need
+> four different pieces of advice. `pushToAll` is shared with the reminder path,
+> so the test runs the real encryption, the real VAPID signature and the real
+> dead-endpoint cleanup; a test that shortcut any of those would prove the
+> shortcut.
+>
+> **"Not configured" is not "unsupported".** Those shared one state until a
+> local run rendered "add Agnte to your home screen" on a desktop browser that
+> was perfectly capable — the actual cause was a server with no VAPID keys. The
+> advice is opposite in the two cases (install the PWA; nothing you can do,
+> reminders are arriving by email), so they are now separate states.
+>
+> **Still not proven end to end.** The encryption is checked against an
+> independent implementation, the fallback logic and the worker's handlers are
+> unit-tested, and the subscription and test endpoints are integration-tested —
+> but no real push has been delivered to a real device. Headless Chromium
+> refuses to register with a push service (`AbortError: Registration failed -
+> permission denied`) and the sandbox cannot reach FCM, so the last link can
+> only be closed on a phone: open the app, Menu → Reminders → Turn on, then
+> **Send a test notification**. That last step is the part this endpoint added;
+> before it, the only way to try was to schedule a reminder and wait.
 >
 > **A reminder is a Verse.** Scheduling one writes two rows: a Verse carrying
 > what it says, when it is for and whatever tags it was given, and a

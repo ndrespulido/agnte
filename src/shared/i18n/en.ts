@@ -230,6 +230,16 @@ export const en = {
     justAMoment: 'Just a moment…',
     turnOff: 'Turn off',
     turnOn: 'Turn on',
+    sendTest: 'Send a test notification',
+    testSending: 'Sending…',
+    testArrived: 'Sent. It should appear on this device within a few seconds.',
+    testNoSubscription:
+      'No browser is subscribed on this account yet. Turn notifications on first.',
+    pushNotConfigured:
+      'Push is switched off on this server, so reminders arrive by email.',
+    testFailed: (reason: string) => `It did not get through: ${reason}`,
+    testGone:
+      'This browser\u2019s subscription had expired, so it was removed. Turn notifications off and on again.',
     everyDay: 'Every day',
     everyWeekday: 'Every weekday',
     everyWeek: 'Every week',

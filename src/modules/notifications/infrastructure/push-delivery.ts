@@ -1,5 +1,9 @@
 import { loadConfig } from '@/shared/infra/config';
-import type { NotificationDelivery, PushSubscriptionRepository } from '../domain/ports';
+import type {
+  NotificationDelivery,
+  PushSubscriptionRecord,
+  PushSubscriptionRepository,
+} from '../domain/ports';
 import { buildPushRequest, type VapidKeys } from './web-push';
 
 /**
@@ -50,42 +54,12 @@ export class PushWithEmailFallback implements NotificationDelivery {
       }),
     );
 
-    let delivered = 0;
-    const failures: string[] = [];
-
-    for (const subscription of subscriptions) {
-      try {
-        const request = buildPushRequest(subscription, payload, keys!);
-        const response = await fetch(request.url, {
-          method: 'POST',
-          headers: request.headers,
-          body: new Uint8Array(request.body),
-        });
-
-        if (response.ok) {
-          delivered += 1;
-          continue;
-        }
-
-        /*
-         * 404 and 410 are the push service saying this endpoint is gone: the
-         * browser was uninstalled, the permission revoked, the profile wiped.
-         * Deleting the row is the only correct response — keeping it means
-         * failing against it on every tick forever, and a queue that always has
-         * one failure in it is a queue nobody reads.
-         */
-        if (response.status === 404 || response.status === 410) {
-          await this.subscriptions.removeByEndpoint(subscription.endpoint);
-          continue;
-        }
-
-        failures.push(
-          `${new URL(subscription.endpoint).host} answered ${response.status}`,
-        );
-      } catch (cause) {
-        failures.push(cause instanceof Error ? cause.message : 'push failed');
-      }
-    }
+    const { delivered, failures } = await pushToAll(
+      subscriptions,
+      payload,
+      keys!,
+      this.subscriptions,
+    );
 
     if (delivered > 0) return;
 
@@ -103,6 +77,87 @@ export class PushWithEmailFallback implements NotificationDelivery {
 
     return this.email.send(input);
   }
+}
+
+/**
+ * What happened when a payload was pushed to every subscription a person has.
+ *
+ * Returned rather than swallowed because two callers want different things
+ * from it. The reminder path only needs "did any of them take it", so it can
+ * decide between staying quiet and falling back to email. The test endpoint
+ * (§8.4) needs the detail: a person who has just pressed "Turn on" and wants
+ * to know whether push actually works is owed the reason it did not, and
+ * "nothing happened" is the answer that made this feature impossible to prove
+ * in the first place.
+ */
+export interface PushOutcome {
+  /** Subscriptions the push service accepted. */
+  readonly delivered: number;
+  /**
+   * Subscriptions the push service said were gone, and which were deleted.
+   *
+   * Separate from a failure on purpose: an endpoint that answers 404 or 410 is
+   * a browser that has been uninstalled or had its permission revoked. Nothing
+   * is broken — there is simply one fewer device — and reporting it as a
+   * failure would send someone looking for a fault that is not there.
+   */
+  readonly removed: number;
+  /** One line per subscription that failed, naming the host and the status. */
+  readonly failures: readonly string[];
+}
+
+/**
+ * Pushes one payload to every subscription, reporting each outcome.
+ *
+ * Extracted from the reminder path so the test endpoint runs exactly the code
+ * a real reminder runs — the encryption, the VAPID signature, the dead-endpoint
+ * cleanup. A test that took a shortcut past any of those would prove the
+ * shortcut works.
+ */
+export async function pushToAll(
+  subscriptions: readonly PushSubscriptionRecord[],
+  payload: Buffer,
+  keys: VapidKeys,
+  repository: Pick<PushSubscriptionRepository, 'removeByEndpoint'>,
+): Promise<PushOutcome> {
+  let delivered = 0;
+  let removed = 0;
+  const failures: string[] = [];
+
+  for (const subscription of subscriptions) {
+    try {
+      const request = buildPushRequest(subscription, payload, keys);
+      const response = await fetch(request.url, {
+        method: 'POST',
+        headers: request.headers,
+        body: new Uint8Array(request.body),
+      });
+
+      if (response.ok) {
+        delivered += 1;
+        continue;
+      }
+
+      /*
+       * 404 and 410 are the push service saying this endpoint is gone: the
+       * browser was uninstalled, the permission revoked, the profile wiped.
+       * Deleting the row is the only correct response — keeping it means
+       * failing against it on every tick forever, and a queue that always has
+       * one failure in it is a queue nobody reads.
+       */
+      if (response.status === 404 || response.status === 410) {
+        await repository.removeByEndpoint(subscription.endpoint);
+        removed += 1;
+        continue;
+      }
+
+      failures.push(`${new URL(subscription.endpoint).host} answered ${response.status}`);
+    } catch (cause) {
+      failures.push(cause instanceof Error ? cause.message : 'push failed');
+    }
+  }
+
+  return { delivered, removed, failures };
 }
 
 /**

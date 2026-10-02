@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetConfigForTests } from '@/shared/infra/config';
-import { PushWithEmailFallback } from '@/modules/notifications/infrastructure/push-delivery';
+import {
+  PushWithEmailFallback,
+  pushToAll,
+} from '@/modules/notifications/infrastructure/push-delivery';
 import { generateVapidKeys } from '@/modules/notifications/infrastructure/web-push';
 import type {
   NotificationDelivery,
@@ -67,6 +70,7 @@ function harness(options: {
 
   return {
     delivery: new PushWithEmailFallback(repository, email),
+    repository,
     removed,
     emailed,
     sent,
@@ -197,5 +201,93 @@ describe('PushWithEmailFallback', () => {
     const body = Buffer.from(seen?.body as Uint8Array);
     expect(body.includes(Buffer.from('Take the tablet'))).toBe(false);
     expect(body.length).toBeGreaterThan(86);
+  });
+});
+
+/**
+ * The same loop, reporting instead of swallowing.
+ *
+ * `pushToAll` was extracted so the test endpoint can tell a person *why* a
+ * notification did not arrive. The reminder path only ever needed "did any of
+ * them take it", which is why these outcomes had nowhere to go before — and
+ * why "I tried push but didn't understand how it works" was the only possible
+ * experience of pressing Turn on.
+ */
+describe('pushToAll', () => {
+  const keys = () => generateVapidKeys('mailto:ops@agnte.app');
+
+  const payload = Buffer.from(JSON.stringify({ title: 'Agnte', body: null }));
+
+  it('counts what the push service accepted', async () => {
+    const h = harness({
+      subscriptions: [
+        subscription(),
+        subscription({ id: 's2', endpoint: 'https://push.example/two' }),
+      ],
+    });
+
+    const outcome = await pushToAll(
+      [subscription(), subscription({ id: 's2', endpoint: 'https://push.example/two' })],
+      payload,
+      keys(),
+      h.repository,
+    );
+
+    expect(outcome).toEqual({ delivered: 2, removed: 0, failures: [] });
+  });
+
+  /**
+   * A gone endpoint is not a failure, and the distinction is the whole point:
+   * 410 means that browser was uninstalled or had its permission revoked.
+   * Nothing is broken, so the person is told to re-subscribe rather than sent
+   * looking for a fault.
+   */
+  it('separates a dead subscription from a broken one', async () => {
+    const h = harness({
+      respond: (url) =>
+        url.endsWith('/gone')
+          ? new Response(null, { status: 410 })
+          : new Response(null, { status: 201 }),
+    });
+
+    const outcome = await pushToAll(
+      [subscription({ endpoint: 'https://push.example/gone' }), subscription()],
+      payload,
+      keys(),
+      h.repository,
+    );
+
+    expect(outcome).toEqual({ delivered: 1, removed: 1, failures: [] });
+    // Deleted, not merely counted: left in place it would fail on every tick.
+    expect(h.removed).toEqual(['https://push.example/gone']);
+  });
+
+  it('reports a failure with the host and the status', async () => {
+    const h = harness({ respond: () => new Response(null, { status: 502 }) });
+
+    const outcome = await pushToAll([subscription()], payload, keys(), h.repository);
+
+    expect(outcome.delivered).toBe(0);
+    expect(outcome.removed).toBe(0);
+    expect(outcome.failures).toEqual(['push.example answered 502']);
+  });
+
+  it('survives a transport error rather than abandoning the other browsers', async () => {
+    const h = harness({
+      respond: (url) => {
+        if (url.endsWith('/boom')) throw new Error('socket closed');
+        return new Response(null, { status: 201 });
+      },
+    });
+
+    const outcome = await pushToAll(
+      [subscription({ endpoint: 'https://push.example/boom' }), subscription()],
+      payload,
+      keys(),
+      h.repository,
+    );
+
+    expect(outcome.delivered).toBe(1);
+    expect(outcome.failures).toEqual(['socket closed']);
   });
 });

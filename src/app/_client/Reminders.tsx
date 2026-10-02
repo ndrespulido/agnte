@@ -9,6 +9,7 @@ import {
   fetchReminders,
   fetchTags,
   saveQuietHours,
+  sendTestPush,
   type QuietHoursView,
   type ReminderView,
   type TagView,
@@ -613,24 +614,103 @@ function PushToggle({
     return <p className="data-note">{s.reminders.notificationsUnsupported}</p>;
   }
 
+  /*
+   * Not the same as unsupported, and the distinction is the point: there is
+   * nothing for the person to do here, so they are told reminders are arriving
+   * by email rather than sent to install the app to their home screen.
+   */
+  if (state === 'not-configured') {
+    return <p className="data-note">{s.reminders.pushNotConfigured}</p>;
+  }
+
   if (state === 'denied') {
     return <p className="data-note">{s.reminders.notificationsBlocked}</p>;
   }
 
   return (
+    <>
+      <p className="data-note push-toggle">
+        <span>{state === 'on' ? s.reminders.onThisDevice : s.reminders.byEmail}</span>
+        <button
+          type="button"
+          className="quiet"
+          disabled={busy}
+          onClick={() => onChange(state === 'on' ? 'off' : 'on')}
+        >
+          {busy
+            ? s.reminders.justAMoment
+            : state === 'on'
+              ? s.reminders.turnOff
+              : s.reminders.turnOn}
+        </button>
+      </p>
+
+      {/* Only once a browser is subscribed. Offered while notifications are
+          off, it would be a button whose only possible answer is "nothing is
+          subscribed", which is not a test — it is a trap. */}
+      {state === 'on' ? <PushTest /> : null}
+    </>
+  );
+}
+
+/**
+ * Proving that notifications actually arrive.
+ *
+ * The gap this fills: turning notifications on produced no visible result, and
+ * the next thing that would ever arrive was a reminder at its own fire time,
+ * dispatched by a five-minute cron. Nothing on screen distinguished a working
+ * subscription from a dead one, so nobody could answer "does push work" — not
+ * the person holding the phone, and not anyone checking after a deploy.
+ *
+ * The outcome is said in words rather than shown as a tick, because the four
+ * cases need four different pieces of advice: it arrived, nothing is
+ * subscribed, this server has push switched off, or it failed and here is what
+ * the push service said.
+ */
+function PushTest() {
+  const s = useStrings();
+  const [sending, setSending] = useState(false);
+  const [outcome, setOutcome] = useState<string | null>(null);
+
+  async function send() {
+    setSending(true);
+    setOutcome(null);
+    try {
+      const result = await sendTestPush();
+
+      /*
+       * Ordered by what the person should do about it, not by the shape of the
+       * response. A failure is the only case with an action attached, so it is
+       * checked first; "configured: false" is a deployment fact and not
+       * anybody's fault, so it does not read as an error.
+       */
+      if (!result.configured) setOutcome(s.reminders.pushNotConfigured);
+      else if (result.failures.length > 0)
+        setOutcome(s.reminders.testFailed(result.failures.join('; ')));
+      else if (result.delivered > 0) setOutcome(s.reminders.testArrived);
+      else if (result.removed > 0) setOutcome(s.reminders.testGone);
+      else setOutcome(s.reminders.testNoSubscription);
+    } catch (cause) {
+      setOutcome(
+        s.reminders.testFailed(
+          cause instanceof Error ? cause.message : s.common.somethingWentWrong,
+        ),
+      );
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
     <p className="data-note push-toggle">
-      <span>{state === 'on' ? s.reminders.onThisDevice : s.reminders.byEmail}</span>
+      <span>{outcome ?? ''}</span>
       <button
         type="button"
         className="quiet"
-        disabled={busy}
-        onClick={() => onChange(state === 'on' ? 'off' : 'on')}
+        disabled={sending}
+        onClick={() => void send()}
       >
-        {busy
-          ? s.reminders.justAMoment
-          : state === 'on'
-            ? s.reminders.turnOff
-            : s.reminders.turnOn}
+        {sending ? s.reminders.testSending : s.reminders.sendTest}
       </button>
     </p>
   );
