@@ -1570,6 +1570,105 @@ impossible to create rather than merely discouraged.
 
 ---
 
+## 3a. Pausing everything between development sessions
+
+For putting the project to sleep when you are not working on it. Everything
+here is reversible, and the kill switch stays armed throughout.
+
+### What actually consumes anything while idle
+
+Less than it looks like, which is worth knowing before switching things off:
+
+| Thing | Idle cost | Notes |
+|---|---|---|
+| Cloud Run `agnte` | **€0** | Scales to zero. Costs only while serving. |
+| Neon production | **~€0** | Auto-suspends when nothing connects. |
+| R2 | storage only | No egress fees; backups accumulate. |
+| Artifact Registry | storage only | Cleanup policy caps it. |
+| Kill switch | **~€0** | Budget → Pub/Sub → Function. **Leave it on.** |
+| `agnte-backup-nightly` | wakes Run **and** Neon, 03:17 UTC | Cloud Scheduler. |
+| `agnte-prune-daily` | wakes Run **and** Neon, 04:40 UTC | Cloud Scheduler. |
+| `sweep-previews` | one Actions run, 03:17 UTC | GitHub, authenticates to GCP. |
+
+So the only things that run on their own are the **two Cloud Scheduler jobs and
+one GitHub schedule**. Nothing else wakes up unless somebody opens the app or
+pushes a commit. Cloud Run and Neon both idle at nothing; the schedulers are
+what keep poking them awake.
+
+> **There is no notifications tick in production.** `handleNotificationsTick`
+> is exported by the module and has no `/internal/...` route, so no scheduler
+> can be calling it and scheduled reminders have never fired. Noted here
+> because it is the thing you would expect to be the biggest idle consumer —
+> a five-minute cron — and it is not running at all. See §8.4.
+
+### Pausing
+
+Confirm the region first rather than trusting the script defaults, since the
+workflows read it from `vars.GCP_REGION`:
+
+```sh
+gcloud scheduler locations list --project=agnte-prod
+gcloud scheduler jobs list --location=<region> --project=agnte-prod
+```
+
+Then pause both jobs:
+
+```sh
+gcloud scheduler jobs pause agnte-backup-nightly \
+  --location=<region> --project=agnte-prod
+gcloud scheduler jobs pause agnte-prune-daily \
+  --location=<region> --project=agnte-prod
+```
+
+That is the whole pause. With nothing poking it, Cloud Run stays at zero
+instances and Neon suspends itself, so the recurring spend goes to
+approximately nothing without deleting or reconfiguring anything.
+
+Optionally, stop the daily GitHub run too — it is small, and it is the thing
+that cleans up previews, so it is only waste when no pull requests exist:
+
+```sh
+gh workflow disable sweep-previews.yml --repo ndrespulido/agnte
+```
+
+> **Pausing the backup means no backups.** §8.8 already calls Neon's
+> free-tier recovery window insufficient on its own, and while the nightly job
+> is paused the newest dump in R2 is the one from the day you paused. That is a
+> fair trade for a timeline nobody is writing to — it is not a fair trade if you
+> keep using the app. Take a dump by hand before a long pause:
+> `gcloud run jobs execute agnte-backup --region=<region> --project=agnte-prod --wait`
+
+**What not to do.** Do not delete the Cloud Run service or the Neon project to
+"save more": both are already free at rest, and recreating them means
+reconfiguring secrets, the custom domain and R2 CORS — the three things in this
+document that have each cost a debugging session. And do not disable the kill
+switch; it is the one thing whose whole purpose is to protect an unattended
+project.
+
+### Resuming
+
+```sh
+gcloud scheduler jobs resume agnte-backup-nightly \
+  --location=<region> --project=agnte-prod
+gcloud scheduler jobs resume agnte-prune-daily \
+  --location=<region> --project=agnte-prod
+gh workflow enable sweep-previews.yml --repo ndrespulido/agnte
+```
+
+Then check the app still answers and the database is migrated, which is one
+unauthenticated request — the same one the deploy's smoke test gates on:
+
+```sh
+curl -s https://agnte.app/v1/health | jq '.status, .checks'
+```
+
+It answers 200/`ok` or 503/`failed`, and the database check compares the
+migrations the image ships against the ones the database reports applied
+(§2.1) — so a green answer means more than "it booted". Expect the first
+request after a long pause to be slow: it wakes both Cloud Run and Neon.
+
+---
+
 ## 3b. Preview environments (task 0.9)
 
 Every pull request from this repository gets its own URL, backed by its own Neon
