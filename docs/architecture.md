@@ -1186,3 +1186,209 @@ three different things here: what a tag looks like *over time* (a sparkline of
 when you actually went to restaurants), what it looks like *against other tags*
 (the co-tag data the dashboard already returns), and what a filtered timeline
 looks like when it is a whole screen rather than a filter on the main one.
+
+---
+
+## 12. v3 — the chat redesign (planned, not built)
+
+Asked for in November 2026, after v2's nine phases shipped. Everything in this
+section is a plan and a set of decisions; none of it is code yet. It is written
+down before the first line for the reason §11 was: each item collides with
+something already decided, and the collisions are cheaper to find here.
+
+### 12.1 What changes for the person using it
+
+- **The timeline reads like a chat.** Still centred on today and scrollable
+  both ways, but the past is up and the future is down. Today it is the other
+  way round (`Timeline.tsx` renders the future reversed above the past).
+- **A composer replaces the add button.** A text box pinned to the bottom, a
+  microphone on one side for voice notes, and a `+` on the other for photos and
+  video, files, reminders, locations, contacts, visibility and tags. Pasting an
+  image, a link or a file into it makes a verse.
+- **Typed text is parsed, not just stored.** `Trip to Recife from: 5 January
+  2027 to: 24/02/27 where: Recife Airport rating: 8 .travel` becomes a verse
+  with a range, a location, a rating and a tag. What was typed appears on the
+  right; what Agnte understood appears on the left as an editable card. The
+  form stays, as the way to edit a card.
+- **Replying to a verse edits it.** `seat: 4A airplane: A320` sent as a reply
+  adds two properties to the verse it replies to.
+- **Screenshots become verses.** A flight confirmation yields origin,
+  destination, times and the booking reference (§11.1, now scheduled).
+- **Tags Agnte inferred are distinguishable from tags the person typed.**
+- **Filtering grows**: tags as now, plus a date range and a place.
+- **A tag can be published.** A public URL anyone can open — a restaurant's
+  daily menu is the motivating case.
+- **Native apps** for Android and iPhone.
+
+### 12.2 Decisions made
+
+1. **One timeline, ordered by event date.** A chat orders by when something was
+   typed and this timeline orders by when it happened, and the request's own
+   example separates them: a trip typed today belongs in January 2027. The
+   event-date axis is the product, so it wins. The literal text is stored on
+   the verse and shown beside its card *where the verse lives*; for an entry
+   dated today, which is most of them, that is indistinguishable from a chat.
+   For one filed elsewhere the composer answers with where it went and a jump.
+2. **Ratings stay 0–10.**
+3. **Voice notes are transcribed**, so they are searchable and go through the
+   same parser as typed text.
+4. **Still one person's app first.** No billing, no organisation accounts, no
+   moderation queue. That bounds 12.5 below: metered features get hard
+   per-day caps rather than a pricing model, and the billing kill switch stays
+   exactly as it is, because the only account it can take down is the owner's.
+   Publishing still needs the minimum a public page needs — see 12.4.
+5. **One UI codebase is the preferred outcome, decided by a spike.** See 12.6.
+
+### 12.3 The grammar
+
+Deterministic and client-side. No model reads typed text: a parser is free,
+instant, works offline, and can be tested exhaustively in four languages. It
+lives in the shared `core` package (12.6) so every client parses identically.
+
+- `key: value` sets a field or a property; `.name` adds a tag; whatever is left
+  is `xp`.
+- Reserved keys map to fields: `from`, `to`, `when`, `where`, `rating`,
+  `visibility`. Anything else is a property — `seat: 4A`, `plat: rice with
+  setas`.
+- A value runs to the next key, so `entrée: croquetas plat: rice dessert: ice
+  cream` is three properties.
+
+Traps already known, each of which needs a rule and a test before the composer
+ships:
+
+- **Colons that are not keys.** `Note: call mom`, `10:30`, `https://…`. A key
+  must be a single word directly followed by a colon and a space or a value,
+  and times and URLs are recognised first.
+- **Ambiguous dates.** `24/02/27` can only be day-first; `05/01/27` cannot be
+  told apart. The reader's locale decides, and the card shows the
+  interpretation so a wrong guess is visible rather than silent.
+- **Property keys are ASCII-only today** (`^[a-z0-9]+(?:-[a-z0-9]+)*$`), so
+  `entrée:` is refused by the domain. The rule has to admit letters outside
+  ASCII, with a stated normalisation, before a French speaker's first lunch.
+- **Keywords in four languages.** `from:` / `desde:` / `de:` / `从`. Either the
+  reserved keys are localised with the interface or they are English-only and
+  documented as such; undecided.
+- **Precision.** A parsed date with no time is `'date'`; with a time it is
+  `'minute'` in the typist's zone. This is the reason the event-precision work
+  (branch `claude/event-precision`) had to land first.
+
+The parse is committed immediately and the card is editable afterwards — no
+confirmation step — because a composer that asks "is this right?" after every
+message is not a chat.
+
+### 12.4 What the data model has to grow, and what each collides with
+
+- **The literal text, and the history of replies.** A verse gains the entries
+  that produced it: raw text, attachments, and the change each one made.
+  Reply-to-edit is "append an entry", which also gives an edit history for free.
+  Collides with nothing; it is new.
+- **Inferred tags carry their origin.** `verse_tag` gains a source — typed or
+  inferred. **An inferred tag must never widen visibility** (CLAUDE.md: fail
+  closed). Today a verse inherits the most restrictive visibility among its
+  tags, so a verse whose *only* tag is an inferred `.travel`, where `.travel`
+  has been published, would be made public by a machine. Inferred tags are
+  therefore excluded from resolution in the permissive direction, in the one
+  function that resolves visibility, with a test that names this case.
+  Inferred tags come from a fixed vocabulary at first, so extraction cannot
+  mint tags.
+- **Location becomes structured.** It is a bare string today. Filtering by
+  place needs a place id and coordinates alongside the label; typed
+  `where:` text needs a decision on whether it is geocoded (a metered call) or
+  matched as text.
+- **Media stops being images only.** `ALLOWED_CONTENT_TYPES` is JPEG, PNG and
+  WebP. Audio, video and arbitrary files each need a size cap; video is stored
+  as uploaded with a poster frame and is **never transcoded**, or it becomes
+  the bill. Recorded audio differs by browser (WebM/Opus against MP4/AAC).
+- **Contacts are other people's personal data.** A contact attached to a verse
+  is third-party data under GDPR and is covered by export and erasure.
+- **Publishing needs things that do not exist:** a handle on the user, an
+  unauthenticated read path (there is none — every read authenticates), public
+  media URLs that are not short-lived signed links and serve only derived
+  variants with metadata stripped, and CDN caching. The read path goes through
+  the same visibility resolver as every other (§2); it does not get its own
+  query. Publishing is **retroactive** — every verse carrying only that tag
+  becomes public — so it is confirmed against a count. Even for a one-person
+  app, a public page needs a report address and a way to take a page down.
+- **Link previews fetch arbitrary URLs from the server**, which is a
+  request-forgery surface: private address ranges are blocked and the fetch is
+  size- and time-bounded.
+
+### 12.5 Metered dependencies: the rule changes, deliberately
+
+§3.1's discipline allowed exactly one metered dependency (place suggestions).
+v3 adds two: **vision extraction** for screenshots and **transcription** for
+voice notes. The rule is not dropped; it is restated for more than one:
+
+- every metered call sits behind a per-user daily cap enforced server-side,
+- each is switched off by leaving its key unset, like Places, so `npm run dev`
+  still needs no account,
+- extraction runs as a deferred job (§1.3) and produces a **proposed** verse
+  the person confirms, shown beside the screenshot it came from — a wrong date
+  extracted silently is the worst failure this feature has,
+- text inside an image is untrusted input: the extractor returns fields and
+  nothing else, and nothing it returns is acted on,
+- sending an image to a third party is asked for, not assumed. This app holds
+  medical and financial screenshots; the processor, its region and its
+  retention are written into §8.7 before the first image leaves.
+
+### 12.6 Stack
+
+**Kept:** TypeScript, Postgres, the modular monolith and its boundaries, R2,
+Cloudflare, Cloud Run, the API inside the web deployable. The route handlers
+are plain `Request → Response` functions, so moving them to their own service
+later is mechanical and there is no reason to pay for it now.
+
+**Changed:**
+
+- **A monorepo with a shared `core` package** — design tokens, string tables,
+  date formatting, the parser, the timeline arithmetic and the offline queue's
+  rules. `format.ts` already carries a hand-copied duplicate of the verse
+  module's timeline maths with a comment admitting what happens when they
+  drift; a second client would make it three copies.
+- **API errors are consumed by code, not prose** (§8.6.1's open gap). A native
+  build in someone's pocket for months cannot depend on English sentences, and
+  `/v1` becomes additive-only from the first store release.
+- **Native apps on Expo (React Native).** A chat input, hold-to-record and the
+  keyboard are where a wrapped web view feels wrong. iOS builds run in a cloud
+  build service because the development machine is not a Mac. Push needs a
+  native delivery adapter beside Web Push. The share sheet — "Share to Agnte"
+  from any app — is the real successor to messaging things to yourself, and is
+  the first native-only feature worth building.
+- **Sign in with Apple**, required by the App Store once Google sign-in is
+  offered.
+
+**The spike.** Whether the signed-in app becomes one Expo codebase for web,
+iOS and Android, or stays two (Next for web, Expo for native), is decided by
+building the hardest screen once: a two-directional, date-sectioned timeline
+with a sticky header and a keyboard-attached composer, on React Native, running
+on the web and on a phone. One codebase halves every future UI change for a
+solo developer, and its web output can be driven in a browser the same way the
+current client is. The risk is that screen. If it holds, v3's UI is built once;
+if it does not, `core` is shared and the two UIs are not. Public pages are
+server-rendered either way.
+
+**Repository.** Goes private, and stays on GitHub. Deployment is not limited by
+the host — it happens on GCP through workload identity — and moving would mean
+rewriting six workflows and the federation for a smaller free CI allowance.
+The history up to this point has been public and should be treated as such.
+
+### 12.7 Order of work
+
+Each step is one deliverable ending in a merged pull request.
+
+1. **Foundations.** Merge `claude/event-precision`, 
+   `claude/push-test-notification` and `claude/pause-runbook`; finish the display half of event
+   precision; give the reminder tick a route (it has none, so no reminder has
+   ever fired in production); the monorepo and `core`; error codes.
+2. **The spike** (12.6), which decides how steps 3 and 8 are built.
+3. **Composer and chat timeline.** Grammar, entries, reply-to-edit, the flip,
+   paste, the `+` menu over what already exists.
+4. **Media kinds.** Voice with transcription, files, capped video, contacts.
+5. **Structured location and the new filters.**
+6. **Publishing.**
+7. **Screenshot extraction and inferred tags.**
+8. **Native apps**, starting with the share sheet.
+
+Not addressed here and still open: live updates across devices (a chat implies
+them; nothing provides them today), the `contribute` permission (§10), and the
+v1 converter, which is still blocked on v1's schema.
