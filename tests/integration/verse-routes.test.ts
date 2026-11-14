@@ -440,6 +440,25 @@ describe.skipIf(!DATABASE_URL)('verse routes', () => {
       });
     });
 
+    /**
+     * Property keys in the person's own language, end to end: through the API,
+     * the domain's normalisation and jsonb, and back out unchanged.
+     */
+    it('stores property keys with accents and in other scripts', async () => {
+      const { token } = await signUp('accents-keys@example.com');
+      const tag = await makeTag(token, 'restaurant');
+
+      const body = (await (
+        await post(token, {
+          tagIds: [tag.id],
+          // Decomposed on the way in, to prove it is stored composed.
+          properties: { 'entre\u0301e': 'croquetas', 座位: '14A' },
+        })
+      ).json()) as { properties: Record<string, string> };
+
+      expect(body.properties).toEqual({ 'entr\u00e9e': 'croquetas', 座位: '14A' });
+    });
+
     it('accepts a deep-time verse', async () => {
       const { token } = await signUp('h@example.com');
       const tag = await makeTag(token, 'prehistory');

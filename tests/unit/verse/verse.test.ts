@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   MAX_LOCATION_LENGTH,
   MAX_PROPERTIES,
+  MAX_PROPERTY_KEY_LENGTH,
   MAX_PROPERTY_VALUE_LENGTH,
   MAX_RATING,
   MAX_XP_LENGTH,
@@ -334,6 +335,75 @@ describe('parseProperties', () => {
     expect(parseProperties(many).ok).toBe(false);
   });
 
+  /**
+   * Keys in the person's own language (§12.3). The rule was `[a-z0-9]`, and
+   * the first French lunch — `entrée: croquetas` — was refused by it.
+   */
+  describe('keys outside ASCII', () => {
+    it('accepts accented letters and other scripts', () => {
+      expect(unwrap(parseProperties({ entrée: 'croquetas', plat: 'riz' }))).toEqual({
+        entrée: 'croquetas',
+        plat: 'riz',
+      });
+      expect(
+        unwrap(parseProperties({ 座位: '14A', Größe: 'M', 'año de estreno': '1998' })),
+      ).toEqual({
+        座位: '14A',
+        größe: 'M',
+        'año-de-estreno': '1998',
+      });
+    });
+
+    /**
+     * The trap accents bring with them. `é` composed and `e` + combining acute
+     * render identically, and text pasted from a macOS file name is the second
+     * form — so without NFC these would be two indistinguishable properties.
+     */
+    it('treats composed and decomposed spellings as one key', () => {
+      const composed = 'entr\u00e9e';
+      const decomposed = 'entre\u0301e';
+      expect(composed).not.toBe(decomposed);
+
+      const parsed = unwrap(parseProperties({ [decomposed]: 'croquetas' }));
+      expect(Object.keys(parsed)).toEqual([composed]);
+    });
+
+    /** A key is the label the person chose; folding would be correcting it. */
+    it('does not fold accents away', () => {
+      const parsed = unwrap(parseProperties({ entree: 'a', entrée: 'b' }));
+      expect(parsed).toEqual({ entree: 'a', entrée: 'b' });
+    });
+
+    /**
+     * The colon above all: the composer reads `key: value`, so a key holding
+     * one could never be typed back.
+     */
+    it.each([
+      'seat:',
+      'a/b',
+      'seat!',
+      '💺',
+      '-seat',
+      'seat-',
+      'a--b',
+      '\u0301',
+      'a\u200bb',
+    ])('still refuses %j', (key) => {
+      const result = parseProperties({ [key]: 'x' });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe(VerseErrorCode.PropertyKeyInvalid);
+    });
+
+    it('counts the length limit in characters, not UTF-16 units', () => {
+      // 64 astral-plane letters are 128 UTF-16 units and exactly at the limit.
+      expect(parseProperties({ ['𝒂'.repeat(MAX_PROPERTY_KEY_LENGTH)]: 'x' }).ok).toBe(
+        true,
+      );
+      expect(parseProperties({ ['𝒂'.repeat(MAX_PROPERTY_KEY_LENGTH + 1)]: 'x' }).ok).toBe(
+        false,
+      );
+    });
+  });
   it('refuses a value past the cap', () => {
     expect(parseProperties({ note: 'a'.repeat(MAX_PROPERTY_VALUE_LENGTH + 1) }).ok).toBe(
       false,

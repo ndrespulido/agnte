@@ -110,8 +110,44 @@ export const MAX_PROPERTIES = 50;
 export const MAX_PROPERTY_KEY_LENGTH = 64;
 export const MAX_PROPERTY_VALUE_LENGTH = 2_000;
 
-/** Same shape as a tag name: lowercase, digits, inner hyphens. */
-const PROPERTY_KEY = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+/**
+ * Letters and digits **in any script**, in hyphen-separated runs.
+ *
+ * This was `[a-z0-9]`, copied from tag names, and it refused `entrée` — which
+ * is what someone writing down a French lunch types first. A property key is
+ * the person's own label for their own data, in their own language, and four
+ * interface languages are supported; an ASCII-only rule was a rule about what
+ * the first author happened to type.
+ *
+ * `\p{L}` and `\p{N}` rather than a list of accented letters, so 座位 and
+ * `größe` are keys without anyone having to think of them. Combining marks
+ * (`\p{M}`) are allowed after a letter because some scripts cannot be written
+ * without them; they cannot start a run, so a key is never a bare accent.
+ *
+ * Still refused: punctuation, symbols, emoji and invisible characters. The
+ * colon in particular stays out, because the composer's grammar (§12.3) reads
+ * `key: value` and a key containing one could not be typed back.
+ */
+const PROPERTY_KEY =
+  /^[\p{L}\p{N}][\p{L}\p{N}\p{M}]*(?:-[\p{L}\p{N}][\p{L}\p{N}\p{M}]*)*$/u;
+
+/**
+ * A property key as it is stored.
+ *
+ * NFC first, and that is the step that matters once accents are allowed:
+ * `é` can arrive as one code point or as `e` followed by a combining acute,
+ * and the two look identical on screen. Text pasted from a file name on macOS
+ * is routinely the second form. Without normalising, `entrée` typed and
+ * `entrée` pasted would be two properties on one verse that nobody could tell
+ * apart — and a dashboard summing one of them.
+ *
+ * Accents are **not** folded. `entree` and `entrée` stay different keys:
+ * search folds accents because it is forgiving about what was typed, but a key
+ * is shown back as the label the person chose, and stripping its accent would
+ * be correcting their spelling.
+ */
+const normalisePropertyKey = (raw: string): string =>
+  raw.normalize('NFC').trim().toLowerCase().replace(/\s+/g, '-');
 
 /**
  * Where a Verse sits in time.
@@ -347,10 +383,12 @@ export function parseProperties(
   const out: Record<string, string> = {};
 
   for (const [rawKey, rawValue] of entries) {
-    const key = rawKey.trim().toLowerCase().replace(/\s+/g, '-');
+    const key = normalisePropertyKey(rawKey);
 
     if (key.length === 0) return err(propertyKeyInvalid(rawKey, 'it is empty'));
-    if (key.length > MAX_PROPERTY_KEY_LENGTH) {
+    // Counted in characters, not UTF-16 units — the same way location is —
+    // so the limit means the same thing for 座位 as it does for `seat`.
+    if ([...key].length > MAX_PROPERTY_KEY_LENGTH) {
       return err(
         propertyKeyInvalid(
           rawKey,

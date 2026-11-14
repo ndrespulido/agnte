@@ -1262,12 +1262,22 @@ ships:
 - **Ambiguous dates.** `24/02/27` can only be day-first; `05/01/27` cannot be
   told apart. The reader's locale decides, and the card shows the
   interpretation so a wrong guess is visible rather than silent.
-- **Property keys are ASCII-only today** (`^[a-z0-9]+(?:-[a-z0-9]+)*$`), so
-  `entrée:` is refused by the domain. The rule has to admit letters outside
-  ASCII, with a stated normalisation, before a French speaker's first lunch.
-- **Keywords in four languages.** `from:` / `desde:` / `de:` / `从`. Either the
-  reserved keys are localised with the interface or they are English-only and
-  documented as such; undecided.
+- **Property keys were ASCII-only** (`^[a-z0-9]+(?:-[a-z0-9]+)*$`), so
+  `entrée:` was refused by the domain. **Fixed ahead of the composer:** a key
+  is now letters and digits in any script, NFC-normalised so a composed `é` and
+  an `e` with a combining accent are one key, and accents are *not* folded —
+  `entree` and `entrée` stay different, because a key is the label the person
+  chose. Tag names are still ASCII; that was not asked for and is a separate
+  decision, since a tag name is also a URL segment once tags can be published.
+- **Keywords are localised with the interface** (decided). `from:` in English
+  is `desde:` in Spanish, and each string table carries its own reserved keys
+  the same way it carries its own month names. Two consequences to design for:
+  a reserved key in one language is an ordinary property key in another (`de:`
+  is "from" in Spanish and nothing in English), so the same text parses
+  differently under a different interface language — which is why the literal
+  text and the parsed result are both stored, and a re-parse is never automatic.
+  And English keys are accepted in every language as a fallback, so a habit
+  formed in one language keeps working after switching.
 - **Precision.** A parsed date with no time is `'date'`; with a time it is
   `'minute'` in the typist's zone. This is the reason the event-precision work
   (branch `claude/event-precision`) had to land first.
