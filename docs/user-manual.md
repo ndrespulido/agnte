@@ -202,8 +202,8 @@ The form has one rounded box per field, with the name inside it:
 
 | Field | Notes |
 |---|---|
-| **What happened** | The note. Up to 20,000 characters. |
-| **Attachments** (the three icons right under the note) | **Photo library**, **Take a photo or video** (opens the camera on a phone) and **Choose files** — one tap each, no second menu. Photos are shrunk automatically; videos, voice notes and files go up as they are. Chips and thumbnails show what is attached; remove one with its ✕. |
+| **Attachments** (at the top of the form) | **Photo library**, **Take a photo or video** (opens the camera on a phone) and **Choose files** — one tap each, no second menu. Photos are shrunk automatically; videos, voice notes and files go up as they are. Chips and thumbnails show what is attached; they sit in **one strip that scrolls sideways**, with voice notes, videos and files shown as tiles with their names. Remove one with its ✕. |
+| **What happened** | The note, below the attachments. Up to 20,000 characters. The box grows with what you write. |
 | **Where** | A place, up to 200 characters. If place suggestions are switched on, they appear as you type. |
 | **Starts / Ends** + times | A date and an **optional** time for each end. Leave the time empty for a whole day. If the start has a time, the end needs one too. A time needs a date. |
 | **Rating** | 0 to 10. |
@@ -212,6 +212,8 @@ The form has one rounded box per field, with the name inside it:
 | **Add a detail** | Any `name` and `value`. Up to 50 per verse. Names may use letters in any script, digits and hyphens: `entrée`, `座位`, `seat` are all fine. `entree` and `entrée` are different names. |
 
 If you do not give a date, the verse is placed **now**, as a moment.
+
+**Closing.** A small chevron at the top right of the form (and of a verse opened read-only) closes it, as do **Cancel** and **Esc**.
 
 **Minimise.** When you opened the form from the bar with **+**, a small **chevron**
 at the top right puts the form down and **moves everything back into the bar**

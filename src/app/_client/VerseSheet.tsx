@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import {
   createTag,
   createVerse,
@@ -161,6 +161,21 @@ export function VerseSheet({
   const firstFieldRef = useRef<HTMLTextAreaElement | null>(null);
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  /*
+   * The note grows with what is in it.
+   *
+   * A fixed three-row box scrolled long or multi-line text inside itself, and
+   * the sheet's own padding made it look as if the text ran out of the box.
+   * Reset to `auto` first so it can also shrink when text is deleted, then fit
+   * to the content; the stylesheet caps it and lets it scroll past that.
+   */
+  useLayoutEffect(() => {
+    const box = firstFieldRef.current;
+    if (!box) return;
+    box.style.height = 'auto';
+    box.style.height = `${box.scrollHeight}px`;
+  }, [xp]);
 
   useEffect(() => {
     void fetchTags()
@@ -540,53 +555,51 @@ export function VerseSheet({
 
         {/* Only from the composer: put the form down and carry on in the bar.
             Not while something is uploading — the upload would be left behind. */}
-        {onMinimise ? (
+        {onMinimise || editing ? (
           <button
             type="button"
             className="sheet-minimise"
-            aria-label={s.composerBar.minimize}
-            title={s.composerBar.minimize}
-            disabled={uploading}
-            onClick={minimise}
+            aria-label={onMinimise ? s.composerBar.minimize : s.common.close}
+            title={onMinimise ? s.composerBar.minimize : s.common.close}
+            disabled={onMinimise ? uploading : false}
+            onClick={onMinimise ? minimise : onClose}
           >
             <Icon name="chevronDown" />
           </button>
         ) : null}
 
         {/*
-          The field's name is inside the box, as its placeholder and an icon,
-          rather than above it as a title. The name still exists for a screen
-          reader (`aria-label`) — a placeholder alone disappears on the first
-          keystroke and is not announced as a label by every reader.
-        */}
-        <label className="control control-area">
-          <Icon name="note" />
-          <textarea
-            ref={firstFieldRef}
-            data-field="xp"
-            value={xp}
-            onChange={(event) => setXp(event.target.value)}
-            rows={3}
-            placeholder={s.verse.whatHappened}
-            aria-label={s.verse.whatHappened}
-          />
-        </label>
-
-        {/*
-          Attachments, straight under the note — the most used thing after the
-          note itself. Three sources in one row rather than one button that
+          Attachments first, above the note — what a verse is about is often the
+          picture, and the words come after it. Three sources in one row rather than one button that
           opens a menu of the same three: a phone's "Add photos" is a second
           tap to say which, and each of these is already the answer.
         */}
         <fieldset className="field attach-field">
           <legend className="visually-hidden">{s.verse.photos}</legend>
-          {carried.length > 0 ? (
-            <ul className="composer-attachments carried">
+          {images.length > 0 || carried.length > 0 ? (
+            /*
+              One strip for everything attached — photos with their previews,
+              and voice notes, videos and files as tiles of their own — that
+              scrolls sideways, so a verse with many attachments costs width
+              and not height. Voice notes and files used to be missing from
+              the editor altogether: it only knew how to draw pictures.
+            */
+            <ul className="picked-images media-strip">
               {carried.map((item) => (
-                <li key={item.key} className={item.status}>
-                  <span>{item.name}</span>
+                <li key={item.key} className="media-file" data-status={item.status}>
+                  <Icon
+                    name={
+                      item.kind === 'audio'
+                        ? 'mic'
+                        : item.kind === 'video'
+                          ? 'camera'
+                          : 'clip'
+                    }
+                  />
+                  <span className="media-name">{item.name}</span>
                   <button
                     type="button"
+                    className="remove"
                     aria-label={`${s.composerBar.remove} ${item.name}`}
                     onClick={() =>
                       setCarried((current) =>
@@ -594,15 +607,15 @@ export function VerseSheet({
                       )
                     }
                   >
-                    <Icon name="close" />
+                    ×
                   </button>
+                  {item.status === 'working' ? (
+                    <span className="badge" role="status">
+                      {s.verse.uploading}
+                    </span>
+                  ) : null}
                 </li>
               ))}
-            </ul>
-          ) : null}
-
-          {images.length > 0 ? (
-            <ul className="picked-images">
               {images.map((image) => (
                 <li key={image.key} data-status={image.status}>
                   {/* eslint-disable-next-line @next/next/no-img-element --
@@ -621,7 +634,7 @@ export function VerseSheet({
                   </button>
                   {image.status === 'working' ? (
                     <span className="badge" role="status">
-                      Uploading…
+                      {s.verse.uploading}
                     </span>
                   ) : null}
                   {image.status === 'failed' ? (
@@ -683,6 +696,25 @@ export function VerseSheet({
             </label>
           </div>
         </fieldset>
+
+        {/*
+          The field's name is inside the box, as its placeholder and an icon,
+          rather than above it as a title. The name still exists for a screen
+          reader (`aria-label`) — a placeholder alone disappears on the first
+          keystroke and is not announced as a label by every reader.
+        */}
+        <label className="control control-area">
+          <Icon name="note" />
+          <textarea
+            ref={firstFieldRef}
+            data-field="xp"
+            value={xp}
+            onChange={(event) => setXp(event.target.value)}
+            rows={3}
+            placeholder={s.verse.whatHappened}
+            aria-label={s.verse.whatHappened}
+          />
+        </label>
 
         <LocationField value={location} onChange={setLocation} />
 

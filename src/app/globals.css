@@ -1016,6 +1016,18 @@ button.tag:focus-visible {
   gap: var(--space-lg);
 }
 
+/*
+ * Nothing in the sheet shrinks to fit.
+ *
+ * The sheet is a flex column with a maximum height, so when the form grew
+ * past it every field was squeezed down to its minimum height — a long note's
+ * box collapsed to one row while its text kept its full height and ran out of
+ * the bottom. The sheet scrolls instead.
+ */
+.sheet > * {
+  flex-shrink: 0;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -1133,6 +1145,10 @@ button.tag:focus-visible {
 }
 
 .control-area textarea {
+  /* Sized by the sheet's effect to its content; this is only the ceiling,
+     past which it scrolls rather than pushing the form off screen. */
+  max-height: 40vh;
+  overflow-y: auto;
   padding: var(--space-xxs) 0;
   resize: none;
   line-height: var(--leading-snug, 1.3);
@@ -1194,6 +1210,12 @@ button.tag:focus-visible {
 .attach-button:focus-within {
   border-color: var(--color-accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+/* A fieldset will not shrink below its content by default, so a long strip
+   widened the whole row and pushed the last attach icon off the sheet. */
+.attach-field {
+  min-width: 0;
 }
 
 .attach-field .picked-images {
@@ -1450,11 +1472,57 @@ fieldset.field > .field-pair + .field-pair {
 
 .picked-images li {
   position: relative;
+  flex: none;
+  scroll-snap-align: start;
   width: 5rem;
   height: 5rem;
   border-radius: var(--radius-sm);
   overflow: hidden;
   border: var(--hairline) solid var(--color-rule);
+}
+
+/* Everything attached, in one strip that scrolls sideways. */
+.media-strip {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+  padding-bottom: var(--space-xxs);
+}
+
+.media-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.media-strip li {
+  width: 6.5rem;
+  height: 6.5rem;
+  border-radius: var(--radius-lg);
+}
+
+/* A voice note, video or file: no picture, so an icon and its name. */
+.media-strip li.media-file {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  background: color-mix(in srgb, var(--color-accent) 7%, var(--color-paper));
+  color: var(--color-accent-text);
+}
+
+.media-name {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-width: 100%;
+  font-size: var(--text-micro);
+  line-height: var(--leading-tight);
+  text-align: center;
+  color: var(--color-ink-soft);
+  overflow-wrap: anywhere;
 }
 
 .picked-images img {
