@@ -1353,9 +1353,23 @@ The literal text is stored in `verse.typed_text`, verbatim, and is never
 rewritten by an edit to a field. A typed tag resolves to a tag of that name,
 then to a tag with that shortcut, then to a new tag. A verse still needs a
 tag, so text with none cannot be sent — the card says so. The plus in the bar
-opens the form for what typing cannot say. Not built yet: the chat layout
-(past up, future down, typed text beside the card), reply-to-edit, paste and
-attachments in the bar, and non-ASCII tag names.
+opens the form for what typing cannot say.
+
+**The chat layout is built on the web client.** The column reads oldest at the
+top, opens with today at the bottom of the screen just above the composer,
+and continues into the future below. The flip is in the rendering only: pages
+and their order from the API are unchanged. Older rows are now what gets
+added above the reader, so the scroll correction moved to that side and
+measures the today mark rather than the document height (the "Loading…" line
+made the height wrong by 44px a page); the browser's own anchoring is turned
+off so every browser takes the one path. A verse made in the composer shows
+its literal text as a bubble on the right, above the card. Measured in
+headless Chromium at phone width: five loads of older rows moved the tracked
+row 0–1px. **Not checked on Safari/iOS**, which is the browser the manual
+correction exists for. Known limit: the date header follows headings as they
+scroll past, so after a programmatic jump it can lag until the next heading.
+Not built yet: reply-to-edit, paste and attachments in the bar, and non-ASCII
+tag names.
 
 The parse is committed immediately and the card is editable afterwards — no
 confirmation step — because a composer that asks "is this right?" after every

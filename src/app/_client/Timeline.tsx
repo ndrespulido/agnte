@@ -38,11 +38,13 @@ import {
 } from './sync';
 
 /**
- * The timeline: today in the middle, the future above it, the past below.
+ * The timeline, read like a chat (§12): the past above, today at the bottom
+ * of the screen just over the composer, the future below it.
  *
- * Time runs downward, so the column reads farthest-future → today → deepest
- * past, and "scroll up to see what's coming" matches the way the date header
- * counts backwards as you go down.
+ * Time runs downward the way a conversation does — what you just wrote lands
+ * at your thumb, and scrolling up goes back. It used to run the other way
+ * (future on top); the flip is in the rendering only, the pages and their
+ * order from the API are unchanged.
  *
  * The future half used to be deliberately absent: the API had it, but a column
  * that grows from both ends needs a scroll anchor to stay put while rows are
@@ -265,14 +267,29 @@ export function Timeline({
   }, [anchor, tags, settledText]);
 
   /**
-   * How much scroll height the next render has to make up for.
+   * Where the today mark was on screen before older rows went in above it.
    *
-   * Set immediately before a future page is added and consumed by the layout
+   * Set immediately before a page of older rows is added and consumed by the layout
    * effect below. A ref rather than state on purpose: it must be readable in
    * the same commit that renders the new rows, and a state update would
    * schedule another render after the jump had already been painted.
    */
   const anchorHeight = useRef<number | null>(null);
+
+  /**
+   * The today mark: what the opening scroll lands on, and the fixed point the
+   * anchoring measures against.
+   *
+   * Everything prepended goes in above it and everything appended below, so
+   * how far it moved on screen is exactly how far the reader was pushed. The
+   * document's height was the first thing measured here and it was wrong by
+   * the height of the "Loading…" line, which comes and goes at the bottom
+   * between the two measurements — 44px a page, found by sampling frames.
+   */
+  const todayRef = useRef<HTMLDivElement | null>(null);
+  const holdPosition = useCallback(() => {
+    anchorHeight.current = todayRef.current?.getBoundingClientRect().top ?? null;
+  }, []);
 
   /**
    * Put the scroll position back where it was before rows appeared above it.
@@ -287,7 +304,8 @@ export function Timeline({
     if (before === null) return;
 
     anchorHeight.current = null;
-    window.scrollBy(0, document.documentElement.scrollHeight - before);
+    const after = todayRef.current?.getBoundingClientRect().top;
+    if (after !== undefined) window.scrollBy(0, after - before);
   });
 
   /**
@@ -349,6 +367,10 @@ export function Timeline({
         cursor: catalogueCursor,
         limit: PAGE,
       });
+      // The catalogue sits above a person's own past, so it is a prepend too.
+      // Unconditionally: an empty last page still draws the "end of the
+      // past" line above everything, and that moves the reader too.
+      holdPosition();
       setCatalogue((current) => [...current, ...page.events]);
       setCatalogueCursor(page.nextCursor);
       setCatalogueDone(page.nextCursor === null);
@@ -359,7 +381,7 @@ export function Timeline({
       inFlight.current = false;
       setLoading(false);
     }
-  }, [catalogueCursor, catalogueDone, withCatalogue]);
+  }, [catalogueCursor, catalogueDone, withCatalogue, holdPosition]);
 
   const loadPast = useCallback(async () => {
     // Past first, then history. The catalogue is what comes after a life, not
@@ -377,7 +399,11 @@ export function Timeline({
         tagIds: tags,
         text: settledText,
       });
-      // Appended below the fold — nothing moves, so no anchoring needed.
+      // Older rows go in *above* what is being read, so the scroll position
+      // has to be put back. Measured here rather than in the layout effect:
+      // by the time that runs the rows are in the document and the old height
+      // is gone.
+      holdPosition();
       setPast((current) => [...current, ...page.verses]);
       setPastCursor(page.nextCursor);
       setPastDone(page.nextCursor === null);
@@ -387,7 +413,7 @@ export function Timeline({
     } finally {
       setLoading(false);
     }
-  }, [anchor, pastCursor, loadCatalogue, tags, withCatalogue, settledText]);
+  }, [anchor, pastCursor, loadCatalogue, tags, withCatalogue, settledText, holdPosition]);
 
   const loadFuture = useCallback(async () => {
     if (futureCursor === null) return;
@@ -403,12 +429,7 @@ export function Timeline({
         text: settledText,
       });
 
-      // Measured here rather than in the layout effect: by the time that runs
-      // the rows are already in the document and the old height is gone.
-      if (page.verses.length > 0) {
-        anchorHeight.current = document.documentElement.scrollHeight;
-      }
-
+      // Appended below the fold — nothing moves, so no anchoring needed.
       setFuture((current) => [...current, ...page.verses]);
       setFutureCursor(page.nextCursor);
       setFutureDone(page.nextCursor === null);
@@ -495,16 +516,44 @@ export function Timeline({
    * entry names itself ("13.8 billion years ago"), which is the only sensible
    * label for a row whose date is a magnitude rather than a day.
    */
+  /**
+   * The column as it is drawn: oldest at the top.
+   *
+   * `sections` stays newest-first because that is the order pages arrive in
+   * and the order `withPending` sorts by; turning it over here, once, keeps
+   * the flip in one place rather than in every loader.
+   */
+  const shown = useMemo(
+    () =>
+      sections
+        .map((section) => ({ ...section, verses: [...section.verses].reverse() }))
+        .reverse(),
+    [sections],
+  );
+  const shownCatalogue = useMemo(
+    () => (withCatalogue ? [...catalogue].reverse() : []),
+    [catalogue, withCatalogue],
+  );
+  /** The latest section holding anything past: today's, when there is one. */
+  const boundaryShown = boundary === -1 ? -1 : sections.length - 1 - boundary;
+
   const anchors = useMemo(
     () => [
-      ...sections.map((section) => ({ key: section.key, label: section.label })),
-      ...(withCatalogue ? catalogue : []).map((event) => ({
+      ...shownCatalogue.map((event) => ({
         key: event.id,
         label: deepTimeLabel(event.timelineYears, s),
       })),
+      ...shown.map((section) => ({ key: section.key, label: section.label })),
     ],
-    [sections, catalogue, withCatalogue, s],
+    [shown, shownCatalogue, s],
   );
+  /*
+   * What the header says before anything has scrolled under it. The page
+   * opens at the bottom of today, where no heading need be in the band at the
+   * top — and the topmost row loaded is the *oldest*, which is the last thing
+   * the header should claim.
+   */
+  const openingKey = shown[boundaryShown]?.key ?? anchors.at(-1)?.key;
 
   // Report whatever is currently under the header.
   const headingsRef = useRef(new Map<string, HTMLElement>());
@@ -521,7 +570,7 @@ export function Timeline({
      * avoid, and it only shows up once a filter can make the list short.
      *
      * So the first callback after the sections change falls back to the
-     * topmost one. After that the observer is authoritative again: between two
+     * section the page opens on. After that the observer is authoritative again: between two
      * headings nothing is in the band and the header should hold its value
      * rather than snapping back to the top.
      */
@@ -540,7 +589,7 @@ export function Timeline({
         // the first *entry* instead would depend on callback order, which is
         // not the document order and drifts as you scroll fast.
         const ordered = anchors.map((a) => a.key).filter((key) => visible.has(key));
-        const current = ordered[0] ?? (reported ? undefined : anchors[0]?.key);
+        const current = ordered[0] ?? (reported ? undefined : openingKey);
         if (current) {
           const anchor = anchors.find((a) => a.key === current);
           if (anchor) {
@@ -561,7 +610,7 @@ export function Timeline({
 
     for (const element of headingsRef.current.values()) observer.observe(element);
     return () => observer.disconnect();
-  }, [anchors, onDateChange]);
+  }, [anchors, openingKey, onDateChange]);
 
   /**
    * One sentinel at each end, watched by the same effect.
@@ -616,18 +665,17 @@ export function Timeline({
   ]);
 
   /**
-   * Open on today, not on the far edge of the future.
+   * Open on today, at the bottom of the screen.
    *
-   * With rows above it, the natural scroll position (the top of the document)
-   * is the furthest-away thing the reader has — the opposite of a timeline
-   * "centred on today". This scrolls to the boundary between the two halves
-   * once, on the first render that has content.
+   * The mark sits just after today's section, and the opening scroll puts it
+   * at the bottom edge of the visible column — right above the composer — so
+   * the latest thing written is where a chat puts it. Anything in the future
+   * is below, one scroll away.
    *
    * Keyed on `anchor` so replacing it after a write re-centres, and guarded by
-   * a ref so an incoming future page does not yank the reader back to today
-   * while they are reading forward.
+   * a ref so an incoming page does not yank the reader back to today while
+   * they are reading elsewhere.
    */
-  const todayRef = useRef<HTMLDivElement | null>(null);
   const centred = useRef<Date | null>(null);
   useLayoutEffect(() => {
     if (loading || centred.current === anchor) return;
@@ -637,23 +685,17 @@ export function Timeline({
     centred.current = anchor;
 
     /*
-     * Offset by the sticky header, rather than `scrollIntoView({block:
-     * 'start'})`.
-     *
-     * That aligns to the top of the *viewport*, which the fixed date header
-     * covers — the first section's heading lands underneath the glass and
-     * reads as half a word. The header is measured rather than assumed: its
-     * height comes from tokens and a hardcoded 72 here would drift the moment
-     * one of them changed.
-     *
-     * `auto`, never `smooth`: this is where the page should already have
-     * been, not a movement the reader should watch happen.
+     * The composer is fixed over the bottom of the viewport, so "the bottom"
+     * is its top edge. Measured rather than assumed, for the same reason the
+     * header used to be: its height comes from tokens and grows with the
+     * card. `auto`, never `smooth`: this is where the page should already
+     * have been, not a movement the reader should watch happen.
      */
-    const header = document.querySelector('.date-header');
-    const clearance = header ? header.getBoundingClientRect().height : 0;
+    const composer = document.querySelector('.composer-bar');
+    const floor = composer ? composer.getBoundingClientRect().top : window.innerHeight;
 
     window.scrollTo({
-      top: today.getBoundingClientRect().top + window.scrollY - clearance,
+      top: Math.max(0, today.getBoundingClientRect().top + window.scrollY - floor),
       behavior: 'auto',
     });
   }, [loading, anchor]);
@@ -689,22 +731,51 @@ export function Timeline({
         </p>
       ) : null}
 
-      {futureDone && future.length > 0 ? (
-        <p className="notice end">{s.timeline.endOfFuture}</p>
+      {withCatalogue && catalogueDone && catalogue.length > 0 ? (
+        <p className="notice end">{s.timeline.endOfPast}</p>
       ) : null}
 
-      <div ref={futureSentinel} aria-hidden="true" />
+      {shownCatalogue.length > 0 ? (
+        <section className="catalogue" aria-label={s.timeline.catalogue}>
+          <ul className="verses">
+            {shownCatalogue.map((event) => (
+              <li className="verse" key={event.id}>
+                <span
+                  className="verse-time"
+                  data-section={event.id}
+                  ref={(element) => {
+                    if (element) headingsRef.current.set(event.id, element);
+                    else headingsRef.current.delete(event.id);
+                  }}
+                >
+                  {deepTimeLabel(event.timelineYears, s)}
+                </span>
+                <div className="verse-body">
+                  <p className="verse-xp">{event.title}</p>
+                  {event.detail ? <p className="verse-meta">{event.detail}</p> : null}
+                </div>
+              </li>
+            ))}
+          </ul>
 
-      {sections.map((section, index) => (
-        <Fragment key={section.key}>
           {/*
-            The centre mark, between the last future section and the first
-            past one. It is what the opening scroll lands on, and the only
-            reason it is an element at all — there is nothing to show, because
-            "today" is already the label of the section right below it.
+            The seam. Worth marking rather than letting the scroll slide from
+            a person's own life into the history of the universe with nothing
+            said — these rows are not theirs, cannot be opened, and did not
+            happen to them.
           */}
-          {index === boundary ? <div ref={todayRef} aria-hidden="true" /> : null}
+          <p className="catalogue-seam">{s.timeline.catalogue}</p>
+        </section>
+      ) : null}
 
+      <div ref={pastSentinel} aria-hidden="true" />
+
+      {/* No past at all: the mark still has to exist, or the opening scroll
+          has nothing to find. Above everything, because everything is ahead. */}
+      {boundaryShown === -1 ? <div ref={todayRef} aria-hidden="true" /> : null}
+
+      {shown.map((section, index) => (
+        <Fragment key={section.key}>
           <section aria-labelledby={`h-${section.key}`}>
             <h2
               id={`h-${section.key}`}
@@ -730,52 +801,23 @@ export function Timeline({
               ))}
             </ul>
           </section>
+
+          {/*
+            The centre mark, right after the last section that holds anything
+            past. It is what the opening scroll lands on, and the only reason
+            it is an element at all — there is nothing to show.
+          */}
+          {index === boundaryShown ? <div ref={todayRef} aria-hidden="true" /> : null}
         </Fragment>
       ))}
 
-      {/* No past at all: the mark still has to exist, or the opening scroll
-          has nothing to find and the reader starts at the far future. */}
-      {boundary === -1 ? <div ref={todayRef} aria-hidden="true" /> : null}
+      <div ref={futureSentinel} aria-hidden="true" />
 
-      <div ref={pastSentinel} aria-hidden="true" />
-
-      {withCatalogue && catalogue.length > 0 ? (
-        <section className="catalogue" aria-label={s.timeline.catalogue}>
-          {/*
-            The seam. Worth marking rather than letting the scroll slide from
-            a person's own life into the history of the universe with nothing
-            said — these rows are not theirs, cannot be opened, and did not
-            happen to them.
-          */}
-          <p className="catalogue-seam">{s.timeline.catalogue}</p>
-
-          <ul className="verses">
-            {catalogue.map((event) => (
-              <li className="verse" key={event.id}>
-                <span
-                  className="verse-time"
-                  data-section={event.id}
-                  ref={(element) => {
-                    if (element) headingsRef.current.set(event.id, element);
-                    else headingsRef.current.delete(event.id);
-                  }}
-                >
-                  {deepTimeLabel(event.timelineYears, s)}
-                </span>
-                <div className="verse-body">
-                  <p className="verse-xp">{event.title}</p>
-                  {event.detail ? <p className="verse-meta">{event.detail}</p> : null}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
+      {futureDone && future.length > 0 ? (
+        <p className="notice end">{s.timeline.endOfFuture}</p>
       ) : null}
 
       {loading ? <p className="notice">{s.common.loading}</p> : null}
-      {withCatalogue && catalogueDone && catalogue.length > 0 ? (
-        <p className="notice end">{s.timeline.endOfPast}</p>
-      ) : null}
     </div>
   );
 }
@@ -850,6 +892,13 @@ function VerseRow({
       */
       aria-busy={pending !== null && !pending.blocked}
     >
+      {/*
+        What was typed, on the right, the way your own message sits in a chat;
+        what agnte made of it is the card on the left below. Only for a verse
+        that came from the composer — the form has no literal text to show.
+      */}
+      {verse.typedText ? <p className="verse-typed">{verse.typedText}</p> : null}
+
       {time ? <span className="verse-time">{time}</span> : null}
 
       {/*
