@@ -54,6 +54,15 @@ export const zh: Strings = {
     dayFirst: true as boolean,
   },
 
+  /** The full-screen photo viewer. */
+  photos: {
+    close: '关闭',
+    previous: '上一张',
+    next: '下一张',
+    open: '打开照片',
+    position: (index: number, total: number) => `${index} / ${total}`,
+  },
+
   /** The composer bar and the card that shows what it understood. */
   composerBar: {
     attach: '添加照片或文件',

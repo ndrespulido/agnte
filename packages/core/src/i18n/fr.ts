@@ -47,6 +47,15 @@ export const fr: Strings = {
     dayFirst: true as boolean,
   },
 
+  /** The full-screen photo viewer. */
+  photos: {
+    close: 'Fermer',
+    previous: 'Photo précédente',
+    next: 'Photo suivante',
+    open: 'Ouvrir la photo',
+    position: (index: number, total: number) => `${index} / ${total}`,
+  },
+
   /** The composer bar and the card that shows what it understood. */
   composerBar: {
     attach: 'Joindre une photo ou un fichier',

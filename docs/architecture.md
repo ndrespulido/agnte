@@ -1399,6 +1399,17 @@ stores the bar's text as `typedText` and clears the bar. The plus is no longer
 the metallic button: at that size the gradient read as a grey disc, so it is
 an accent-tinted one.
 
+**A tap on a verse edits it.** From the timeline a verse opens straight in the
+editor, focused on the part of the row that was tapped — the note, the place,
+the time, the rating, or one property. The row is still one stretched button
+(valid HTML, one accessible name); which part was tapped is read from what is
+under the pointer. The verse is fetched fresh first, so the editor never
+holds a stale version, and the editor carries Delete now that no read view
+sits in front of it. Search results still open the read view. Photos on a row
+are a swipeable strip with the next one peeking at the edge, and a tap opens
+a full-screen viewer that swipes between them — both are the browser's own
+scroll-snap, with no gesture code.
+
 Not built: **transcription of voice notes** (decided, but it is the second
 metered dependency and needs a provider, a key and the daily cap of §12.5
 before any code), stripping metadata from non-image files on erasure, video

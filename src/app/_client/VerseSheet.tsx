@@ -58,11 +58,20 @@ export interface SheetDraft {
 export function VerseSheet({
   initial,
   draft,
+  focusField = null,
+  onDelete,
   onClose,
   onSaved,
 }: {
   initial?: VerseView;
   draft?: SheetDraft;
+  /**
+   * Which field to open on: `xp`, `where`, `when`, `rating`, or `detail:<key>`.
+   * Set when the verse was opened by tapping that part of its row.
+   */
+  focusField?: string | null;
+  /** Present when editing from the timeline, where no other view offers it. */
+  onDelete?: () => Promise<void> | void;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -120,6 +129,8 @@ export function VerseSheet({
   const [error, setError] = useState<string | null>(null);
 
   const firstFieldRef = useRef<HTMLTextAreaElement | null>(null);
+  const sheetRef = useRef<HTMLDivElement | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   useEffect(() => {
     void fetchTags()
@@ -128,7 +139,19 @@ export function VerseSheet({
       // list, and reading the table here would make the language a dependency
       // of a fetch that should run once. Phrased at render instead.
       .catch(() => setError(''));
-    firstFieldRef.current?.focus();
+    // Open on the field that was tapped, when there was one and it is on the
+    // sheet; otherwise on the note, as always. `CSS.escape` because a property
+    // key is the person's own text and may hold anything.
+    const wanted =
+      focusField === null
+        ? null
+        : sheetRef.current?.querySelector<HTMLElement>(
+            `[data-field="${CSS.escape(focusField)}"]`,
+          );
+    (wanted ?? firstFieldRef.current)?.focus();
+    // Mount only: `focusField` is where the sheet opened, not something to
+    // chase afterwards.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Escape closes. A sheet that can only be dismissed by a small × is a sheet
@@ -363,6 +386,7 @@ export function VerseSheet({
     <div className="sheet-backdrop" onClick={onClose} role="presentation">
       <div
         className="sheet"
+        ref={sheetRef}
         role="dialog"
         aria-modal="true"
         aria-label={editing ? s.verse.editHeading : s.verse.addHeading}
@@ -383,6 +407,7 @@ export function VerseSheet({
           <Icon name="note" />
           <textarea
             ref={firstFieldRef}
+            data-field="xp"
             value={xp}
             onChange={(event) => setXp(event.target.value)}
             rows={3}
@@ -406,6 +431,7 @@ export function VerseSheet({
               <span className="control-prefix">{s.verse.starts}</span>
               <input
                 type="date"
+                data-field="when"
                 value={startDate}
                 onChange={(event) => setStartDate(event.target.value)}
               />
@@ -453,6 +479,7 @@ export function VerseSheet({
             <Icon name="star" />
             <input
               type="number"
+              data-field="rating"
               min={0}
               max={10}
               value={rating}
@@ -590,6 +617,33 @@ export function VerseSheet({
         ) : null}
 
         <div className="sheet-actions">
+          {onDelete ? (
+            confirmingDelete ? (
+              <>
+                <button
+                  type="button"
+                  className="quiet"
+                  onClick={() => setConfirmingDelete(false)}
+                >
+                  {s.common.cancel}
+                </button>
+                <button type="button" className="danger" onClick={() => void onDelete()}>
+                  {s.verse.deleteForGood}
+                </button>
+              </>
+            ) : (
+              // Pushed to the far side from Save: the two must not be
+              // neighbours under a thumb.
+              <button
+                type="button"
+                className="quiet sheet-delete"
+                aria-label={s.common.delete}
+                onClick={() => setConfirmingDelete(true)}
+              >
+                <Icon name="trash" />
+              </button>
+            )
+          ) : null}
           <button type="button" className="quiet" onClick={onClose}>
             {s.common.cancel}
           </button>
@@ -707,6 +761,7 @@ function LocationField({
         <Icon name="pin" />
         <input
           aria-label={s.verse.where}
+          data-field="where"
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onFocus={() => setOpen(suggestions.length > 0)}
@@ -839,6 +894,9 @@ function Properties({
             aria-label={s.verse.detailName}
           />
           <input
+            // Named by the stored key, which is how a row on the timeline
+            // names the property that was tapped.
+            data-field={`detail:${row.name.trim().toLowerCase().replace(/\s+/g, '-')}`}
             value={row.value}
             onChange={(event) => set(row.key, { value: event.target.value })}
             placeholder={s.verse.detailValuePlaceholder}

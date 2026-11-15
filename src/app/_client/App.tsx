@@ -178,6 +178,7 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
    * session has answered (`session === 'unknown'` below), so there is no
    * server-rendered markup for this to disagree with.
    */
+  const [openEdit, setOpenEdit] = useState<{ field: string | null } | null>(null);
   const [openVerseId, setOpenVerseId] = useState<string | null>(() =>
     typeof window === 'undefined' ? null : verseIdFromSearch(window.location.search),
   );
@@ -323,7 +324,15 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
           };
 
   const onDateChange = useCallback((label: string) => setDateLabel(label), []);
-  const onOpen = useCallback((verseId: string) => setOpenVerseId(verseId), []);
+  /*
+   * From the timeline a verse opens in the editor, on the field that was
+   * tapped. Everything else that opens one (search, a deep link) still shows
+   * it first.
+   */
+  const onOpen = useCallback((verseId: string, field?: string) => {
+    setOpenEdit({ field: field ?? null });
+    setOpenVerseId(verseId);
+  }, []);
 
   if (session === 'unknown') return null;
   if (session === 'signed-out')
@@ -563,8 +572,15 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
 
       {openVerseId !== null ? (
         <VerseDetail
+          // Keyed, so opening another verse starts from a clean editor rather
+          // than one still holding the last verse's fields.
+          key={openVerseId}
           verseId={openVerseId}
-          onClose={() => setOpenVerseId(null)}
+          {...(openEdit ? { edit: openEdit } : {})}
+          onClose={() => {
+            setOpenVerseId(null);
+            setOpenEdit(null);
+          }}
           onChanged={() => setAnchor(new Date())}
         />
       ) : null}

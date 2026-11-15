@@ -22,10 +22,20 @@ import type { Strings } from '@agnte/core';
  */
 export function VerseDetail({
   verseId,
+  edit,
   onClose,
   onChanged,
 }: {
   verseId: string;
+  /**
+   * Go straight to the editor, optionally on one field.
+   *
+   * How a verse opens from the timeline: a tap is "I want to change this",
+   * and a read-only view in between was a second tap to say so. The verse is
+   * still fetched fresh first — an editor on a stale `version` gets a 409 on
+   * its first save.
+   */
+  edit?: { field: string | null };
   onClose: () => void;
   /** A write happened: the timeline behind this needs to refetch. */
   onChanged: () => void;
@@ -33,7 +43,7 @@ export function VerseDetail({
   const s = useStrings();
   const [verse, setVerse] = useState<VerseView | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(edit !== undefined);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const load = useCallback(() => {
@@ -83,14 +93,22 @@ export function VerseDetail({
     return (
       <VerseSheet
         initial={verse}
-        onClose={() => setEditing(false)}
+        focusField={edit?.field ?? null}
+        onDelete={remove}
+        // Opened straight into the editor, there is no read view to fall
+        // back to: leaving the editor is leaving the verse.
+        onClose={edit ? onClose : () => setEditing(false)}
         onSaved={() => {
+          onChanged();
+          if (edit) {
+            onClose();
+            return;
+          }
           setEditing(false);
           // Re-read rather than trusting the sheet's own result: the resolved
           // visibility and the media URLs are both server-computed, and the
           // version has moved on.
           load();
-          onChanged();
         }}
       />
     );
