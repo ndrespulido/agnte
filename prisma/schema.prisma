@@ -399,6 +399,11 @@ model Verse {
 
   location String?
 
+  /// The composer text this verse was made from, exactly as typed (§12.3).
+  /// Kept beside the parsed fields because the parse depends on the interface
+  /// language and is never re-run. Null for a verse made any other way.
+  typedText String? @map("typed_text")
+
   /// 0-10, fractional allowed. Range enforced in the migration.
   rating Float?
 

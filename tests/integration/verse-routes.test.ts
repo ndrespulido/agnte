@@ -206,6 +206,54 @@ describe.skipIf(!DATABASE_URL)('verse routes', () => {
       expect(body.tags).toHaveLength(1);
     });
 
+    /**
+     * The composer's text is kept verbatim beside the fields parsed from it
+     * (§12.3). It is a record of what was typed, so an edit to a field leaves
+     * it alone, and it can be cleared but is never rewritten by the server.
+     */
+    it('keeps the typed text verbatim, through an edit to something else', async () => {
+      const { token } = await signUp('typed@example.com');
+      const tag = await makeTag(token, 'travel');
+      const typedText = 'Trip to Recife  from: 5 January 2027 rating:5 .travel';
+
+      const created = (await (
+        await post(token, {
+          tagIds: [tag.id],
+          xp: 'Trip to Recife',
+          rating: 5,
+          typedText,
+        })
+      ).json()) as { id: string; typedText: string | null; version: number };
+      expect(created.typedText).toBe(typedText);
+
+      const edited = (await (
+        await patch(token, created.id, { expectedVersion: created.version, rating: 6 })
+      ).json()) as { typedText: string | null; rating: number };
+      expect(edited).toMatchObject({ rating: 6, typedText });
+    });
+
+    it('has no typed text on a verse made through the form', async () => {
+      const { token } = await signUp('form@example.com');
+      const tag = await makeTag(token, 'plain');
+      const body = (await (await post(token, { tagIds: [tag.id] })).json()) as {
+        typedText: unknown;
+      };
+      expect(body.typedText).toBe(null);
+    });
+
+    it('refuses typed text past the limit rather than cutting it', async () => {
+      const { token } = await signUp('long@example.com');
+      const tag = await makeTag(token, 'long');
+      const response = await post(token, {
+        tagIds: [tag.id],
+        typedText: 'x'.repeat(20_001),
+      });
+      expect(response.status).toBe(422);
+      expect(((await response.json()) as { error: { code: string } }).error.code).toBe(
+        'verse.typed_text_too_long',
+      );
+    });
+
     it('stores a full verse and returns the resolved visibility', async () => {
       const { token } = await signUp('b@example.com');
       const tag = await makeTag(token, 'flights');

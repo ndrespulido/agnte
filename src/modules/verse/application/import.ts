@@ -11,6 +11,7 @@ import {
 import {
   createVerse,
   parseEventPrecision,
+  parseTypedText,
   parsePlacement,
   parseProperties,
 } from '../domain/verse';
@@ -55,6 +56,7 @@ export interface ImportedVerse {
   readonly event_end?: unknown;
   readonly deep_time_years?: unknown;
   readonly location?: unknown;
+  readonly typed_text?: unknown;
   readonly rating?: unknown;
   readonly xp?: unknown;
   readonly properties?: unknown;
@@ -371,6 +373,13 @@ export async function importVerses(
       continue;
     }
 
+    const typed = asString(row.typed_text);
+    const typedText = typed === null ? null : parseTypedText(typed);
+    if (typedText !== null && !typedText.ok) {
+      rejected.push({ what: `verse ${label}`, why: typedText.error.message });
+      continue;
+    }
+
     const visibility = readVisibility(row.visibility);
     if (!visibility.ok) {
       rejected.push({ what: `verse ${label}`, why: visibility.error.message });
@@ -383,6 +392,7 @@ export async function importVerses(
       tagIds: resolved,
       placement: placement.value,
       location: asString(row.location),
+      typedText: typedText === null ? null : typedText.value,
       rating: typeof row.rating === 'number' ? row.rating : null,
       xp: asString(row.xp),
       properties: properties.value,

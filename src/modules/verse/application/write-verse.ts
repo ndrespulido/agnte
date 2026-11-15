@@ -9,6 +9,7 @@ import {
   applyChanges,
   createVerse,
   parseLocation,
+  parseTypedText,
   parsePlacement,
   parseProperties,
   parseRating,
@@ -78,6 +79,7 @@ export interface VerseFields {
   eventEnd?: string | null | undefined;
   deepTimeYears?: number | null | undefined;
   location?: string | null | undefined;
+  typedText?: string | null | undefined;
   rating?: number | null | undefined;
   xp?: string | null | undefined;
   properties?: Record<string, unknown> | undefined;
@@ -89,6 +91,7 @@ export interface VerseFields {
 interface Parsed {
   placement?: Placement;
   location?: string | null;
+  typedText?: string | null;
   rating?: number | null;
   xp?: string | null;
   properties?: Record<string, string>;
@@ -131,6 +134,15 @@ function parseFields(fields: VerseFields): Result<Parsed, DomainError> {
     });
     if (!placement.ok) return placement;
     parsed.placement = placement.value;
+  }
+
+  if (fields.typedText !== undefined) {
+    if (fields.typedText === null) parsed.typedText = null;
+    else {
+      const typedText = parseTypedText(fields.typedText);
+      if (!typedText.ok) return typedText;
+      parsed.typedText = typedText.value;
+    }
   }
 
   if (fields.location !== undefined) {

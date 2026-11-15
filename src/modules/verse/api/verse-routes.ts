@@ -29,6 +29,7 @@ const Fields = {
   eventPrecision: z.string().nullish(),
   deepTimeYears: z.number().nullish(),
   location: z.string().nullish(),
+  typedText: z.string().nullish(),
   rating: z.number().nullish(),
   xp: z.string().nullish(),
   properties: z.record(z.string(), z.unknown()).optional(),

@@ -25,6 +25,7 @@ export const verseBody = (v: VisibleVerse) => ({
   eventPrecision: v.verse.eventPrecision,
   deepTimeYears: v.verse.deepTimeYears,
   location: v.verse.location,
+  typedText: v.verse.typedText,
   rating: v.verse.rating,
   xp: v.verse.xp,
   properties: v.verse.properties,

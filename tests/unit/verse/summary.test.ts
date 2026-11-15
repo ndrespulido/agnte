@@ -37,6 +37,7 @@ const verse = (over: Partial<Verse> = {}): Verse => ({
   eventPrecision: null,
   deepTimeYears: null,
   location: null,
+  typedText: null,
   rating: null,
   xp: null,
   properties: {},
