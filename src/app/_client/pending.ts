@@ -69,6 +69,7 @@ function asVerse(entry: OutboxEntry): VerseView | null {
     eventPrecision: body.eventPrecision ?? null,
     deepTimeYears: null,
     location: body.location ?? null,
+    typedText: body.typedText ?? null,
     rating: body.rating ?? null,
     xp: body.xp ?? null,
     properties: body.properties ?? {},
