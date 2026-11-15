@@ -903,6 +903,17 @@ function LocationField({
    */
   const justChose = useRef(false);
 
+  /**
+   * Whether the person has typed in this field since it appeared.
+   *
+   * Suggestions are for text being *written*. A field that opens already
+   * holding a place — editing a verse, or a draft carried over from the bar —
+   * looked, to the effect below, exactly like typing: it asked the provider
+   * about the saved place (a paid request nobody made) and popped the list
+   * open under a field that had not been touched.
+   */
+  const typed = useRef(false);
+
   // Stable across renders, and unique if this field is ever used twice on one
   // screen — which `aria-controls` requires to point anywhere meaningful.
   const listId = useId();
@@ -912,6 +923,7 @@ function LocationField({
       justChose.current = false;
       return;
     }
+    if (!typed.current) return;
 
     let cancelled = false;
 
@@ -956,7 +968,10 @@ function LocationField({
           aria-label={s.verse.where}
           data-field="where"
           value={value}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={(event) => {
+            typed.current = true;
+            onChange(event.target.value);
+          }}
           onFocus={() => setOpen(suggestions.length > 0)}
           placeholder={s.verse.where}
           // The browser's own history dropdown would sit on top of this one.
