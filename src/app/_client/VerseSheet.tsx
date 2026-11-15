@@ -19,7 +19,7 @@ import {
   splitTagNames,
   toDateInput,
   toTimeInput,
-} from './format';
+} from '@agnte/core';
 import { failureMessage, useStrings } from './locale';
 
 /**

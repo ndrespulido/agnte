@@ -8,7 +8,7 @@ package-lock.json
 *.md
 docs/
 
-# Generated from src/shared/design/tokens.ts by `npm run tokens`. Formatting a
+# Generated from packages/core/src/tokens.ts by `npm run tokens`. Formatting a
 # generated file is churn nobody reads, and it would fight the drift test,
 # which compares the file byte for byte against the generator's output.
 src/app/tokens.css

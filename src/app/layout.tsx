@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { dark, light } from '@/shared/design/tokens';
+import { dark, light } from '@agnte/core';
 import './globals.css';
 
 export const metadata: Metadata = {

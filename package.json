@@ -3,6 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "engines": {
     "node": ">=22.0.0 <23"
   },
@@ -23,6 +26,7 @@
     "tokens": "tsx scripts/generate-tokens-css.ts"
   },
   "dependencies": {
+    "@agnte/core": "*",
     "@aws-sdk/client-s3": "^3.1127.0",
     "@aws-sdk/s3-request-presigner": "^3.1128.0",
     "@google-cloud/tasks": "^7.1.0",

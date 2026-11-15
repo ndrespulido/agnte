@@ -1,5 +1,5 @@
 import type { MetadataRoute } from 'next';
-import { light } from '@/shared/design/tokens';
+import { light } from '@agnte/core';
 
 /**
  * The PWA manifest, so the app can be added to a home screen.

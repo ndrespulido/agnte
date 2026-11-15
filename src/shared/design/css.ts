@@ -15,7 +15,7 @@ import {
   space,
   zIndex,
   type Palette,
-} from './tokens';
+} from '@agnte/core';
 
 /**
  * The web's spelling of the tokens.
@@ -65,7 +65,7 @@ export function tokensCss(): string {
   return `/*
  * GENERATED FILE — do not edit.
  *
- * Written from src/shared/design/tokens.ts by scripts/generate-tokens-css.ts.
+ * Written from packages/core/src/tokens.ts by scripts/generate-tokens-css.ts.
  * \`npm run tokens\` regenerates it; a unit test fails if it has drifted, so a
  * token change that forgets the regeneration cannot reach a deploy.
  *

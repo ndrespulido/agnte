@@ -29,7 +29,7 @@ export interface User {
    *
    * A plain string, validated at the edges rather than by the type. The domain
    * has no opinion on which languages exist — that list lives in
-   * `shared/i18n` and is meant to grow — and an unrecognised value resolves to
+   * `@agnte/core` and is meant to grow — and an unrecognised value resolves to
    * English when the strings are looked up, so a stale row degrades rather
    * than throwing.
    */

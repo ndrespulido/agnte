@@ -1,7 +1,7 @@
 import { DomainError, systemClock } from '@/shared/kernel';
 import { consume } from '@/shared/infra/rate-limit';
 import { jsonError } from '@/shared/infra/http';
-import { isLocale, LOCALES } from '@/shared/i18n';
+import { isLocale, LOCALES } from '@agnte/core';
 import { PrismaUserRepository } from '../infrastructure/prisma-user-repository';
 import { authenticate } from './authenticate';
 import { rateLimitHeaders, tooManyRequests } from './http';

@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { deleteVerse, fetchVerse, type VerseView } from './api';
 import { VerseSheet } from './VerseSheet';
-import { deepTimeLabel, headerLabel, placementOf, timeLabel } from './format';
+import { deepTimeLabel, headerLabel, placementOf, timeLabel } from '@agnte/core';
 import { failureMessage, useStrings } from './locale';
-import type { Strings } from '@/shared/i18n';
+import type { Strings } from '@agnte/core';
 
 /**
  * One verse, in full.

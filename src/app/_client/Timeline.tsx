@@ -24,11 +24,11 @@ import {
   sectionKey,
   timeLabel,
   timelinePosition,
-} from './format';
+} from '@agnte/core';
 import { withPending, type TimelineVerse } from './pending';
 import { emptyMessage, showsCatalogue } from './timeline-filter';
 import { useStrings } from './locale';
-import type { Strings } from '@/shared/i18n';
+import type { Strings } from '@agnte/core';
 import {
   discard,
   outboxSnapshot,

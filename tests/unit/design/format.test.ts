@@ -10,8 +10,8 @@ import {
   timelinePosition,
   toDateInput,
   toTimeInput,
-} from '@/app/_client/format';
-import { en, es, fr, zh } from '@/shared/i18n';
+} from '@agnte/core';
+import { en, es, fr, zh } from '@agnte/core';
 
 /*
  * Pinned, because a moment is now read in the reader's zone (§2.1) and these

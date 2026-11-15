@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { failureMessage, useStrings } from './locale';
 import { fetchTagDashboard, type DashboardView } from './api';
-import { dayLabel } from './format';
+import { dayLabel } from '@agnte/core';
 
 /**
  * A tag's dashboard.

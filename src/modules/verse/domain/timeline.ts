@@ -1,4 +1,5 @@
 import { type DomainError, type Result, err, ok } from '@/shared/kernel';
+import { TIMELINE_EPOCH_MS, yearsFromEpoch } from '@agnte/core';
 import { cursorInvalid } from './errors';
 import type { Verse } from './verse';
 
@@ -15,14 +16,9 @@ import type { Verse } from './verse';
  * changes, which is the sort of bug that looks like "the timeline feels wrong".
  */
 
-/** A Julian year in milliseconds — the same constant deep-time conversion uses. */
-const MS_PER_JULIAN_YEAR = 365.25 * 24 * 60 * 60 * 1000;
-
-/** 2000-01-01T00:00:00Z. */
-export const TIMELINE_EPOCH_MS = Date.UTC(2000, 0, 1);
-
-export const yearsFromEpoch = (date: Date): number =>
-  (date.getTime() - TIMELINE_EPOCH_MS) / MS_PER_JULIAN_YEAR;
+// The scale itself — epoch and year length — is `@agnte/core`'s, shared with
+// every client so a queued verse sorts where the server will put it.
+export { TIMELINE_EPOCH_MS, yearsFromEpoch };
 
 /**
  * The verse's position, from whichever of the three ways it is placed.

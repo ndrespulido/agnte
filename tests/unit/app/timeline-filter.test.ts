@@ -4,7 +4,7 @@ import {
   showsCatalogue,
   toggleFilterTag,
 } from '@/app/_client/timeline-filter';
-import { en } from '@/shared/i18n';
+import { en } from '@agnte/core';
 
 /**
  * Filtering the timeline by tag.

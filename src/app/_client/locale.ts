@@ -8,7 +8,7 @@ import {
   stringsFor,
   type Locale,
   type Strings,
-} from '@/shared/i18n';
+} from '@agnte/core';
 
 /**
  * Which language the interface is in, in the browser.

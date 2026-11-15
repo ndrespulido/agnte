@@ -1,7 +1,7 @@
 'use client';
 
 import type { VerseView } from './api';
-import { timelinePosition } from './format';
+import { timelinePosition } from '@agnte/core';
 import type { OutboxEntry } from './outbox';
 
 /**

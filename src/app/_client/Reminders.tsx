@@ -25,9 +25,9 @@ import {
   localMomentLabel,
   splitTagNames,
   toLocalDateTimeInput,
-} from './format';
+} from '@agnte/core';
 import { failureMessage, useStrings } from './locale';
-import type { Strings } from '@/shared/i18n';
+import type { Strings } from '@agnte/core';
 import { disablePush, enablePush, pushState, type PushState } from './push';
 
 /**

@@ -23,6 +23,12 @@ const nextConfig: NextConfig = {
    * opt-out list (see next/dist/docs .../serverExternalPackages.md). This
    * package is not on that list.
    */
+  /*
+   * `@agnte/core` ships as TypeScript source, not a build: one less step, and
+   * an edit there hot-reloads here. Next has to be told to compile it.
+   */
+  transpilePackages: ['@agnte/core'],
+
   serverExternalPackages: ['@google-cloud/tasks'],
 
   /**
