@@ -1,5 +1,6 @@
 'use client';
 
+import { serverSaid } from './locale';
 import { uuidv7 } from '@/shared/kernel/id';
 import { authedFetch } from './session';
 import { tagLabelOf, type TagLabel } from './outbox';
@@ -51,9 +52,9 @@ export interface TagView {
 async function json<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as {
-      error?: { message?: string };
+      error?: { code?: string; message?: string };
     } | null;
-    throw new Error(body?.error?.message ?? `Request failed (${response.status}).`);
+    throw new Error(serverSaid(body) ?? `Request failed (${response.status}).`);
   }
   return (await response.json()) as T;
 }
@@ -553,10 +554,10 @@ export async function requestExport(): Promise<ExportRequested> {
 
   if (response.status === 429) {
     const body = (await response.json().catch(() => null)) as {
-      error?: { message?: string };
+      error?: { code?: string; message?: string };
     } | null;
     throw new ExportTooSoon(
-      body?.error?.message ?? 'You can ask for one copy a day. Try again tomorrow.',
+      serverSaid(body) ?? 'You can ask for one copy a day. Try again tomorrow.',
     );
   }
 

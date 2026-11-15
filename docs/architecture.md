@@ -975,12 +975,13 @@ set is meant to grow by adding a file.
   renders differently depending on when it is called, which is the property the
   "clock passed in" rule already exists to prevent.
 
-> **The one thing not translated: the API.** Server error text reaches the
-> client in English and is shown as-is; only the client's own fallback
-> sentences are localised. Domain errors already carry stable codes
-> (`verse.verse_id_taken`), so mapping codes to translated sentences on the
-> client is the way to close it. Until then a failed request reads in English
-> inside a screen that is otherwise not.
+> **Server errors are translated on the client, by code.** Every error body is
+> `{ error: { code, message } }`; the message stays English and the client
+> picks its own sentence from `errors` in the string table (`serverSaid`). The
+> server stays language-free, and a native client reuses the same codes. A
+> code with no entry falls back to the server's English. The translated
+> sentences are deliberately number-free ("that password is too short", not
+> "at least 12 characters"), which loses a detail the English message had.
 >
 > **The Mandarin table has not been reviewed by a native speaker.** The
 > structure is compiler-checked and the number regrouping is tested, but

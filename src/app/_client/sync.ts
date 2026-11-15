@@ -1,5 +1,6 @@
 'use client';
 
+import { serverSaid } from './locale';
 import { NotSignedIn, authedFetch } from './session';
 import {
   defaultStore,
@@ -73,9 +74,9 @@ export function classify(response: { status: number }, message: string): SendOut
 
 async function messageOf(response: Response): Promise<string> {
   const body = (await response.json().catch(() => null)) as {
-    error?: { message?: string };
+    error?: { code?: string; message?: string };
   } | null;
-  return body?.error?.message ?? `The server answered ${response.status}.`;
+  return serverSaid(body) ?? `The server answered ${response.status}.`;
 }
 
 /** Puts one entry on the wire. The only part of this file that needs a network. */

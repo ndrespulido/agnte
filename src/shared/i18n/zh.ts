@@ -27,6 +27,70 @@ import type { Strings } from './en';
  * translation was done by someone not reading it.
  */
 export const zh: Strings = {
+  /**
+   * API failures, by the stable code the server sends (`error.code`).
+   *
+   * Only codes a person can reach from the screen. Anything not listed falls
+   * back to the server's own English sentence — see `serverSaid`.
+   */
+  errors: {
+    'identity.invalid_credentials': '邮箱和密码不匹配。',
+    'identity.email_invalid': '这看起来不是一个邮箱地址。',
+    'identity.password_too_short': '密码太短。',
+    'identity.password_too_long': '密码太长。',
+    'identity.verification_token_invalid': '验证链接无效。',
+    'identity.verification_token_expired': '验证链接已过期。请重新注册以获取新链接。',
+    'identity.verification_token_already_used': '验证链接已被使用。请尝试登录。',
+    'identity.reset_token_invalid': '重置链接无效。',
+    'identity.reset_token_expired': '重置链接已过期。请重新申请。',
+    'identity.reset_token_already_used': '重置链接已被使用。请重新申请。',
+    'identity.session_revoked': '你已退出登录。请重新登录。',
+    'identity.refresh_token_invalid': '会话已结束。请重新登录。',
+    'identity.oauth_email_unverified': 'Google 尚未验证该邮箱地址。',
+    'identity.oauth_exchange_failed': '无法完成 Google 登录。',
+    'identity.oauth_state_invalid': 'Google 登录已过期。请重新开始。',
+    unauthenticated: '会话已结束。请重新登录。',
+    rate_limited: '请求过于频繁。请稍后再试。',
+    'verse.no_tags': '一条记录至少需要一个标签。',
+    'verse.not_found': '这条记录已不存在。',
+    'verse.forbidden': '你无权修改此内容。',
+    'verse.version_conflict': '此内容已在别处被修改。请刷新后重试。',
+    'verse.date_invalid': '日期无效。',
+    'verse.event_precision_invalid': '日期和时间不匹配。',
+    'verse.event_range_inverted': '结束时间早于开始时间。',
+    'verse.time_conflict': '日期和深时只能选其一。',
+    'verse.deep_time_out_of_range': '超出了时间线的范围。',
+    'verse.rating_out_of_range': '评分范围为 0 到 10。',
+    'verse.xp_too_long': '备注太长。',
+    'verse.location_invalid': '地点无效。',
+    'verse.property_key_invalid': '属性名称只能包含字母、数字和连字符。',
+    'verse.property_value_too_long': '属性值太长。',
+    'verse.too_many_properties': '一条记录的属性过多。',
+    'verse.media_not_found': '其中一张图片已不存在。',
+    'verse.visibility_invalid': '可见性选项无效。',
+    'verse.search_query_invalid': '无法执行该搜索。',
+    'verse.tag_name_invalid': '标签名称只能包含小写字母、数字和连字符。',
+    'verse.tag_already_exists': '已存在同名标签。',
+    'verse.tag_not_found': '该标签已不存在。',
+    'verse.tag_shortcut_invalid': '快捷方式无效。',
+    'verse.tag_shortcut_taken': '该快捷方式已被其他标签使用。',
+    'verse.share_invalid': '无法以这种方式共享。',
+    'verse.share_not_permitted': '只有所有者可以共享。',
+    'media.content_type_not_allowed': '无法添加此类文件。',
+    'media.too_large': '文件太大。',
+    'media.not_found': '图片已不存在。',
+    'media.storage_unavailable': '存储服务无响应。请稍后再试。',
+    'media.upload_mismatch': '上传不完整。请重试。',
+    'notifications.invalid_reminder': '提醒无效。',
+    'notifications.invalid_recurrence': '重复规则无效。',
+    'notifications.invalid_quiet_hours':
+      '免打扰时段需要同时设置开始、结束和时区，或者都不设置。',
+    'places.unavailable': '无法连接地点服务。',
+    'privacy.export_too_soon': '每天只能申请一份副本。请明天再试。',
+    'privacy.export_expired': '该导出已失效。',
+    'privacy.no_export': '没有可下载的导出。',
+  },
+
   locale: {
     heading: '语言',
   },

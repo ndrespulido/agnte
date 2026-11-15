@@ -20,6 +20,74 @@
  * rules in the key and make the others fight it.
  */
 export const en = {
+  /**
+   * API failures, by the stable code the server sends (`error.code`).
+   *
+   * Only codes a person can reach from the screen. Anything not listed falls
+   * back to the server's own English sentence — see `serverSaid`.
+   */
+  errors: {
+    'identity.invalid_credentials': 'That email and password do not match.',
+    'identity.email_invalid': 'That does not look like an email address.',
+    'identity.password_too_short': 'That password is too short.',
+    'identity.password_too_long': 'That password is too long.',
+    'identity.verification_token_invalid': 'That verification link is not valid.',
+    'identity.verification_token_expired':
+      'That verification link has expired. Register again to get a new one.',
+    'identity.verification_token_already_used':
+      'That verification link was already used. Try signing in.',
+    'identity.reset_token_invalid': 'That reset link is not valid.',
+    'identity.reset_token_expired': 'That reset link has expired. Ask for a new one.',
+    'identity.reset_token_already_used':
+      'That reset link was already used. Ask for a new one.',
+    'identity.session_revoked': 'You have been signed out. Sign in again.',
+    'identity.refresh_token_invalid': 'Your session has ended. Sign in again.',
+    'identity.oauth_email_unverified': 'Google has not verified that email address.',
+    'identity.oauth_exchange_failed': 'Could not finish signing in with Google.',
+    'identity.oauth_state_invalid': 'That Google sign-in expired. Start again.',
+    unauthenticated: 'Your session has ended. Sign in again.',
+    rate_limited: 'Too many requests. Try again shortly.',
+    'verse.no_tags': 'A verse needs at least one tag.',
+    'verse.not_found': 'That verse no longer exists.',
+    'verse.forbidden': 'You cannot change that.',
+    'verse.version_conflict': 'This was changed somewhere else. Reload and try again.',
+    'verse.date_invalid': 'That date is not valid.',
+    'verse.event_precision_invalid': 'That date and time do not fit together.',
+    'verse.event_range_inverted': 'The end is before the start.',
+    'verse.time_conflict': 'Use either a date or deep time, not both.',
+    'verse.deep_time_out_of_range': 'That is further away than the timeline reaches.',
+    'verse.rating_out_of_range': 'A rating goes from 0 to 10.',
+    'verse.xp_too_long': 'That note is too long.',
+    'verse.location_invalid': 'That location is not valid.',
+    'verse.property_key_invalid': 'A property name can use letters, numbers and hyphens.',
+    'verse.property_value_too_long': 'That property value is too long.',
+    'verse.too_many_properties': 'That is too many properties for one verse.',
+    'verse.media_not_found': 'One of those images is no longer there.',
+    'verse.visibility_invalid': 'That visibility is not one of the choices.',
+    'verse.search_query_invalid': 'That search cannot be run.',
+    'verse.tag_name_invalid':
+      'A tag name can use lowercase letters, numbers and hyphens.',
+    'verse.tag_already_exists': 'You already have a tag with that name.',
+    'verse.tag_not_found': 'That tag no longer exists.',
+    'verse.tag_shortcut_invalid': 'That shortcut is not valid.',
+    'verse.tag_shortcut_taken': 'Another tag already uses that shortcut.',
+    'verse.share_invalid': 'That cannot be shared that way.',
+    'verse.share_not_permitted': 'Only the owner can share that.',
+    'media.content_type_not_allowed': 'That kind of file cannot be added.',
+    'media.too_large': 'That file is too large.',
+    'media.not_found': 'That image is no longer there.',
+    'media.storage_unavailable': 'Storage is not answering. Try again shortly.',
+    'media.upload_mismatch': 'That upload did not arrive intact. Try again.',
+    'notifications.invalid_reminder': 'That reminder is not valid.',
+    'notifications.invalid_recurrence': 'That repeat rule is not valid.',
+    'notifications.invalid_quiet_hours':
+      'Quiet hours need a start, an end and a time zone, or none of the three.',
+    'places.unavailable': 'Could not reach the places service.',
+    'privacy.export_too_soon': 'You can ask for one copy a day. Try again tomorrow.',
+    'privacy.export_expired': 'That export is no longer available.',
+    'privacy.no_export': 'There is no export ready to download.',
+  },
+
   locale: {
     /** The picker's own heading — the one line that must be guessable. */
     heading: 'Language',

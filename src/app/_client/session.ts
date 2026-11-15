@@ -1,5 +1,7 @@
 'use client';
 
+import { serverSaid } from './locale';
+
 /**
  * The browser's session: an access token and a refresh token, in localStorage.
  *
@@ -196,9 +198,9 @@ export async function signIn(email: string, password: string): Promise<void> {
 
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as {
-      error?: { message?: string };
+      error?: { code?: string; message?: string };
     } | null;
-    throw new Error(body?.error?.message ?? 'Could not sign in.');
+    throw new Error(serverSaid(body) ?? 'Could not sign in.');
   }
 
   saveTokens((await response.json()) as Tokens);
@@ -220,9 +222,9 @@ export async function register(email: string, password: string): Promise<void> {
   if (response.status === 202) return;
 
   const body = (await response.json().catch(() => null)) as {
-    error?: { message?: string };
+    error?: { code?: string; message?: string };
   } | null;
-  throw new Error(body?.error?.message ?? 'Could not register.');
+  throw new Error(serverSaid(body) ?? 'Could not register.');
 }
 
 /**
@@ -255,9 +257,9 @@ export async function completeGoogleSignIn(): Promise<boolean> {
 
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as {
-      error?: { message?: string };
+      error?: { code?: string; message?: string };
     } | null;
-    throw new Error(body?.error?.message ?? 'Could not finish signing in with Google.');
+    throw new Error(serverSaid(body) ?? 'Could not finish signing in with Google.');
   }
 
   saveTokens((await response.json()) as Tokens);
@@ -305,9 +307,9 @@ export async function resetPassword(token: string, password: string): Promise<vo
 
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as {
-      error?: { message?: string };
+      error?: { code?: string; message?: string };
     } | null;
-    throw new Error(body?.error?.message ?? 'That reset link did not work.');
+    throw new Error(serverSaid(body) ?? 'That reset link did not work.');
   }
 }
 
@@ -331,9 +333,9 @@ export async function changePassword(
 
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as {
-      error?: { message?: string };
+      error?: { code?: string; message?: string };
     } | null;
-    throw new Error(body?.error?.message ?? 'Could not change the password.');
+    throw new Error(serverSaid(body) ?? 'Could not change the password.');
   }
 
   const body = (await response.json()) as { sessionsRevoked: number };

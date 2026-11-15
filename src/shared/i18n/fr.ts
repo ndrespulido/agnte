@@ -20,6 +20,78 @@ const plural = (n: string, word: string): string =>
   Math.abs(Number(n)) >= 2 ? `${word}s` : word;
 
 export const fr: Strings = {
+  /**
+   * API failures, by the stable code the server sends (`error.code`).
+   *
+   * Only codes a person can reach from the screen. Anything not listed falls
+   * back to the server's own English sentence — see `serverSaid`.
+   */
+  errors: {
+    'identity.invalid_credentials': 'Cet e-mail et ce mot de passe ne correspondent pas.',
+    'identity.email_invalid': 'Cela ne ressemble pas à une adresse e-mail.',
+    'identity.password_too_short': 'Ce mot de passe est trop court.',
+    'identity.password_too_long': 'Ce mot de passe est trop long.',
+    'identity.verification_token_invalid': 'Ce lien de vérification n’est pas valide.',
+    'identity.verification_token_expired':
+      'Ce lien de vérification a expiré. Inscrivez-vous à nouveau pour en recevoir un autre.',
+    'identity.verification_token_already_used':
+      'Ce lien de vérification a déjà été utilisé. Essayez de vous connecter.',
+    'identity.reset_token_invalid': 'Ce lien de réinitialisation n’est pas valide.',
+    'identity.reset_token_expired':
+      'Ce lien de réinitialisation a expiré. Demandez-en un nouveau.',
+    'identity.reset_token_already_used':
+      'Ce lien de réinitialisation a déjà été utilisé. Demandez-en un nouveau.',
+    'identity.session_revoked': 'Vous avez été déconnecté. Reconnectez-vous.',
+    'identity.refresh_token_invalid': 'Votre session a pris fin. Reconnectez-vous.',
+    'identity.oauth_email_unverified': 'Google n’a pas vérifié cette adresse e-mail.',
+    'identity.oauth_exchange_failed': 'Impossible de terminer la connexion avec Google.',
+    'identity.oauth_state_invalid': 'Cette connexion Google a expiré. Recommencez.',
+    unauthenticated: 'Votre session a pris fin. Reconnectez-vous.',
+    rate_limited: 'Trop de requêtes. Réessayez dans un instant.',
+    'verse.no_tags': 'Un verset a besoin d’au moins une étiquette.',
+    'verse.not_found': 'Ce verset n’existe plus.',
+    'verse.forbidden': 'Vous ne pouvez pas modifier cela.',
+    'verse.version_conflict': 'Ceci a été modifié ailleurs. Rechargez et réessayez.',
+    'verse.date_invalid': 'Cette date n’est pas valide.',
+    'verse.event_precision_invalid': 'Cette date et cette heure ne vont pas ensemble.',
+    'verse.event_range_inverted': 'La fin précède le début.',
+    'verse.time_conflict': 'Utilisez soit une date, soit le temps profond, pas les deux.',
+    'verse.deep_time_out_of_range':
+      'C’est plus loin que ce que la chronologie peut atteindre.',
+    'verse.rating_out_of_range': 'Une note va de 0 à 10.',
+    'verse.xp_too_long': 'Cette note est trop longue.',
+    'verse.location_invalid': 'Ce lieu n’est pas valide.',
+    'verse.property_key_invalid':
+      'Un nom de propriété peut contenir des lettres, des chiffres et des tirets.',
+    'verse.property_value_too_long': 'La valeur de cette propriété est trop longue.',
+    'verse.too_many_properties': 'Cela fait trop de propriétés pour un verset.',
+    'verse.media_not_found': 'L’une de ces images n’est plus là.',
+    'verse.visibility_invalid': 'Cette visibilité ne fait pas partie des choix.',
+    'verse.search_query_invalid': 'Cette recherche ne peut pas être lancée.',
+    'verse.tag_name_invalid':
+      'Un nom d’étiquette peut contenir des minuscules, des chiffres et des tirets.',
+    'verse.tag_already_exists': 'Vous avez déjà une étiquette portant ce nom.',
+    'verse.tag_not_found': 'Cette étiquette n’existe plus.',
+    'verse.tag_shortcut_invalid': 'Ce raccourci n’est pas valide.',
+    'verse.tag_shortcut_taken': 'Une autre étiquette utilise déjà ce raccourci.',
+    'verse.share_invalid': 'Cela ne peut pas être partagé ainsi.',
+    'verse.share_not_permitted': 'Seul le propriétaire peut partager cela.',
+    'media.content_type_not_allowed': 'Ce type de fichier ne peut pas être ajouté.',
+    'media.too_large': 'Ce fichier est trop volumineux.',
+    'media.not_found': 'Cette image n’est plus là.',
+    'media.storage_unavailable': 'Le stockage ne répond pas. Réessayez dans un instant.',
+    'media.upload_mismatch': 'Cet envoi n’est pas arrivé intact. Réessayez.',
+    'notifications.invalid_reminder': 'Ce rappel n’est pas valide.',
+    'notifications.invalid_recurrence': 'Cette règle de répétition n’est pas valide.',
+    'notifications.invalid_quiet_hours':
+      'Les heures calmes nécessitent un début, une fin et un fuseau horaire, ou aucun des trois.',
+    'places.unavailable': 'Impossible de joindre le service de lieux.',
+    'privacy.export_too_soon':
+      'Vous pouvez demander une copie par jour. Réessayez demain.',
+    'privacy.export_expired': 'Cet export n’est plus disponible.',
+    'privacy.no_export': 'Aucun export n’est prêt à être téléchargé.',
+  },
+
   locale: {
     heading: 'Langue',
   },

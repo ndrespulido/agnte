@@ -159,12 +159,30 @@ export function useStrings(): Strings {
  * nobody asked for. So the catch stores `''` — "it failed and I have nothing
  * to add" — and the sentence is chosen where the language is already known.
  *
- * **Known gap, stated rather than hidden:** the server's own message is
- * English, because the API has not been translated. Domain errors already
- * carry stable codes (`verse.verse_id_taken` and the like), so mapping codes
- * to translated sentences on this side is the way to close it — but until that
- * exists, a server-side failure reads in English inside a screen that is
- * otherwise not.
+ * The server's sentence is translated before it gets here: see `serverSaid`.
  */
 export const failureMessage = (caught: string | null, fallback: string): string =>
   caught !== null && caught !== '' ? caught : fallback;
+
+/**
+ * What the server said about a failure, in the reader's language.
+ *
+ * Every error body carries a stable `code` beside its English `message`
+ * (§8.6.1). The code picks the sentence from the string table; a code the
+ * table does not know — a new one, or one no screen is expected to reach —
+ * falls back to the server's English, which is still better than nothing.
+ * Null when the body had neither, so the caller's own fallback applies.
+ *
+ * Translated when the failure is caught rather than when it is drawn, so an
+ * error already on screen keeps its language if the language is then changed.
+ * That is the cheap side of the trade `failureMessage` describes: errors are
+ * short-lived, and nothing has to re-run to show one.
+ */
+export function serverSaid(
+  body: { error?: { code?: string; message?: string } } | null,
+): string | null {
+  const code = body?.error?.code;
+  const known: Record<string, string> = stringsFor(getLocaleSnapshot()).errors;
+  if (code !== undefined && Object.hasOwn(known, code)) return known[code] ?? null;
+  return body?.error?.message ?? null;
+}
