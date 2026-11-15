@@ -1008,7 +1008,8 @@ button.tag:focus-visible {
   border-top: var(--hairline) solid var(--color-rule);
   box-shadow: 0 -12px 40px rgb(0 0 0 / 10%);
 
-  padding: var(--space-xl) var(--space-lg)
+  position: relative;
+  padding: calc(var(--space-xl) + var(--space-md)) var(--space-lg)
     calc(var(--space-xl) + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
@@ -1151,6 +1152,84 @@ button.tag:focus-visible {
 
 .control:has(:disabled) {
   opacity: 0.55;
+}
+
+/* Attach: three icons in a row, each already the answer to "from where?". */
+.attach-row {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.attach-button {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 1;
+  min-height: var(--size-control);
+  border: var(--hairline) dashed var(--color-rule);
+  border-radius: var(--radius-lg);
+  color: var(--color-accent-text);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) ease-out,
+    border-color var(--motion-fast) ease-out;
+}
+
+.attach-button:hover {
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  border-color: var(--color-accent);
+}
+
+/* The real input fills the box and is invisible: a tap lands on it directly,
+   which is what a phone needs to open its picker or camera. */
+.attach-button input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.attach-button:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent);
+}
+
+.attach-field .picked-images {
+  margin-bottom: var(--space-xs);
+}
+
+/* Minimise: a quiet chevron at the top right of the sheet, level with the
+   grabber, so putting the form down is where the eye already is. */
+.sheet-minimise {
+  /* In the sheet's top margin, clear of the first field. It scrolls with the
+     form: a long form is put down from the top, which is where it was opened. */
+  position: absolute;
+  top: var(--space-xs);
+  right: var(--space-sm);
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: var(--size-min-tap-target);
+  height: var(--size-min-tap-target);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: none;
+  color: var(--color-ink-soft);
+  cursor: pointer;
+  transition: background-color var(--motion-fast) ease-out;
+}
+
+.sheet-minimise:hover,
+.sheet-minimise:focus-visible {
+  background: color-mix(in srgb, var(--color-ink) 7%, transparent);
+  outline: none;
+}
+
+.sheet-minimise:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .sheet-grabber {

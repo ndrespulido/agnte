@@ -65,6 +65,13 @@ export const zh: Strings = {
 
   /** The composer bar and the card that shows what it understood. */
   composerBar: {
+    photo: '照片',
+    library: '照片图库',
+    camera: '拍照或录像',
+    files: '选择文件',
+    minimize: '最小化 — 在输入栏继续写',
+    cannotMinimize:
+      '这样无法写进输入栏：备注或地点里有冒号，或有与字段同名的细节。请改写，或直接在这里保存。',
     attach: '添加照片或文件',
     record: '录制语音备注',
     stopRecording: '停止录音',

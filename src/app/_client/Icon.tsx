@@ -30,6 +30,11 @@ const PATHS = {
   send: 'M12 19V5M6 11l6-6 6 6',
   chevronLeft: 'M15 5l-7 7 7 7',
   chevronRight: 'M9 5l7 7-7 7',
+  camera:
+    'M4 8h3l1.500-2.500h7L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1zM12 17a3.500 3.500 0 1 0 0-7 3.500 3.500 0 0 0 0 7z',
+  folder:
+    'M3 7a1 1 0 0 1 1-1h5l2 2.500h9a1 1 0 0 1 1 1V18a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7z',
+  chevronDown: 'M5 9l7 7 7-7',
   trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5',
 } as const;
 

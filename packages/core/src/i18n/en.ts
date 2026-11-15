@@ -58,6 +58,13 @@ export const en = {
 
   /** The composer bar and the card that shows what it understood. */
   composerBar: {
+    photo: 'Photo',
+    library: 'Photo library',
+    camera: 'Take a photo or video',
+    files: 'Choose files',
+    minimize: 'Minimise — keep writing in the bar',
+    cannotMinimize:
+      'This can’t be written in the bar as it is — a colon in the note or place, or a detail named like a field. Reword it, or save from here.',
     attach: 'Attach a photo or file',
     record: 'Record a voice note',
     stopRecording: 'Stop recording',

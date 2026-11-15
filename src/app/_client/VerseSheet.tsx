@@ -22,6 +22,14 @@ import {
   toTimeInput,
 } from '@agnte/core';
 import { Icon } from './Icon';
+import {
+  contentTypeOf,
+  kindOfFile,
+  uploadAttachment,
+  type AttachmentKind,
+} from './attach';
+import { draftToText } from './compose';
+import { isImage } from './Attachments';
 import { failureMessage, useStrings } from './locale';
 
 /**
@@ -60,6 +68,7 @@ export function VerseSheet({
   draft,
   focusField = null,
   onDelete,
+  onMinimise,
   onClose,
   onSaved,
 }: {
@@ -72,6 +81,14 @@ export function VerseSheet({
   focusField?: string | null;
   /** Present when editing from the timeline, where no other view offers it. */
   onDelete?: () => Promise<void> | void;
+  /**
+   * Present when the form was opened from the composer bar. Hands the form's
+   * contents back to the bar so writing can carry on there.
+   */
+  onMinimise?: (back: {
+    text: string;
+    attachments: { mediaId: string; name: string; kind: Extra['kind'] }[];
+  }) => void;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -90,7 +107,20 @@ export function VerseSheet({
   );
   const [xp, setXp] = useState(initial?.xp ?? typed?.xp ?? '');
   const [location, setLocation] = useState(initial?.location ?? typed?.location ?? '');
-  const [carried, setCarried] = useState(draft?.attachments ?? []);
+  /*
+   * Everything attached that is not a picture with a preview: voice notes,
+   * videos and files, and whatever the composer bar already uploaded.
+   */
+  const [carried, setCarried] = useState<Extra[]>(() => [
+    ...(draft?.attachments ?? []).map((item) => ({
+      key: item.mediaId,
+      mediaId: item.mediaId,
+      name: item.name,
+      kind: kindOfName(item.name),
+      status: 'ready' as const,
+    })),
+    ...(initial?.media ?? []).filter((media) => !isImage(media)).map(asExtra),
+  ]);
   const startingRating = initial ? initial.rating : (typed?.rating ?? null);
   const [rating, setRating] = useState(
     startingRating === null ? '' : String(startingRating),
@@ -122,7 +152,7 @@ export function VerseSheet({
     initial ? asRows(initial.properties) : typed ? asRows(typed.properties) : [],
   );
   const [images, setImages] = useState<PickedImage[]>(
-    initial ? initial.media.map(asPicked) : [],
+    initial ? initial.media.filter(isImage).map(asPicked) : [],
   );
 
   const [saving, setSaving] = useState(false);
@@ -242,7 +272,118 @@ export function VerseSheet({
       return current.filter((image) => image.key !== key);
     });
 
-  const uploading = images.some((image) => image.status === 'working');
+  /**
+   * Anything that is not a picture goes straight up as it is — there is no
+   * preview to build and nothing to shrink. A phone's "take photo or video"
+   * can hand back either, so what arrives is sorted by what it is.
+   */
+  async function addAny(files: readonly File[]): Promise<void> {
+    const pictures = files.filter((file) => kindOfFile(contentTypeOf(file)) === 'image');
+    const others = files.filter((file) => kindOfFile(contentTypeOf(file)) !== 'image');
+    if (pictures.length > 0) void addFiles(pictures);
+
+    for (const file of others) {
+      const key = crypto.randomUUID();
+      const kind = kindOfFile(contentTypeOf(file));
+      setCarried((current) => [
+        ...current,
+        {
+          key,
+          mediaId: null,
+          name: file.name || s.composerBar.file,
+          kind,
+          status: 'working',
+        },
+      ]);
+      try {
+        const mediaId = await uploadAttachment(file);
+        setCarried((current) =>
+          current.map((item) =>
+            item.key === key ? { ...item, mediaId, status: 'ready' } : item,
+          ),
+        );
+      } catch (cause) {
+        // The server's own words ("that kind of file cannot be added").
+        setError(cause instanceof Error ? cause.message : s.composerBar.attachFailed);
+        setCarried((current) => current.filter((item) => item.key !== key));
+      }
+    }
+  }
+
+  const uploading =
+    images.some((image) => image.status === 'working') ||
+    carried.some((item) => item.status === 'working');
+
+  /**
+   * Hand the form back to the bar.
+   *
+   * Only when the bar can say what the form says (`draftToText` checks by
+   * reading its own output back); otherwise the form stays open and says why,
+   * because minimising into text that means something else would change the
+   * verse without anyone noticing.
+   */
+  function minimise() {
+    if (!onMinimise) return;
+
+    const start = fromDateAndTime(startDate, startTime);
+    const timed = start?.precision === 'minute';
+    const end = fromDateAndTime(endDate, timed ? endTime : '');
+    const names = [
+      ...selected.flatMap((id) => {
+        const tag = tags.find((candidate) => candidate.id === id);
+        return tag ? [tag.name] : [];
+      }),
+      ...splitTagNames(newTag).map((name) => name.replace(/^\.+/, '').toLowerCase()),
+    ];
+    const parsedRating = rating.trim() === '' ? null : Number(rating);
+
+    const said = draftToText(
+      {
+        xp,
+        tags: [...new Set(names)],
+        properties: asRecord(properties),
+        start,
+        endIso: end?.iso ?? null,
+        location,
+        rating: parsedRating !== null && Number.isNaN(parsedRating) ? null : parsedRating,
+        visibility,
+      },
+      s,
+      new Date(),
+    );
+    // A time with no date, or a start time with no end time, has no spelling
+    // in the bar either.
+    const dateIsConsistent =
+      !((startDate === '' && startTime !== '') || (endDate === '' && endTime !== '')) &&
+      !(timed && endDate !== '' && endTime === '');
+
+    if (!said.lossless || !dateIsConsistent) {
+      setError(s.composerBar.cannotMinimize);
+      return;
+    }
+
+    onMinimise({
+      text: said.text,
+      attachments: [
+        ...carried.flatMap((item) =>
+          item.mediaId === null
+            ? []
+            : [{ mediaId: item.mediaId, name: item.name, kind: item.kind }],
+        ),
+        ...images.flatMap((image) =>
+          image.mediaId === null
+            ? []
+            : [
+                {
+                  mediaId: image.mediaId,
+                  name: s.composerBar.photo,
+                  kind: 'image' as const,
+                },
+              ],
+        ),
+      ],
+    });
+  }
 
   async function save() {
     setSaving(true);
@@ -327,7 +468,7 @@ export function VerseSheet({
 
       const mediaIds = [
         // What was attached in the bar first: it was added first.
-        ...carried.map((item) => item.mediaId),
+        ...carried.flatMap((item) => (item.mediaId === null ? [] : [item.mediaId])),
         ...images
           .filter((image) => image.status === 'ready' && image.mediaId !== null)
           .map((image) => image.mediaId as string),
@@ -397,6 +538,21 @@ export function VerseSheet({
             Escape and the backdrop are what close it. */}
         <div className="sheet-grabber" aria-hidden="true" />
 
+        {/* Only from the composer: put the form down and carry on in the bar.
+            Not while something is uploading — the upload would be left behind. */}
+        {onMinimise ? (
+          <button
+            type="button"
+            className="sheet-minimise"
+            aria-label={s.composerBar.minimize}
+            title={s.composerBar.minimize}
+            disabled={uploading}
+            onClick={minimise}
+          >
+            <Icon name="chevronDown" />
+          </button>
+        ) : null}
+
         {/*
           The field's name is inside the box, as its placeholder and an icon,
           rather than above it as a title. The name still exists for a screen
@@ -415,6 +571,118 @@ export function VerseSheet({
             aria-label={s.verse.whatHappened}
           />
         </label>
+
+        {/*
+          Attachments, straight under the note — the most used thing after the
+          note itself. Three sources in one row rather than one button that
+          opens a menu of the same three: a phone's "Add photos" is a second
+          tap to say which, and each of these is already the answer.
+        */}
+        <fieldset className="field attach-field">
+          <legend className="visually-hidden">{s.verse.photos}</legend>
+          {carried.length > 0 ? (
+            <ul className="composer-attachments carried">
+              {carried.map((item) => (
+                <li key={item.key} className={item.status}>
+                  <span>{item.name}</span>
+                  <button
+                    type="button"
+                    aria-label={`${s.composerBar.remove} ${item.name}`}
+                    onClick={() =>
+                      setCarried((current) =>
+                        current.filter((other) => other.key !== item.key),
+                      )
+                    }
+                  >
+                    <Icon name="close" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          {images.length > 0 ? (
+            <ul className="picked-images">
+              {images.map((image) => (
+                <li key={image.key} data-status={image.status}>
+                  {/* eslint-disable-next-line @next/next/no-img-element --
+                      next/image wants a known width and height and rewrites
+                      the URL through the optimiser; these are a local blob:
+                      URL and a short-lived signed one, neither of which
+                      survives that. */}
+                  <img src={image.previewUrl} alt="" />
+                  <button
+                    type="button"
+                    className="remove"
+                    aria-label={s.verse.removePhoto}
+                    onClick={() => removeImage(image.key)}
+                  >
+                    ×
+                  </button>
+                  {image.status === 'working' ? (
+                    <span className="badge" role="status">
+                      Uploading…
+                    </span>
+                  ) : null}
+                  {image.status === 'failed' ? (
+                    <span className="badge failed">{s.verse.photoFailed}</span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          <div className="attach-row">
+            {/* A label wrapping a hidden input, rather than a button that
+                clicks one: a real file input for the keyboard and for
+                assistive tech, and the browser's own picker behind it. */}
+            <label className="attach-button" title={s.composerBar.library}>
+              <input
+                type="file"
+                accept="image/*"
+                multiple
+                aria-label={s.composerBar.library}
+                onChange={(event) => {
+                  const files = [...(event.target.files ?? [])];
+                  // Cleared so picking the same file twice in a row still fires.
+                  event.target.value = '';
+                  void addAny(files);
+                }}
+              />
+              <Icon name="image" />
+            </label>
+            <label className="attach-button" title={s.composerBar.camera}>
+              <input
+                type="file"
+                // `capture` is what opens the camera itself on a phone, with
+                // photo and video both on offer; a computer ignores it and
+                // shows its ordinary picker.
+                accept="image/*,video/*"
+                capture="environment"
+                aria-label={s.composerBar.camera}
+                onChange={(event) => {
+                  const files = [...(event.target.files ?? [])];
+                  event.target.value = '';
+                  void addAny(files);
+                }}
+              />
+              <Icon name="camera" />
+            </label>
+            <label className="attach-button" title={s.composerBar.files}>
+              <input
+                type="file"
+                multiple
+                aria-label={s.composerBar.files}
+                onChange={(event) => {
+                  const files = [...(event.target.files ?? [])];
+                  event.target.value = '';
+                  void addAny(files);
+                }}
+              />
+              <Icon name="folder" />
+            </label>
+          </div>
+        </fieldset>
 
         <LocationField value={location} onChange={setLocation} />
 
@@ -506,81 +774,6 @@ export function VerseSheet({
             </select>
           </label>
         </div>
-
-        <fieldset className="field">
-          <legend className="visually-hidden">{s.verse.photos}</legend>
-          {carried.length > 0 ? (
-            <ul className="composer-attachments carried">
-              {carried.map((item) => (
-                <li key={item.mediaId}>
-                  <span>{item.name}</span>
-                  <button
-                    type="button"
-                    aria-label={`${s.composerBar.remove} ${item.name}`}
-                    onClick={() =>
-                      setCarried((current) =>
-                        current.filter((other) => other.mediaId !== item.mediaId),
-                      )
-                    }
-                  >
-                    <Icon name="close" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          {images.length > 0 ? (
-            <ul className="picked-images">
-              {images.map((image) => (
-                <li key={image.key} data-status={image.status}>
-                  {/* eslint-disable-next-line @next/next/no-img-element --
-                      next/image wants a known width and height and rewrites
-                      the URL through the optimiser; these are a local blob:
-                      URL and a short-lived signed one, neither of which
-                      survives that. */}
-                  <img src={image.previewUrl} alt="" />
-                  <button
-                    type="button"
-                    className="remove"
-                    aria-label={s.verse.removePhoto}
-                    onClick={() => removeImage(image.key)}
-                  >
-                    ×
-                  </button>
-                  {image.status === 'working' ? (
-                    <span className="badge" role="status">
-                      Uploading…
-                    </span>
-                  ) : null}
-                  {image.status === 'failed' ? (
-                    <span className="badge failed">{s.verse.photoFailed}</span>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-
-          {/* A label wrapping a hidden input, rather than a button that
-              clicks one: the native control cannot be styled to match the
-              rest of the sheet, and this keeps it a real file input for the
-              keyboard and for assistive tech. */}
-          <label className="file-picker">
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={(event) => {
-                const files = [...(event.target.files ?? [])];
-                // The input is cleared so picking the same file twice in a
-                // row still fires a change event.
-                event.target.value = '';
-                void addFiles(files);
-              }}
-            />
-            <Icon name="image" />
-            <span>{images.length === 0 ? s.verse.addPhotos : s.verse.addAnother}</span>
-          </label>
-        </fieldset>
 
         <fieldset className="field">
           <legend className="visually-hidden">{s.verse.tags}</legend>
@@ -835,6 +1028,31 @@ const asPicked = (media: VerseView['media'][number]): PickedImage => ({
   previewUrl: media.thumbUrl ?? '',
   status: media.status === 'failed' ? 'failed' : 'ready',
   mediaId: media.id,
+});
+
+/** An attachment with no preview: a voice note, a video, a file. */
+interface Extra {
+  key: string;
+  mediaId: string | null;
+  name: string;
+  kind: AttachmentKind;
+  status: 'working' | 'ready';
+}
+
+/** What a saved attachment is, from its name — all a draft carries is that. */
+const kindOfName = (name: string): AttachmentKind => {
+  const extension = name.split('.').pop()?.toLowerCase() ?? '';
+  if (['weba', 'm4a', 'mp3', 'ogg', 'wav'].includes(extension)) return 'audio';
+  if (['mp4', 'mov'].includes(extension)) return 'video';
+  return 'file';
+};
+
+const asExtra = (media: VerseView['media'][number]): Extra => ({
+  key: media.id,
+  mediaId: media.id,
+  name: media.fileName ?? media.contentType ?? '',
+  kind: media.kind ?? 'file',
+  status: 'ready',
 });
 
 interface PropertyRow {
