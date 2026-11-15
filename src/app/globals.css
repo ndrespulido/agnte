@@ -2338,15 +2338,25 @@ button.danger {
   /* The same clearance `.app-main` pads by, so this sits directly under the
      fixed date header rather than sliding beneath it. */
   top: calc(var(--space-xxxl) + var(--space-xl));
-  z-index: 1;
+  /*
+   * Above every row, below the date header.
+   *
+   * It was 1. Rows lift their own controls above the stretched open button —
+   * the open button is 1, tag chips and photo strips are 2 and 3 — so a bar at
+   * 1 lost to all of them and the timeline drew straight through it. The
+   * header is the next layer up; this is the one just under it.
+   */
+  z-index: calc(var(--z-sticky-header) - 1);
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: var(--space-sm);
   margin: 0 calc(var(--space-lg) * -1) var(--space-md);
   padding: var(--space-sm) var(--space-lg);
-  background: var(--color-glass);
-  backdrop-filter: blur(20px);
+  /* Solid. This is a panel of controls over a moving page, not a pane of
+     glass: text in the fields has to stay legible whatever scrolls beneath,
+     and a translucent base is what let the rows show through. */
+  background: var(--color-paper);
   border-bottom: var(--hairline) solid var(--color-glass-edge);
 }
 
