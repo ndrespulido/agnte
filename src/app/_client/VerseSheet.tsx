@@ -20,6 +20,7 @@ import {
   toDateInput,
   toTimeInput,
 } from '@agnte/core';
+import { Icon } from './Icon';
 import { failureMessage, useStrings } from './locale';
 
 /**
@@ -337,34 +338,50 @@ export function VerseSheet({
         aria-label={editing ? s.verse.editHeading : s.verse.addHeading}
         onClick={(event) => event.stopPropagation()}
       >
-        <label className="field">
-          <span>{s.verse.whatHappened}</span>
+        {/* A handle, because a sheet that slides up from the bottom should
+            look like something that can be put back down. Decoration only —
+            Escape and the backdrop are what close it. */}
+        <div className="sheet-grabber" aria-hidden="true" />
+
+        {/*
+          The field's name is inside the box, as its placeholder and an icon,
+          rather than above it as a title. The name still exists for a screen
+          reader (`aria-label`) — a placeholder alone disappears on the first
+          keystroke and is not announced as a label by every reader.
+        */}
+        <label className="control control-area">
+          <Icon name="note" />
           <textarea
             ref={firstFieldRef}
             value={xp}
             onChange={(event) => setXp(event.target.value)}
             rows={3}
-            placeholder={s.verse.xpPlaceholder}
+            placeholder={s.verse.whatHappened}
+            aria-label={s.verse.whatHappened}
           />
         </label>
 
         <LocationField value={location} onChange={setLocation} />
 
         <fieldset className="field">
-          <legend>{s.verse.when}</legend>
+          <legend className="visually-hidden">{s.verse.when}</legend>
           {/* A date and an optional time, not one `datetime-local`: that
               control cannot say "no time", and a day with no time is what
               most entries are. */}
-          <div className="field-pair">
-            <label>
-              <span>{s.verse.starts}</span>
+          <div className="field-pair when-row">
+            <label className="control">
+              <Icon name="calendar" />
+              {/* A date input cannot hold a placeholder, so the word sits in
+                  the box beside it. */}
+              <span className="control-prefix">{s.verse.starts}</span>
               <input
                 type="date"
                 value={startDate}
                 onChange={(event) => setStartDate(event.target.value)}
               />
             </label>
-            <label>
+            <label className="control">
+              <Icon name="clock" />
               <input
                 type="time"
                 aria-label={s.verse.startTime}
@@ -373,18 +390,20 @@ export function VerseSheet({
               />
             </label>
           </div>
-          <div className="field-pair">
-            <label>
+          <div className="field-pair when-row">
+            <label className="control">
+              <Icon name="calendar" />
               {/* A range, not a second event: leaving it empty is the common
                   case, because most things happen at a moment. */}
-              <span>{s.verse.ends}</span>
+              <span className="control-prefix">{s.verse.ends}</span>
               <input
                 type="date"
                 value={endDate}
                 onChange={(event) => setEndDate(event.target.value)}
               />
             </label>
-            <label>
+            <label className="control">
+              <Icon name="clock" />
               <input
                 type="time"
                 aria-label={s.verse.endTime}
@@ -400,21 +419,23 @@ export function VerseSheet({
         </fieldset>
 
         <div className="field-pair">
-          <label className="field">
-            <span>{s.verse.rating}</span>
+          <label className="control">
+            <Icon name="star" />
             <input
               type="number"
               min={0}
               max={10}
               value={rating}
               onChange={(event) => setRating(event.target.value)}
-              placeholder={s.verse.ratingPlaceholder}
+              placeholder={`${s.verse.rating} ${s.verse.ratingPlaceholder}`}
+              aria-label={s.verse.rating}
             />
           </label>
 
-          <label className="field">
-            <span>{s.verse.visibility}</span>
+          <label className="control">
+            <Icon name="eye" />
             <select
+              aria-label={s.verse.visibility}
               value={visibility}
               onChange={(event) => setVisibility(event.target.value)}
             >
@@ -430,7 +451,7 @@ export function VerseSheet({
         </div>
 
         <fieldset className="field">
-          <legend>{s.verse.photos}</legend>
+          <legend className="visually-hidden">{s.verse.photos}</legend>
           {images.length > 0 ? (
             <ul className="picked-images">
               {images.map((image) => (
@@ -479,12 +500,13 @@ export function VerseSheet({
                 void addFiles(files);
               }}
             />
+            <Icon name="image" />
             <span>{images.length === 0 ? s.verse.addPhotos : s.verse.addAnother}</span>
           </label>
         </fieldset>
 
         <fieldset className="field">
-          <legend>{s.verse.tags}</legend>
+          <legend className="visually-hidden">{s.verse.tags}</legend>
           <div className="tag-picker">
             {tags.map((tag) => (
               <button
@@ -498,12 +520,15 @@ export function VerseSheet({
               </button>
             ))}
           </div>
-          <input
-            value={newTag}
-            onChange={(event) => setNewTag(event.target.value)}
-            placeholder={s.verse.newTagsPlaceholder}
-            aria-label={s.verse.newTag}
-          />
+          <label className="control">
+            <Icon name="tag" />
+            <input
+              value={newTag}
+              onChange={(event) => setNewTag(event.target.value)}
+              placeholder={s.verse.newTagsPlaceholder}
+              aria-label={s.verse.newTag}
+            />
+          </label>
         </fieldset>
 
         <Properties rows={properties} onChange={setProperties} />
@@ -628,13 +653,14 @@ function LocationField({
 
   return (
     <div className="field location-field">
-      <label>
-        <span>{s.verse.where}</span>
+      <label className="control">
+        <Icon name="pin" />
         <input
+          aria-label={s.verse.where}
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onFocus={() => setOpen(suggestions.length > 0)}
-          placeholder={s.verse.wherePlaceholder}
+          placeholder={s.verse.where}
           // The browser's own history dropdown would sit on top of this one.
           autoComplete="off"
           role="combobox"
@@ -752,7 +778,7 @@ function Properties({
 
   return (
     <fieldset className="field">
-      <legend>{s.verse.details}</legend>
+      <legend className="visually-hidden">{s.verse.details}</legend>
 
       {rows.map((row) => (
         <div className="field-pair property-row" key={row.key}>
@@ -774,7 +800,7 @@ function Properties({
             aria-label={s.verse.removeDetail(row.name || s.verse.thisDetail)}
             onClick={() => onChange(rows.filter((other) => other.key !== row.key))}
           >
-            ×
+            <Icon name="close" />
           </button>
         </div>
       ))}
@@ -786,6 +812,7 @@ function Properties({
           onChange([...rows, { key: crypto.randomUUID(), name: '', value: '' }])
         }
       >
+        <Icon name="list" />
         {s.verse.addADetail}
       </button>
     </fieldset>

@@ -10,6 +10,7 @@ import {
   type AttachmentKind,
 } from './attach';
 import { dateLine, resolveTags, verseFrom } from './compose';
+import { Icon } from './Icon';
 import { useStrings } from './locale';
 
 /**
@@ -279,7 +280,7 @@ export function Composer({
                       )
                     }
                   >
-                    ×
+                    <Icon name="close" />
                   </button>
                 </li>
               ))}
@@ -308,56 +309,67 @@ export function Composer({
           aria-label={s.composerBar.openForm}
           onClick={onOpenForm}
         >
-          <span aria-hidden="true">+</span>
+          <Icon name="plus" />
         </button>
-        <input
-          ref={picker}
-          type="file"
-          multiple
-          hidden
-          onChange={(event) => {
-            attach([...(event.target.files ?? [])]);
-            // Reset, or picking the same file twice in a row does nothing.
-            event.target.value = '';
-          }}
-        />
+
+        {/* One pill: the text, with attach and record inside it at the far
+            end, the way a chat field carries its own tools. */}
+        <div className="composer-field">
+          <input
+            type="text"
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            onPaste={(event) => {
+              // A pasted screenshot or file is attached; pasted text is left
+              // to the browser, which already knows how to paste text.
+              const files = [...event.clipboardData.files];
+              if (files.length === 0) return;
+              event.preventDefault();
+              attach(files);
+            }}
+            placeholder={recording ? s.composerBar.recording : s.composerBar.placeholder}
+            aria-label={s.composerBar.placeholder}
+            autoComplete="off"
+            autoCapitalize="sentences"
+            enterKeyHint="send"
+          />
+          <input
+            ref={picker}
+            type="file"
+            multiple
+            hidden
+            onChange={(event) => {
+              attach([...(event.target.files ?? [])]);
+              // Reset, or picking the same file twice in a row does nothing.
+              event.target.value = '';
+            }}
+          />
+          <button
+            type="button"
+            className="composer-tool"
+            aria-label={s.composerBar.attach}
+            onClick={() => picker.current?.click()}
+          >
+            <Icon name="clip" />
+          </button>
+          <button
+            type="button"
+            className="composer-tool"
+            aria-label={recording ? s.composerBar.stopRecording : s.composerBar.record}
+            aria-pressed={recording}
+            onClick={() => void toggleRecording()}
+          >
+            <Icon name={recording ? 'stop' : 'mic'} />
+          </button>
+        </div>
+
         <button
-          type="button"
-          className="composer-tool"
-          aria-label={s.composerBar.attach}
-          onClick={() => picker.current?.click()}
+          type="submit"
+          className="composer-send"
+          disabled={!canSend}
+          aria-label={saving ? s.common.saving : s.composerBar.send}
         >
-          <span aria-hidden="true">⌁</span>
-        </button>
-        <button
-          type="button"
-          className="composer-tool"
-          aria-label={recording ? s.composerBar.stopRecording : s.composerBar.record}
-          aria-pressed={recording}
-          onClick={() => void toggleRecording()}
-        >
-          <span aria-hidden="true">{recording ? '■' : '●'}</span>
-        </button>
-        <input
-          type="text"
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          onPaste={(event) => {
-            // A pasted screenshot or file is attached; pasted text is left to
-            // the browser, which already knows how to paste text.
-            const files = [...event.clipboardData.files];
-            if (files.length === 0) return;
-            event.preventDefault();
-            attach(files);
-          }}
-          placeholder={recording ? s.composerBar.recording : s.composerBar.placeholder}
-          aria-label={s.composerBar.placeholder}
-          autoComplete="off"
-          autoCapitalize="sentences"
-          enterKeyHint="send"
-        />
-        <button type="submit" className="composer-send" disabled={!canSend}>
-          {saving ? s.common.saving : s.verse.add}
+          <Icon name="send" />
         </button>
       </form>
     </div>

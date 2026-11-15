@@ -1380,6 +1380,17 @@ bytes are not inspected**, so the declared type is trusted. A contact is a
 `microphone=(self)` in the permissions policy and a `media-src` for object
 storage — both found by pressing record in a browser.
 
+**Restyle.** Controls are rounded boxes that carry their own name: an icon
+and a placeholder inside, instead of a title above (`.control`, with the name
+kept as `aria-label`). Icons are a small inline-SVG set in `Icon.tsx` — no
+icon font, no package. The sheet has a larger radius and a grabber; quiet
+buttons lose the underline for a soft wash; the composer is one pill holding
+the text with attach and record inside it, and send is the one filled control.
+The direction in CLAUDE.md stands — paper palette, hairlines, 150ms motion,
+dark mode — only the shapes changed. Applied to the verse form and the
+composer; the other forms (sign-in, reminders, tags) took the new shape of
+inputs and buttons but still have titles above their fields.
+
 Not built: **transcription of voice notes** (decided, but it is the second
 metered dependency and needs a provider, a key and the daily cap of §12.5
 before any code), stripping metadata from non-image files on erasure, video
