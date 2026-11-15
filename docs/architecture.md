@@ -232,6 +232,21 @@ meaning; at `'minute'` it is a real moment, rendered in the reader's own zone.
 > rows that way is what makes the change a no-op on screen for everything
 > already written, which was the requirement.
 >
+> **How the client reads it.** A day is read with UTC parts, so it is the same
+> date for every reader; a moment is read in the reader's zone. The form is a
+> date field plus an optional time — the empty time *is* `'date'` — and both
+> ends of a range share the start's precision. One deliberate disagreement
+> with the server: the client sorts a day at **local** midnight, because the
+> stored instant (midnight UTC) is the evening before for anyone west of
+> Greenwich and would split that day's section. Pages are still fetched in the
+> server's order; the "today" mark is placed by the same local reading.
+>
+> Two costs, both accepted. Times typed *before* this change were stored as
+> UTC wall-clock, so they now display shifted by the reader's offset (14:00
+> typed in Madrid in summer reads 16:00); nothing can tell those rows from
+> correct ones. And the tag dashboard's first/last span still formats in UTC —
+> its summary carries no precision yet.
+>
 > The same rule runs at the edges as an **inference, not a default**: a write
 > queued offline by an older build, or an export written before the field
 > existed, carries no precision and must still mean what it meant when it was
@@ -1428,7 +1443,7 @@ Each step is one deliverable ending in a merged pull request.
 
 1. **Foundations.** Merge `claude/event-precision`, 
    `claude/push-test-notification` and `claude/pause-runbook`; finish the display half of event
-   precision; replace the five-minute reminder cron with wake-ups (§8.4); the
+   precision (done, `claude/date-display`); replace the five-minute reminder cron with wake-ups (§8.4); the
    monorepo and `core`; error codes.
 2. **The spike** (12.6), which decides how steps 3 and 8 are built.
 3. **Composer and chat timeline.** Grammar, entries, reply-to-edit, the flip,

@@ -13,7 +13,13 @@ import {
   type VerseView,
 } from './api';
 import { downscaleImage } from './downscale';
-import { fromDateTimeInput, splitTagNames, toDateTimeInput } from './format';
+import {
+  fromDateAndTime,
+  placementOf,
+  splitTagNames,
+  toDateInput,
+  toTimeInput,
+} from './format';
 import { failureMessage, useStrings } from './locale';
 
 /**
@@ -56,10 +62,29 @@ export function VerseSheet({
       : String(initial.rating),
   );
   const [visibility, setVisibility] = useState(initial?.explicitVisibility ?? '');
-  const [eventStart, setEventStart] = useState(
-    toDateTimeInput(initial?.eventStart ?? null),
+  /*
+   * A date field and an optional time, for each end of the range.
+   *
+   * The empty time is the precision (§2.1): blank, the verse is a day; filled
+   * in, it is a moment in the zone the person is standing in. Read through
+   * `placementOf` so a verse cached before precision existed opens the way the
+   * timeline is already showing it.
+   */
+  const initialPlacement = initial ? placementOf(initial) : null;
+  const initialPrecision =
+    initialPlacement?.kind === 'date' ? initialPlacement.precision : null;
+  const [startDate, setStartDate] = useState(
+    toDateInput(initial?.eventStart ?? null, initialPrecision),
   );
-  const [eventEnd, setEventEnd] = useState(toDateTimeInput(initial?.eventEnd ?? null));
+  const [startTime, setStartTime] = useState(
+    toTimeInput(initial?.eventStart ?? null, initialPrecision),
+  );
+  const [endDate, setEndDate] = useState(
+    toDateInput(initial?.eventEnd ?? null, initialPrecision),
+  );
+  const [endTime, setEndTime] = useState(
+    toTimeInput(initial?.eventEnd ?? null, initialPrecision),
+  );
   const [properties, setProperties] = useState<PropertyRow[]>(
     initial ? asRows(initial.properties) : [],
   );
@@ -227,6 +252,26 @@ export function VerseSheet({
         return;
       }
 
+      /*
+       * The date, as the three things the API takes: start, end, precision.
+       *
+       * Both ends share one precision — a range is either days or moments —
+       * and the start decides it. So an end date with no time, on a start that
+       * has one, is refused rather than guessed at: midnight and "the same
+       * time as the start" are both plausible and both wrong half the time.
+       */
+      if ((startDate === '' && startTime !== '') || (endDate === '' && endTime !== '')) {
+        setError(s.verse.timeNeedsDate);
+        return;
+      }
+      const start = fromDateAndTime(startDate, startTime);
+      const timed = start?.precision === 'minute';
+      if (timed && endDate !== '' && endTime === '') {
+        setError(s.verse.endNeedsTime);
+        return;
+      }
+      const end = fromDateAndTime(endDate, timed ? endTime : '');
+
       const parsedRating = rating.trim() === '' ? null : Number(rating);
       if (parsedRating !== null && (Number.isNaN(parsedRating) || parsedRating < 0)) {
         setError(s.verse.ratingRange);
@@ -244,8 +289,9 @@ export function VerseSheet({
         rating: parsedRating,
         // Empty means "no date" — sent as an explicit null so clearing a date
         // that was there actually clears it rather than being read as "leave".
-        eventStart: fromDateTimeInput(eventStart),
-        eventEnd: fromDateTimeInput(eventEnd),
+        eventStart: start?.iso ?? null,
+        eventEnd: end?.iso ?? null,
+        eventPrecision: start?.precision ?? null,
         visibility: visibility === '' ? null : visibility,
         properties: asRecord(properties),
         mediaIds,
@@ -261,6 +307,9 @@ export function VerseSheet({
             // this app came from is messaging yourself something *now* — but
             // only when nothing was typed into the date field.
             eventStart: fields.eventStart ?? new Date().toISOString(),
+            // "Now" is a moment, not a day: it sorts into this afternoon
+            // rather than to the top of today.
+            eventPrecision: fields.eventPrecision ?? 'minute',
           },
           // The labels the timeline draws the queued row with, taken from the
           // list this sheet already loaded plus anything it just created.
@@ -303,23 +352,48 @@ export function VerseSheet({
 
         <fieldset className="field">
           <legend>{s.verse.when}</legend>
+          {/* A date and an optional time, not one `datetime-local`: that
+              control cannot say "no time", and a day with no time is what
+              most entries are. */}
           <div className="field-pair">
             <label>
               <span>{s.verse.starts}</span>
               <input
-                type="datetime-local"
-                value={eventStart}
-                onChange={(event) => setEventStart(event.target.value)}
+                type="date"
+                value={startDate}
+                onChange={(event) => setStartDate(event.target.value)}
               />
             </label>
+            <label>
+              <input
+                type="time"
+                aria-label={s.verse.startTime}
+                value={startTime}
+                onChange={(event) => setStartTime(event.target.value)}
+              />
+            </label>
+          </div>
+          <div className="field-pair">
             <label>
               {/* A range, not a second event: leaving it empty is the common
                   case, because most things happen at a moment. */}
               <span>{s.verse.ends}</span>
               <input
-                type="datetime-local"
-                value={eventEnd}
-                onChange={(event) => setEventEnd(event.target.value)}
+                type="date"
+                value={endDate}
+                onChange={(event) => setEndDate(event.target.value)}
+              />
+            </label>
+            <label>
+              <input
+                type="time"
+                aria-label={s.verse.endTime}
+                value={endTime}
+                // A range of days has no end time to give. Disabled rather
+                // than hidden so the row does not jump when a start time is
+                // typed.
+                disabled={startTime === ''}
+                onChange={(event) => setEndTime(event.target.value)}
               />
             </label>
           </div>

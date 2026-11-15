@@ -459,32 +459,32 @@ export function Timeline({
   /**
    * Where the future stops and the past begins, as a section index.
    *
-   * Found by membership rather than by comparing dates: a section can hold
-   * both halves at once — anything written for later today is "future" and
-   * anything from this morning is "past", and they group under the same
-   * heading. Marking the first section that contains *any* past verse puts
-   * the centre above that shared heading, which is where a reader opening the
-   * app expects today to start.
+   * A section can hold both halves at once — anything written for later today
+   * is "future" and anything from this morning is "past", and they group under
+   * the same heading. Marking the first section that contains *any* past verse
+   * puts the centre above that shared heading, which is where a reader opening
+   * the app expects today to start.
+   *
+   * "Past" is decided by position, not by which page a verse arrived in. The
+   * two agree for a moment and can disagree for a day: the server splits the
+   * pages on the stored instant, and a day is stored at midnight UTC, so in
+   * Recife at nine in the evening tomorrow's day-verse has already arrived in
+   * the past page. Its heading says Tomorrow, and by membership the centre
+   * would sit above it. `timelinePosition` reads a day where the reader is,
+   * which is the same reading the headings use.
    */
   const boundary = useMemo(() => {
-    const pastIds = new Set(past.map((verse) => verse.id));
-    // A queued verse is in neither page, so membership alone cannot place it.
-    // Its position against the anchor can: written for now or earlier, it
-    // belongs below the centre mark, which is where the reader is looking.
     const anchorPosition = timelinePosition({
       eventStart: anchor.toISOString(),
+      eventPrecision: 'minute',
       deepTimeYears: null,
       createdAt: anchor.toISOString(),
     });
 
     return sections.findIndex((section) =>
-      section.verses.some(
-        (verse) =>
-          pastIds.has(verse.id) ||
-          (verse.pending !== null && timelinePosition(verse) <= anchorPosition),
-      ),
+      section.verses.some((verse) => timelinePosition(verse) <= anchorPosition),
     );
-  }, [sections, past, anchor]);
+  }, [sections, anchor]);
 
   /**
    * Everything that can name the sticky header, in document order.

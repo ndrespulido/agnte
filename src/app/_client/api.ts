@@ -10,6 +10,12 @@ export interface VerseView {
   id: string;
   eventStart: string | null;
   eventEnd: string | null;
+  /**
+   * Whether the two fields above are a calendar day or a real moment (§2.1).
+   * Optional because a page cached before the field existed does not carry it;
+   * `placementOf` infers it the way the server's backfill did.
+   */
+  eventPrecision?: 'date' | 'minute' | null;
   deepTimeYears: number | null;
   location: string | null;
   rating: number | null;
@@ -137,6 +143,7 @@ export interface NewVerse {
   rating?: number | null;
   eventStart?: string | null;
   eventEnd?: string | null;
+  eventPrecision?: 'date' | 'minute' | null;
   visibility?: string | null;
   properties?: Record<string, string>;
   mediaIds?: string[];
@@ -252,6 +259,7 @@ export interface VerseEdit {
   rating?: number | null;
   eventStart?: string | null;
   eventEnd?: string | null;
+  eventPrecision?: 'date' | 'minute' | null;
   visibility?: string | null;
   properties?: Record<string, string>;
   mediaIds?: string[];
