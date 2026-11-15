@@ -221,6 +221,11 @@ export const zh: Strings = {
   timeline: {
     search: '搜索',
     searchPlaceholder: '搜索时间线',
+    filterPlace: '地点',
+    filterFrom: '从',
+    filterTo: '到',
+    nothingMatchesFilters: '没有符合这些筛选的内容。',
+    filterPlaceLabel: '按地点筛选',
     clear: '清除',
     stopFilteringBy: (tag: string) => `取消按 ${tag} 筛选`,
     addAVerse: '添加一条记录',

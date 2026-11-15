@@ -518,6 +518,135 @@ describe.skipIf(!DATABASE_URL)('timeline', () => {
   });
 
   /**
+   * The place and date-range filters. Both narrow the same page the text and
+   * tags do, and both are plain: a substring of the location, and a range of
+   * days with the last day included.
+   */
+  describe('the place and date filters', () => {
+    const seed = async (token: string) => {
+      const tag = await makeTag(token, 'trips');
+      const lisbon = await makeVerse(token, {
+        tagIds: [tag.id],
+        xp: 'Dinner',
+        location: 'Lisboa, Portugal',
+        eventStart: '2025-03-10T00:00:00Z',
+        eventPrecision: 'date',
+      });
+      const recife = await makeVerse(token, {
+        tagIds: [tag.id],
+        xp: 'Beach',
+        location: 'Recife',
+        eventStart: '2025-04-01T00:00:00Z',
+        eventPrecision: 'date',
+      });
+      // A stay across the boundary of the range asked for below.
+      const stay = await makeVerse(token, {
+        tagIds: [tag.id],
+        xp: 'Hotel',
+        location: 'Recife Airport',
+        eventStart: '2025-03-28T00:00:00Z',
+        eventEnd: '2025-04-03T00:00:00Z',
+        eventPrecision: 'date',
+      });
+      const undated = await makeVerse(token, { tagIds: [tag.id], xp: 'Floating' });
+      return { lisbon, recife, stay, undated };
+    };
+    const ids = (body: { verses: { id: string }[] }) =>
+      body.verses.map((v) => v.id).sort();
+
+    it('matches a place by substring, ignoring case and accents', async () => {
+      const { token } = await signUp('pf1@example.com');
+      const { recife, stay } = await seed(token);
+
+      const { body } = await timeline(token, '?anchor=2026-01-01T00:00:00Z&place=RECI');
+      expect(ids(body)).toEqual([recife.id, stay.id].sort());
+    });
+
+    it('finds Lisboa from lisboa or Lísboa', async () => {
+      const { token } = await signUp('pf2@example.com');
+      const { lisbon } = await seed(token);
+
+      for (const typed of ['lisboa', 'L%C3%ADsboa']) {
+        const { body } = await timeline(
+          token,
+          `?anchor=2026-01-01T00:00:00Z&place=${typed}`,
+        );
+        expect(ids(body)).toEqual([lisbon.id]);
+      }
+    });
+
+    it('does not treat % or _ in a place as wildcards', async () => {
+      const { token } = await signUp('pf3@example.com');
+      await seed(token);
+
+      const { body } = await timeline(token, '?anchor=2026-01-01T00:00:00Z&place=%25');
+      expect(body.verses).toEqual([]);
+    });
+
+    it('includes the last day of a range, and what overlaps it from outside', async () => {
+      const { token } = await signUp('pf4@example.com');
+      const { recife, stay } = await seed(token);
+
+      // Recife on 1 April, and the stay that began in March and runs through it.
+      const { body } = await timeline(
+        token,
+        '?anchor=2026-01-01T00:00:00Z&from=2025-04-01&to=2025-04-01',
+      );
+      expect(ids(body)).toEqual([recife.id, stay.id].sort());
+    });
+
+    it('leaves out what is outside the range, and what has no date at all', async () => {
+      const { token } = await signUp('pf5@example.com');
+      const { lisbon } = await seed(token);
+
+      const { body } = await timeline(
+        token,
+        '?anchor=2026-01-01T00:00:00Z&from=2025-03-01&to=2025-03-15',
+      );
+      expect(ids(body)).toEqual([lisbon.id]);
+    });
+
+    it('takes one bound alone', async () => {
+      const { token } = await signUp('pf6@example.com');
+      const { stay } = await seed(token);
+
+      // Only the stay reaches the 2nd: it runs to the 3rd. Everything that
+      // ended earlier, and the undated verse, is out.
+      const { body } = await timeline(
+        token,
+        '?anchor=2026-01-01T00:00:00Z&from=2025-04-02',
+      );
+      expect(ids(body)).toEqual([stay.id]);
+    });
+
+    it('combines with the other filters', async () => {
+      const { token } = await signUp('pf7@example.com');
+      const { stay } = await seed(token);
+
+      const { body } = await timeline(
+        token,
+        '?anchor=2026-01-01T00:00:00Z&place=recife&from=2025-04-02&q=hotel',
+      );
+      expect(ids(body)).toEqual([stay.id]);
+    });
+
+    it('refuses a date that is not one rather than ignoring it', async () => {
+      const { token } = await signUp('pf8@example.com');
+      for (const bad of ['from=tomorrow', 'to=2025-02-31', 'from=2025-1-1']) {
+        const response = await handleTimeline(
+          new Request(
+            `https://agnte.test/v1/timeline?anchor=2026-01-01T00:00:00Z&${bad}`,
+            {
+              headers: bearer(token),
+            },
+          ),
+        );
+        expect(response.status).toBe(400);
+      }
+    });
+  });
+
+  /**
    * Free text narrowing the timeline itself, rather than a separate results
    * screen (§8.2). The same predicate `search` uses, so the two cannot
    * disagree about what a word matches.

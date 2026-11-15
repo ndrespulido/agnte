@@ -156,6 +156,26 @@ function textFilter(text: string | null | undefined): Prisma.Sql {
   return clauses.length === 0 ? Prisma.sql`TRUE` : Prisma.join(clauses, ' AND ');
 }
 
+/** Location contains the text — one bound pattern, escaped like the text filter's. */
+function placeFilter(place: string | null | undefined): Prisma.Sql {
+  const wanted = place?.trim();
+  if (!wanted) return Prisma.sql`TRUE`;
+  const pattern = `%${wanted.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  return Prisma.sql`unaccent(coalesce(v.location, '')) ILIKE unaccent(${pattern})`;
+}
+
+/** TRUE with no bounds, so the caller can always interpolate it. */
+function rangeFilter(
+  from: Date | null | undefined,
+  to: Date | null | undefined,
+): Prisma.Sql {
+  if (!from && !to) return Prisma.sql`TRUE`;
+  const clauses: Prisma.Sql[] = [Prisma.sql`v.event_start IS NOT NULL`];
+  if (to) clauses.push(Prisma.sql`v.event_start < ${to}`);
+  if (from) clauses.push(Prisma.sql`coalesce(v.event_end, v.event_start) >= ${from}`);
+  return Prisma.join(clauses, ' AND ');
+}
+
 export class PrismaVerseRepository
   implements VerseRepository, TimelineRepository, SearchRepository
 {
@@ -354,6 +374,8 @@ export class PrismaVerseRepository
      * not change with the presence of text.
      */
     const text = textFilter(query.text);
+    const place = placeFilter(query.place);
+    const range = rangeFilter(query.from, query.to);
 
     const rows =
       query.direction === 'past'
@@ -377,6 +399,8 @@ export class PrismaVerseRepository
                 WHERE vt.verse_id = v.id AND vt.tag_id = ANY(${tagFilter}::uuid[])
               ) = ${tagFilter === null ? 0 : tagFilter.length})
               AND ${text}
+              AND ${place}
+              AND ${range}
             ORDER BY v.timeline_years DESC, v.id DESC
             LIMIT ${limit}
           `
@@ -400,6 +424,8 @@ export class PrismaVerseRepository
                 WHERE vt.verse_id = v.id AND vt.tag_id = ANY(${tagFilter}::uuid[])
               ) = ${tagFilter === null ? 0 : tagFilter.length})
               AND ${text}
+              AND ${place}
+              AND ${range}
             ORDER BY v.timeline_years ASC, v.id ASC
             LIMIT ${limit}
           `;

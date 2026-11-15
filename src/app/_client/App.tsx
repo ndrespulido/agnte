@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Icon } from './Icon';
 import { QuickAdd } from './QuickAdd';
 import { SignIn } from './SignIn';
 import { Timeline } from './Timeline';
@@ -232,6 +233,13 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
    */
   const [searching, setSearching] = useState(false);
   const [filterText, setFilterText] = useState('');
+  // A place and a range of days narrow the timeline the same way, and live
+  // with the text: all of it shows in the bar and clears from it.
+  const [filterPlace, setFilterPlace] = useState('');
+  const [filterFrom, setFilterFrom] = useState('');
+  const [filterTo, setFilterTo] = useState('');
+  const narrowedBy =
+    filterText !== '' || filterPlace !== '' || filterFrom !== '' || filterTo !== '';
 
   /**
    * Names for the filtered tags, for the chips and the empty state.
@@ -375,7 +383,12 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
               setSearching((open) => {
                 // Closing clears, so the timeline is never narrowed by text
                 // that has nowhere on screen to be seen.
-                if (open) setFilterText('');
+                if (open) {
+                  setFilterText('');
+                  setFilterPlace('');
+                  setFilterFrom('');
+                  setFilterTo('');
+                }
                 return !open;
               })
             }
@@ -422,7 +435,7 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
           text or tags — has to be visible on the same screen as the rows it is
           hiding, and removable from there.
         */}
-        {searching || filterTagIds.length > 0 ? (
+        {searching || filterTagIds.length > 0 || narrowedBy ? (
           <div className="filter-bar">
             {searching ? (
               <input
@@ -434,6 +447,43 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
                 aria-label={s.timeline.searchPlaceholder}
                 autoFocus
               />
+            ) : null}
+
+            {/* Place and dates, offered while searching like the tag chips.
+                Each is a box with its name inside, like the form's. */}
+            {searching ? (
+              <div className="filter-fields">
+                <label className="control">
+                  <Icon name="pin" />
+                  <input
+                    value={filterPlace}
+                    onChange={(event) => setFilterPlace(event.target.value)}
+                    placeholder={s.timeline.filterPlace}
+                    aria-label={s.timeline.filterPlaceLabel}
+                    autoComplete="off"
+                  />
+                </label>
+                <label className="control">
+                  <Icon name="calendar" />
+                  <span className="control-prefix">{s.timeline.filterFrom}</span>
+                  <input
+                    type="date"
+                    value={filterFrom}
+                    max={filterTo || undefined}
+                    onChange={(event) => setFilterFrom(event.target.value)}
+                  />
+                </label>
+                <label className="control">
+                  <Icon name="calendar" />
+                  <span className="control-prefix">{s.timeline.filterTo}</span>
+                  <input
+                    type="date"
+                    value={filterTo}
+                    min={filterFrom || undefined}
+                    onChange={(event) => setFilterTo(event.target.value)}
+                  />
+                </label>
+              </div>
             ) : null}
 
             <div className="filter-chips">
@@ -481,13 +531,16 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
                 : null}
             </div>
 
-            {filterTagIds.length > 0 || filterText !== '' ? (
+            {filterTagIds.length > 0 || narrowedBy ? (
               <button
                 type="button"
                 className="quiet filter-clear"
                 onClick={() => {
                   setFilterTagIds([]);
                   setFilterText('');
+                  setFilterPlace('');
+                  setFilterFrom('');
+                  setFilterTo('');
                 }}
               >
                 {s.timeline.clear}
@@ -502,6 +555,9 @@ export function App({ googleEnabled }: { googleEnabled: boolean }) {
           tagIds={filterTagIds}
           tagLabels={filterLabels}
           text={filterText}
+          place={filterPlace}
+          from={filterFrom}
+          to={filterTo}
           onFilterTag={(tagId) =>
             setFilterTagIds((current) => toggleFilterTag(current, tagId))
           }

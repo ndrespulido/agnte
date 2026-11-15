@@ -113,6 +113,9 @@ export function Timeline({
   tagIds = [],
   tagLabels = [],
   text = '',
+  place = '',
+  from = '',
+  to = '',
   onFilterTag,
 }: {
   /** Reports the date of whatever is under the sticky header. */
@@ -132,6 +135,10 @@ export function Timeline({
   tagLabels?: readonly string[];
   /** Free text, narrowing the same timeline (§8.2). Blank is no filter. */
   text?: string;
+  /** Narrow to a place, and to a range of days (`YYYY-MM-DD`, both included). */
+  place?: string;
+  from?: string;
+  to?: string;
   /** A tag on a row was tapped. */
   onFilterTag?: (tagId: string) => void;
   /**
@@ -185,6 +192,14 @@ export function Timeline({
     const timer = setTimeout(() => setSettledText(text), 250);
     return () => clearTimeout(timer);
   }, [text]);
+  // The place is typed text too, so it settles the same way. The dates are
+  // picked, not typed, and need no wait.
+  const [settledPlace, setSettledPlace] = useState(place);
+  useEffect(() => {
+    const timer = setTimeout(() => setSettledPlace(place), 250);
+    return () => clearTimeout(timer);
+  }, [place]);
+  const narrowed = settledPlace.trim() !== '' || from !== '' || to !== '';
 
   /**
    * Whether the shared catalogue belongs on screen at all right now.
@@ -196,7 +211,7 @@ export function Timeline({
    * also means clearing the filter brings the catalogue straight back rather
    * than refetching it.
    */
-  const withCatalogue = showsCatalogue(tags, settledText);
+  const withCatalogue = showsCatalogue(tags, settledText, narrowed);
 
   const [past, setPast] = useState<VerseView[]>([]);
   const [future, setFuture] = useState<VerseView[]>([]);
@@ -230,6 +245,9 @@ export function Timeline({
         limit: PAGE,
         tagIds: tags,
         text: settledText,
+        place: settledPlace,
+        from,
+        to,
       }),
       fetchTimeline({
         anchor,
@@ -238,6 +256,9 @@ export function Timeline({
         limit: PAGE,
         tagIds: tags,
         text: settledText,
+        place: settledPlace,
+        from,
+        to,
       }),
     ])
       .then(([back, forward]) => {
@@ -267,7 +288,7 @@ export function Timeline({
     };
     // `key` and not the array itself: a new `[]` every render would re-run this
     // on every render, which is a refetch loop rather than a filter.
-  }, [anchor, tags, settledText]);
+  }, [anchor, tags, settledText, settledPlace, from, to]);
 
   /**
    * Where the today mark was on screen before older rows went in above it.
@@ -401,6 +422,9 @@ export function Timeline({
         limit: PAGE,
         tagIds: tags,
         text: settledText,
+        place: settledPlace,
+        from,
+        to,
       });
       // Older rows go in *above* what is being read, so the scroll position
       // has to be put back. Measured here rather than in the layout effect:
@@ -416,7 +440,18 @@ export function Timeline({
     } finally {
       setLoading(false);
     }
-  }, [anchor, pastCursor, loadCatalogue, tags, withCatalogue, settledText, holdPosition]);
+  }, [
+    anchor,
+    pastCursor,
+    loadCatalogue,
+    tags,
+    withCatalogue,
+    settledText,
+    settledPlace,
+    from,
+    to,
+    holdPosition,
+  ]);
 
   const loadFuture = useCallback(async () => {
     if (futureCursor === null) return;
@@ -430,6 +465,9 @@ export function Timeline({
         limit: PAGE,
         tagIds: tags,
         text: settledText,
+        place: settledPlace,
+        from,
+        to,
       });
 
       // Appended below the fold — nothing moves, so no anchoring needed.
@@ -442,7 +480,7 @@ export function Timeline({
     } finally {
       setLoading(false);
     }
-  }, [anchor, futureCursor, tags, settledText]);
+  }, [anchor, futureCursor, tags, settledText, settledPlace, from, to]);
 
   /**
    * The column, top to bottom: farthest future first, then today, then back
@@ -721,7 +759,11 @@ export function Timeline({
   }
 
   if (!loading && verses.length === 0) {
-    return <p className="notice">{emptyMessage(tagIds, tagLabels, settledText, s)}</p>;
+    return (
+      <p className="notice">
+        {emptyMessage(tagIds, tagLabels, settledText, s, narrowed)}
+      </p>
+    );
   }
 
   return (

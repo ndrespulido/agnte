@@ -1410,6 +1410,21 @@ are a swipeable strip with the next one peeking at the edge, and a tap opens
 a full-screen viewer that swipes between them — both are the browser's own
 scroll-snap, with no gesture code.
 
+**Place and date-range filters.** The search bar gains a place field and a
+From/To pair, narrowing the same page the text and tags do: `place` is a
+substring of the location (case and accents ignored, `%` and `_` literal),
+and `from`/`to` are days with the last day included — made exclusive once, in
+the route, so no client does the arithmetic. A verse is in a range when it
+overlaps it (a stay that began before `from` and runs into it counts);
+deep-time and undated verses are never in one. Everything that narrows the
+timeline clears together, and the bar stays up while any of it is set.
+**Place is still a text column**, not a structured location: there is no
+coordinate, no radius search and no "near here" — that needs the place
+provider's identifier stored with the verse, which is a decision (a second
+metered call per save) and is not made. Known limit: a date range reads
+moments in UTC while the timeline displays them in the reader's zone, so a
+verse within hours of a range boundary can sit on the other side of it.
+
 Not built: **transcription of voice notes** (decided, but it is the second
 metered dependency and needs a provider, a key and the daily cap of §12.5
 before any code), stripping metadata from non-image files on erasure, video

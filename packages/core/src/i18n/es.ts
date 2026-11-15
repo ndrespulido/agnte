@@ -228,6 +228,11 @@ export const es: Strings = {
   timeline: {
     search: 'Buscar',
     searchPlaceholder: 'Buscar en la línea de tiempo',
+    filterPlace: 'Lugar',
+    filterFrom: 'Desde',
+    filterTo: 'Hasta',
+    nothingMatchesFilters: 'Nada coincide con esos filtros.',
+    filterPlaceLabel: 'Filtrar por lugar',
     clear: 'Limpiar',
     stopFilteringBy: (tag: string) => `Dejar de filtrar por ${tag}`,
     addAVerse: 'Añadir un verso',

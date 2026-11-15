@@ -228,6 +228,11 @@ export const fr: Strings = {
   timeline: {
     search: 'Rechercher',
     searchPlaceholder: 'Rechercher dans la chronologie',
+    filterPlace: 'Lieu',
+    filterFrom: 'Du',
+    filterTo: 'Au',
+    nothingMatchesFilters: 'Rien ne correspond à ces filtres.',
+    filterPlaceLabel: 'Filtrer par lieu',
     clear: 'Effacer',
     stopFilteringBy: (tag: string) => `Ne plus filtrer par ${tag}`,
     addAVerse: 'Ajouter un verset',

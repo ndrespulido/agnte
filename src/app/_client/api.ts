@@ -77,6 +77,11 @@ export function fetchTimeline(options: {
   tagIds?: readonly string[];
   /** Free text, narrowing the same timeline (§8.2). */
   text?: string | null;
+  /** Location contains this, ignoring case and accents. */
+  place?: string | null;
+  /** Days, `YYYY-MM-DD`, both included. Either may be absent. */
+  from?: string | null;
+  to?: string | null;
   limit?: number;
 }): Promise<TimelinePage> {
   const params = new URLSearchParams({
@@ -87,6 +92,9 @@ export function fetchTimeline(options: {
   if (options.cursor) params.set('cursor', options.cursor);
   for (const tag of options.tagIds ?? []) params.append('tag', tag);
   if (options.text) params.set('q', options.text);
+  if (options.place?.trim()) params.set('place', options.place.trim());
+  if (options.from) params.set('from', options.from);
+  if (options.to) params.set('to', options.to);
 
   return authedFetch(`/v1/timeline?${params.toString()}`).then((r) =>
     json<TimelinePage>(r),

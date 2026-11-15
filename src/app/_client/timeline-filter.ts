@@ -29,8 +29,11 @@ import type { Strings } from '@agnte/core';
  *
  * Unfiltered, it stays exactly as it was.
  */
-export const showsCatalogue = (tagIds: readonly string[], text = ''): boolean =>
-  tagIds.length === 0 && text.trim() === '';
+export const showsCatalogue = (
+  tagIds: readonly string[],
+  text = '',
+  narrowed = false,
+): boolean => tagIds.length === 0 && text.trim() === '' && !narrowed;
 
 /**
  * Adds or removes a tag from the filter.
@@ -62,10 +65,14 @@ export function emptyMessage(
   labels: readonly string[],
   text: string,
   s: Strings,
+  /** A place or a date range is narrowing the timeline. */
+  narrowed = false,
 ): string {
   const typed = text.trim();
 
-  if (tagIds.length === 0 && typed === '') return s.timeline.empty;
+  if (tagIds.length === 0 && typed === '') {
+    return narrowed ? s.timeline.nothingMatchesFilters : s.timeline.empty;
+  }
 
   // Named rather than counted: "Nothing under 2 tags" makes someone go back and
   // look at the chips to find out which two. The joining word comes from the

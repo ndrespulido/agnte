@@ -2271,6 +2271,19 @@ button.danger {
   border-bottom: var(--hairline) solid var(--color-glass-edge);
 }
 
+/* Place and the two dates: one row where there is room, stacked where not. */
+.filter-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: var(--space-sm);
+}
+
+.filter-fields .control {
+  min-height: var(--size-min-tap-target);
+  padding: 0 var(--space-sm);
+  gap: var(--space-xs);
+}
+
 .filter-clear {
   align-self: flex-end;
   font-size: 0.85rem;
@@ -2330,9 +2343,18 @@ button.danger {
   color: var(--color-ink);
   background: var(--color-paper);
   border: var(--hairline) solid var(--color-rule);
-  border-radius: var(--radius-sm);
-  padding: var(--space-sm);
+  border-radius: var(--radius-pill);
+  padding: var(--space-sm) var(--space-lg);
   min-height: var(--size-min-tap-target);
+  transition:
+    border-color var(--motion-fast) ease-out,
+    box-shadow var(--motion-fast) ease-out;
+}
+
+.filter-search:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent);
 }
 
 /*

@@ -224,6 +224,11 @@ export const en = {
   timeline: {
     search: 'Search',
     searchPlaceholder: 'Search the timeline',
+    filterPlace: 'Place',
+    filterFrom: 'From',
+    filterTo: 'To',
+    nothingMatchesFilters: 'Nothing matches those filters.',
+    filterPlaceLabel: 'Filter by place',
     clear: 'Clear',
     stopFilteringBy: (tag: string) => `Stop filtering by ${tag}`,
     addAVerse: 'Add a verse',
