@@ -97,6 +97,7 @@ export interface ReminderVerseFields {
   tagIds: string[];
   xp: string;
   eventStart: string;
+  eventPrecision: 'minute';
 }
 
 /**
@@ -116,5 +117,7 @@ export function reminderVerseFields(input: {
     tagIds: [...input.tagIds],
     xp: input.title.trim(),
     eventStart: input.fireAt,
+    // A reminder is a moment by definition — it fires at a time.
+    eventPrecision: 'minute',
   };
 }

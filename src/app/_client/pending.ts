@@ -65,6 +65,8 @@ function asVerse(entry: OutboxEntry): VerseView | null {
     id: verseId,
     eventStart: body.eventStart ?? null,
     eventEnd: body.eventEnd ?? null,
+    // Absent on a write queued by an older build; `placementOf` infers it.
+    eventPrecision: body.eventPrecision ?? null,
     deepTimeYears: null,
     location: body.location ?? null,
     rating: body.rating ?? null,
@@ -136,6 +138,10 @@ export function withPending(
       rating: body.rating === undefined ? current.rating : body.rating,
       eventStart: body.eventStart === undefined ? current.eventStart : body.eventStart,
       eventEnd: body.eventEnd === undefined ? current.eventEnd : body.eventEnd,
+      eventPrecision:
+        body.eventPrecision === undefined
+          ? (current.eventPrecision ?? null)
+          : body.eventPrecision,
       properties: body.properties ?? current.properties,
       // A verse that is still new stays new: it has never been stored, so
       // calling it edited would imply there is a stored version to compare to.

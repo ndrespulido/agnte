@@ -1,5 +1,6 @@
 'use client';
 
+import { serverSaid } from './locale';
 import { uuidv7 } from '@/shared/kernel/id';
 import { authedFetch } from './session';
 import { tagLabelOf, type TagLabel } from './outbox';
@@ -10,6 +11,12 @@ export interface VerseView {
   id: string;
   eventStart: string | null;
   eventEnd: string | null;
+  /**
+   * Whether the two fields above are a calendar day or a real moment (§2.1).
+   * Optional because a page cached before the field existed does not carry it;
+   * `placementOf` infers it the way the server's backfill did.
+   */
+  eventPrecision?: 'date' | 'minute' | null;
   deepTimeYears: number | null;
   location: string | null;
   rating: number | null;
@@ -45,9 +52,9 @@ export interface TagView {
 async function json<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as {
-      error?: { message?: string };
+      error?: { code?: string; message?: string };
     } | null;
-    throw new Error(body?.error?.message ?? `Request failed (${response.status}).`);
+    throw new Error(serverSaid(body) ?? `Request failed (${response.status}).`);
   }
   return (await response.json()) as T;
 }
@@ -137,6 +144,7 @@ export interface NewVerse {
   rating?: number | null;
   eventStart?: string | null;
   eventEnd?: string | null;
+  eventPrecision?: 'date' | 'minute' | null;
   visibility?: string | null;
   properties?: Record<string, string>;
   mediaIds?: string[];
@@ -252,6 +260,7 @@ export interface VerseEdit {
   rating?: number | null;
   eventStart?: string | null;
   eventEnd?: string | null;
+  eventPrecision?: 'date' | 'minute' | null;
   visibility?: string | null;
   properties?: Record<string, string>;
   mediaIds?: string[];
@@ -545,10 +554,10 @@ export async function requestExport(): Promise<ExportRequested> {
 
   if (response.status === 429) {
     const body = (await response.json().catch(() => null)) as {
-      error?: { message?: string };
+      error?: { code?: string; message?: string };
     } | null;
     throw new ExportTooSoon(
-      body?.error?.message ?? 'You can ask for one copy a day. Try again tomorrow.',
+      serverSaid(body) ?? 'You can ask for one copy a day. Try again tomorrow.',
     );
   }
 

@@ -16,6 +16,82 @@ import type { Strings } from './en';
 const decimal = (n: string): string => n.replace('.', ',');
 
 export const es: Strings = {
+  /**
+   * API failures, by the stable code the server sends (`error.code`).
+   *
+   * Only codes a person can reach from the screen. Anything not listed falls
+   * back to the server's own English sentence — see `serverSaid`.
+   */
+  errors: {
+    'identity.invalid_credentials': 'Ese correo y esa contraseña no coinciden.',
+    'identity.email_invalid': 'Eso no parece una dirección de correo.',
+    'identity.password_too_short': 'Esa contraseña es demasiado corta.',
+    'identity.password_too_long': 'Esa contraseña es demasiado larga.',
+    'identity.verification_token_invalid': 'Ese enlace de verificación no es válido.',
+    'identity.verification_token_expired':
+      'Ese enlace de verificación ha caducado. Regístrate de nuevo para recibir otro.',
+    'identity.verification_token_already_used':
+      'Ese enlace de verificación ya se usó. Prueba a iniciar sesión.',
+    'identity.reset_token_invalid': 'Ese enlace de restablecimiento no es válido.',
+    'identity.reset_token_expired':
+      'Ese enlace de restablecimiento ha caducado. Pide uno nuevo.',
+    'identity.reset_token_already_used':
+      'Ese enlace de restablecimiento ya se usó. Pide uno nuevo.',
+    'identity.session_revoked': 'Se ha cerrado tu sesión. Inicia sesión de nuevo.',
+    'identity.refresh_token_invalid': 'Tu sesión ha terminado. Inicia sesión de nuevo.',
+    'identity.oauth_email_unverified': 'Google no ha verificado esa dirección de correo.',
+    'identity.oauth_exchange_failed':
+      'No se pudo completar el inicio de sesión con Google.',
+    'identity.oauth_state_invalid':
+      'Ese inicio de sesión con Google caducó. Empieza de nuevo.',
+    unauthenticated: 'Tu sesión ha terminado. Inicia sesión de nuevo.',
+    rate_limited: 'Demasiadas solicitudes. Inténtalo de nuevo en un momento.',
+    'verse.no_tags': 'Un verso necesita al menos una etiqueta.',
+    'verse.not_found': 'Ese verso ya no existe.',
+    'verse.forbidden': 'No puedes cambiar eso.',
+    'verse.version_conflict':
+      'Esto se cambió en otro lugar. Recarga e inténtalo de nuevo.',
+    'verse.date_invalid': 'Esa fecha no es válida.',
+    'verse.event_precision_invalid': 'Esa fecha y esa hora no encajan.',
+    'verse.event_range_inverted': 'El final es anterior al inicio.',
+    'verse.time_conflict': 'Usa una fecha o tiempo profundo, no ambos.',
+    'verse.deep_time_out_of_range':
+      'Eso queda más lejos de lo que alcanza la línea de tiempo.',
+    'verse.rating_out_of_range': 'La valoración va de 0 a 10.',
+    'verse.xp_too_long': 'Esa nota es demasiado larga.',
+    'verse.location_invalid': 'Ese lugar no es válido.',
+    'verse.property_key_invalid':
+      'El nombre de una propiedad puede llevar letras, números y guiones.',
+    'verse.property_value_too_long': 'El valor de esa propiedad es demasiado largo.',
+    'verse.too_many_properties': 'Son demasiadas propiedades para un verso.',
+    'verse.media_not_found': 'Una de esas imágenes ya no está.',
+    'verse.visibility_invalid': 'Esa visibilidad no es una de las opciones.',
+    'verse.search_query_invalid': 'Esa búsqueda no se puede realizar.',
+    'verse.tag_name_invalid':
+      'El nombre de una etiqueta puede llevar minúsculas, números y guiones.',
+    'verse.tag_already_exists': 'Ya tienes una etiqueta con ese nombre.',
+    'verse.tag_not_found': 'Esa etiqueta ya no existe.',
+    'verse.tag_shortcut_invalid': 'Ese atajo no es válido.',
+    'verse.tag_shortcut_taken': 'Otra etiqueta ya usa ese atajo.',
+    'verse.share_invalid': 'Eso no se puede compartir así.',
+    'verse.share_not_permitted': 'Solo quien lo creó puede compartirlo.',
+    'media.content_type_not_allowed': 'Ese tipo de archivo no se puede añadir.',
+    'media.too_large': 'Ese archivo es demasiado grande.',
+    'media.not_found': 'Esa imagen ya no está.',
+    'media.storage_unavailable':
+      'El almacenamiento no responde. Inténtalo de nuevo en un momento.',
+    'media.upload_mismatch': 'Esa subida no llegó completa. Inténtalo de nuevo.',
+    'notifications.invalid_reminder': 'Ese recordatorio no es válido.',
+    'notifications.invalid_recurrence': 'Esa regla de repetición no es válida.',
+    'notifications.invalid_quiet_hours':
+      'Las horas de silencio necesitan inicio, fin y zona horaria, o ninguno de los tres.',
+    'places.unavailable': 'No se pudo contactar con el servicio de lugares.',
+    'privacy.export_too_soon':
+      'Puedes pedir una copia al día. Inténtalo de nuevo mañana.',
+    'privacy.export_expired': 'Esa exportación ya no está disponible.',
+    'privacy.no_export': 'No hay ninguna exportación lista para descargar.',
+  },
+
   locale: {
     heading: 'Idioma',
   },
@@ -133,6 +209,10 @@ export const es: Strings = {
     when: 'Cuándo',
     starts: 'Empieza',
     ends: 'Termina',
+    startTime: 'Hora de inicio, opcional',
+    endTime: 'Hora de fin',
+    endNeedsTime: 'Añade una hora de fin, o borra la hora de inicio.',
+    timeNeedsDate: 'Una hora necesita una fecha.',
     rating: 'Valoración',
     ratingPlaceholder: '0–10',
     visibility: 'Visibilidad',

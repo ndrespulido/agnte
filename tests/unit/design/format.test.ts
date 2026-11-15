@@ -1,15 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import {
   deepTimeLabel,
-  fromDateTimeInput,
+  fromDateAndTime,
   splitTagNames,
   headerLabel,
   placementOf,
   sectionKey,
   timeLabel,
-  toDateTimeInput,
+  timelinePosition,
+  toDateInput,
+  toTimeInput,
 } from '@/app/_client/format';
 import { en, es, fr, zh } from '@/shared/i18n';
+
+/*
+ * Pinned, because a moment is now read in the reader's zone (§2.1) and these
+ * cases state their expectations in UTC. What changes under another zone is
+ * its own file: `event-precision-zones.test.ts`.
+ */
+process.env.TZ = 'UTC';
 
 const NOW = new Date('2026-09-08T12:00:00.000Z');
 
@@ -180,10 +189,30 @@ describe('timeLabel', () => {
     expect(timeLabel(verse({ eventStart: '2026-03-01T21:35:00Z' }))).toBe('21:35');
   });
 
-  it('shows nothing at midnight, which means "no time given"', () => {
-    // A date-only entry arrives as midnight. Printing "00:00" would invent a
-    // precision the user did not supply.
+  it('shows nothing for a day, which has no time to show', () => {
+    expect(
+      timeLabel(verse({ eventStart: '2026-03-01T00:00:00Z', eventPrecision: 'date' })),
+    ).toBe(null);
+  });
+
+  /**
+   * The case the old rule could not express. "Midnight means no time given"
+   * was a guess made from the value; a new year's toast at 00:00 is a moment,
+   * and now that the precision says so, it is shown as one.
+   */
+  it('shows midnight when midnight is what was meant', () => {
+    expect(
+      timeLabel(verse({ eventStart: '2027-01-01T00:00:00Z', eventPrecision: 'minute' })),
+    ).toBe('00:00');
+  });
+
+  it('infers a day from midnight UTC when the precision is absent', () => {
+    // A verse cached before the column existed. Inferring matches the
+    // migration's backfill, so the cache and the server agree.
     expect(timeLabel(verse({ eventStart: '2026-03-01T00:00:00Z' }))).toBe(null);
+    expect(
+      timeLabel(verse({ eventStart: '2026-03-01T00:00:00Z', eventPrecision: null })),
+    ).toBe(null);
   });
 
   it('has nothing to say about deep time', () => {
@@ -192,39 +221,79 @@ describe('timeLabel', () => {
 });
 
 /**
- * The pair the edit sheet writes dates through.
+ * The fields the edit sheet writes dates through: a date, and a time that may
+ * be left empty.
  *
  * The round trip is the property that matters: what the sheet shows for a
- * stored instant must be the instant it sends back when nothing was typed.
- * Both halves work in UTC on purpose — see the doc comment on
- * `toDateTimeInput` for the cost of that, and why matching the display layer
- * beats being independently right.
+ * stored verse must be what it sends back when nothing was typed — value *and*
+ * precision. Zone behaviour is in `event-precision-zones.test.ts`.
  */
-describe('the datetime-local pair', () => {
-  it('round-trips an instant unchanged', () => {
-    const iso = '2026-03-01T14:30:00.000Z';
-    expect(fromDateTimeInput(toDateTimeInput(iso))).toBe(iso);
+describe('the date and time fields', () => {
+  it('reads an empty time as a day, stored at midnight UTC', () => {
+    expect(fromDateAndTime('2026-03-01', '')).toEqual({
+      iso: '2026-03-01T00:00:00.000Z',
+      precision: 'date',
+    });
   });
 
-  it('reads and writes in UTC, not the browser zone', () => {
-    // The whole point: were this local, a machine in Madrid would render
-    // 16:30 here and the timeline (which reads UTC parts) would then disagree
-    // with the field the person just typed into.
-    expect(toDateTimeInput('2026-03-01T14:30:00.000Z')).toBe('2026-03-01T14:30');
-    expect(fromDateTimeInput('2026-03-01T14:30')).toBe('2026-03-01T14:30:00.000Z');
+  it('reads a time as a moment', () => {
+    expect(fromDateAndTime('2026-03-01', '14:30')).toEqual({
+      iso: '2026-03-01T14:30:00.000Z',
+      precision: 'minute',
+    });
+  });
+
+  it('round-trips a day and a moment unchanged', () => {
+    for (const [date, time] of [
+      ['2026-03-01', ''],
+      ['2026-03-01', '14:30'],
+      // Midnight typed on purpose stays a moment, not a day.
+      ['2026-03-01', '00:00'],
+    ] as const) {
+      const stored = fromDateAndTime(date, time)!;
+      expect(toDateInput(stored.iso, stored.precision)).toBe(date);
+      expect(toTimeInput(stored.iso, stored.precision)).toBe(time);
+    }
   });
 
   it('treats empty as no date in both directions', () => {
     // Not the same as "leave it alone": the sheet sends this null explicitly
     // so that clearing a date actually clears it.
-    expect(toDateTimeInput(null)).toBe('');
-    expect(fromDateTimeInput('')).toBe(null);
-    expect(fromDateTimeInput('   ')).toBe(null);
+    expect(toDateInput(null, null)).toBe('');
+    expect(toTimeInput(null, null)).toBe('');
+    expect(fromDateAndTime('', '')).toBe(null);
+    expect(fromDateAndTime('   ', '')).toBe(null);
+  });
+
+  it('will not put a time on a day that was not given', () => {
+    // Inventing today would be a guess; the sheet refuses this with a message.
+    expect(fromDateAndTime('', '14:30')).toBe(null);
   });
 
   it('answers empty rather than throwing on something unparseable', () => {
-    expect(toDateTimeInput('not a date')).toBe('');
-    expect(fromDateTimeInput('not a date')).toBe(null);
+    expect(toDateInput('not a date', 'date')).toBe('');
+    expect(toTimeInput('not a date', 'minute')).toBe('');
+    expect(fromDateAndTime('not a date', '')).toBe(null);
+    expect(fromDateAndTime('2026-02-31', '')).toBe(null);
+    expect(fromDateAndTime('2026-03-01', 'noon')).toBe(null);
+  });
+});
+
+describe('timelinePosition', () => {
+  it('puts a day ahead of everything timed within it', () => {
+    const day = timelinePosition({
+      eventStart: '2026-03-01T00:00:00.000Z',
+      eventPrecision: 'date',
+      deepTimeYears: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    const morning = timelinePosition({
+      eventStart: '2026-03-01T00:01:00.000Z',
+      eventPrecision: 'minute',
+      deepTimeYears: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    expect(day).toBeLessThan(morning);
   });
 });
 

@@ -19,18 +19,93 @@ import type { Strings } from '@/shared/i18n';
  * label it needs is one of two quite different things: a date, or a distance.
  */
 export type Placement =
-  { kind: 'date'; at: Date } | { kind: 'deep-time'; years: number } | { kind: 'undated' };
+  | { kind: 'date'; at: Date; precision: EventPrecision }
+  | { kind: 'deep-time'; years: number }
+  | { kind: 'undated' };
 
-export function placementOf(verse: {
+/**
+ * Whether a verse's date is a calendar day or a real moment (architecture.md
+ * §2.1). The same two values the server stores; a copy for the reason given on
+ * `timelinePosition` below.
+ */
+export type EventPrecision = 'date' | 'minute';
+
+/** What the functions here need of a verse to place it. */
+export interface Placeable {
   eventStart: string | null;
+  /** Absent on rows cached or queued before the field existed; see `placementOf`. */
+  eventPrecision?: EventPrecision | null;
   deepTimeYears: number | null;
   createdAt: string;
-}): Placement {
+}
+
+const isUtcMidnight = (at: Date): boolean =>
+  at.getUTCHours() === 0 &&
+  at.getUTCMinutes() === 0 &&
+  at.getUTCSeconds() === 0 &&
+  at.getUTCMilliseconds() === 0;
+
+export function placementOf(verse: Placeable): Placement {
   if (verse.deepTimeYears !== null) {
     return { kind: 'deep-time', years: verse.deepTimeYears };
   }
-  if (verse.eventStart !== null) return { kind: 'date', at: new Date(verse.eventStart) };
-  return { kind: 'undated' };
+  if (verse.eventStart === null) return { kind: 'undated' };
+
+  const at = new Date(verse.eventStart);
+  /*
+   * Inferred when absent, by the server's own rule: midnight UTC is a day,
+   * anything else is a moment. A page cached by the service worker last month
+   * and a write still sitting in the offline queue both predate the field, and
+   * both must keep meaning what they meant.
+   */
+  const precision = verse.eventPrecision ?? (isUtcMidnight(at) ? 'date' : 'minute');
+  return { kind: 'date', at, precision };
+}
+
+/**
+ * The calendar day and clock time a placement reads as — **to this reader**.
+ *
+ * The one place the two kinds of date are told apart, and the fix for a bug
+ * this file carried from the start: everything used to be read with UTC parts.
+ *
+ * - A **day** ("1 March") has no zone. It is stored as midnight UTC and read
+ *   back with UTC parts, so it is 1 March in Madrid, in Recife and in Tokyo.
+ *   Converting it would hand a reader west of Greenwich the day before.
+ * - A **moment** happened once and is read in the reader's own zone. A
+ *   reminder set for 17:00 in Madrid used to show as 15:00 on the timeline —
+ *   the same verse, two times, in one app.
+ */
+interface CalendarParts {
+  year: number;
+  /** 0-based, as `Date` has it. */
+  month: number;
+  date: number;
+  /** Sunday is 0. */
+  weekday: number;
+  hours: number;
+  minutes: number;
+}
+
+function partsOf(placement: Extract<Placement, { kind: 'date' }>): CalendarParts {
+  const at = placement.at;
+  if (placement.precision === 'date') {
+    return {
+      year: at.getUTCFullYear(),
+      month: at.getUTCMonth(),
+      date: at.getUTCDate(),
+      weekday: at.getUTCDay(),
+      hours: 0,
+      minutes: 0,
+    };
+  }
+  return {
+    year: at.getFullYear(),
+    month: at.getMonth(),
+    date: at.getDate(),
+    weekday: at.getDay(),
+    hours: at.getHours(),
+    minutes: at.getMinutes(),
+  };
 }
 
 /** A Julian year in milliseconds, as the domain's timeline scale defines it. */
@@ -48,12 +123,29 @@ const TIMELINE_EPOCH_MS = Date.UTC(2000, 0, 1);
  * disagree, a locally queued verse sorts into the wrong spot and snaps
  * elsewhere once it syncs, which is the visible symptom to look for.
  */
-export function timelinePosition(verse: {
-  eventStart: string | null;
-  deepTimeYears: number | null;
-  createdAt: string;
-}): number {
+export function timelinePosition(verse: Placeable): number {
   if (verse.deepTimeYears !== null) return verse.deepTimeYears;
+
+  const placement = placementOf(verse);
+  if (placement.kind === 'date' && placement.precision === 'date') {
+    /*
+     * A day sorts at the start of that day **where the reader is**.
+     *
+     * This is the one place the client deliberately disagrees with the
+     * server's `timeline_years`, which has to use the stored instant because
+     * it cannot know the reader's zone. Stored, "16 July" is midnight UTC —
+     * and for a reader in Recife that instant is 21:00 on the 15th, so it
+     * would sort into the middle of the 15th's timed verses and split that
+     * day's section in two. Placing it at local midnight puts a day ahead of
+     * everything timed within it, in every zone. The server's order is still
+     * what pages are fetched by; this only arranges what has been loaded.
+     */
+    const { year, month, date } = partsOf(placement);
+    return (
+      (new Date(year, month, date).getTime() - TIMELINE_EPOCH_MS) / MS_PER_JULIAN_YEAR
+    );
+  }
+
   const at = new Date(verse.eventStart ?? verse.createdAt);
   return (at.getTime() - TIMELINE_EPOCH_MS) / MS_PER_JULIAN_YEAR;
 }
@@ -68,10 +160,10 @@ export function timelinePosition(verse: {
 export function sectionKey(placement: Placement): string {
   switch (placement.kind) {
     case 'date': {
-      const at = placement.at;
-      const month = String(at.getUTCMonth() + 1).padStart(2, '0');
-      const day = String(at.getUTCDate()).padStart(2, '0');
-      return `${at.getUTCFullYear()}-${month}-${day}`;
+      const parts = partsOf(placement);
+      const month = String(parts.month + 1).padStart(2, '0');
+      const day = String(parts.date).padStart(2, '0');
+      return `${parts.year}-${month}-${day}`;
     }
     case 'deep-time':
       return `deep:${magnitude(placement.years)}`;
@@ -100,22 +192,29 @@ export function headerLabel(placement: Placement, now: Date, s: Strings): string
     case 'deep-time':
       return deepTimeLabel(placement.years, s);
     case 'date': {
-      const days = calendarDaysBetween(now, placement.at);
+      const parts = partsOf(placement);
+
+      // "Today" is the reader's today. Their calendar day is compared with the
+      // verse's calendar day as plain dates, so neither is shifted by a zone.
+      const days = Math.round(
+        (Date.UTC(parts.year, parts.month, parts.date) -
+          Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())) /
+          86_400_000,
+      );
       if (days === 0) return s.common.today;
       if (days === 1) return s.common.tomorrow;
       if (days === -1) return s.common.yesterday;
 
-      const at = placement.at;
       // The table arranges the parts, rather than being handed a finished
       // string: Spanish needs "lunes, 3 de marzo" and Chinese runs
       // largest-unit-first, and neither is reachable by translating words in
       // an English order.
-      const day = s.dates.days[at.getUTCDay()] ?? '';
-      const month = s.dates.months[at.getUTCMonth()] ?? '';
+      const day = s.dates.days[parts.weekday] ?? '';
+      const month = s.dates.months[parts.month] ?? '';
 
-      return at.getUTCFullYear() === now.getUTCFullYear()
-        ? s.dates.dayMonth(day, at.getUTCDate(), month)
-        : s.dates.dayMonthYear(day, at.getUTCDate(), month, at.getUTCFullYear());
+      return parts.year === now.getFullYear()
+        ? s.dates.dayMonth(day, parts.date, month)
+        : s.dates.dayMonthYear(day, parts.date, month, parts.year);
     }
   }
 }
@@ -141,13 +240,6 @@ export function dayLabel(at: Date, s: Strings): string {
     s.dates.months[at.getUTCMonth()] ?? '',
     at.getUTCFullYear(),
   );
-}
-
-/** Whole calendar days between two instants, in UTC. */
-function calendarDaysBetween(from: Date, to: Date): number {
-  const startOf = (d: Date) =>
-    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  return Math.round((startOf(to) - startOf(from)) / 86_400_000);
 }
 
 /**
@@ -221,67 +313,102 @@ export function splitTagNames(input: string): string[] {
 }
 
 /**
- * An ISO instant as an `<input type="datetime-local">` value, and back.
+ * A verse's date as the form shows it: a date field, and a time that may be
+ * left empty.
  *
- * Both halves work in UTC, deliberately, because everything else on this
- * screen does: `headerLabel`, `sectionKey` and `timeLabel` all read UTC parts.
- * Converting to the browser's local zone here and not there would mean a verse
- * entered at 14:00 filing itself under a different hour — or, across midnight,
- * a different day — than the one just typed.
+ * Two fields rather than one `datetime-local`, because that control cannot say
+ * "no time" — and "no time" is most entries. The empty time *is* the precision:
+ * left blank the verse is a day, filled in it is a moment.
  *
- * The honest cost is that "14:00" means 14:00 UTC, not 14:00 where the person
- * is standing. That is a real bug for a journal, but it is the *display*
- * layer's bug and it already exists: the timeline has always rendered UTC.
- * Fixing it means changing both together, which is not this change.
+ * A day is read back with UTC parts, exactly as `partsOf` reads it, and a
+ * moment in the browser's zone. These replaced a pair that round-tripped
+ * everything through UTC, which showed back what was typed and stored the
+ * wrong instant for it: "14:00" typed in Madrid was saved as 14:00Z.
  */
-export function toDateTimeInput(iso: string | null): string {
+export function toDateInput(
+  iso: string | null,
+  precision: EventPrecision | null,
+): string {
   if (iso === null) return '';
-
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return '';
 
   const pad = (n: number) => String(n).padStart(2, '0');
-  return (
-    `${at.getUTCFullYear()}-${pad(at.getUTCMonth() + 1)}-${pad(at.getUTCDate())}` +
-    `T${pad(at.getUTCHours())}:${pad(at.getUTCMinutes())}`
-  );
+  return precision === 'date'
+    ? `${at.getUTCFullYear()}-${pad(at.getUTCMonth() + 1)}-${pad(at.getUTCDate())}`
+    : `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
 }
 
-/** Empty means "no date", which the API takes as an explicit null. */
-export function fromDateTimeInput(value: string): string | null {
-  if (value.trim() === '') return null;
+/** The time field for the same value: empty for a day. */
+export function toTimeInput(
+  iso: string | null,
+  precision: EventPrecision | null,
+): string {
+  if (iso === null || precision !== 'minute') return '';
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return '';
 
-  // `Z` rather than letting Date parse it as local: a bare "YYYY-MM-DDTHH:mm"
-  // is interpreted in the browser's zone, which is the shift this whole pair
-  // exists to avoid.
-  const at = new Date(`${value}:00.000Z`);
-  return Number.isNaN(at.getTime()) ? null : at.toISOString();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+}
+
+/**
+ * The two fields, back into what the API stores.
+ *
+ * No time: the day itself, as midnight UTC, which is what `'date'` precision
+ * requires and what makes it the same day for every reader. With a time: that
+ * wall-clock moment *where the person is*, as a real instant.
+ *
+ * Null for an empty or unparseable date. A time with no date is also null —
+ * there is no day to put it on, and inventing today would be a guess.
+ */
+export function fromDateAndTime(
+  date: string,
+  time: string,
+): { iso: string; precision: EventPrecision } | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) return null;
+
+  if (time.trim() === '') {
+    const at = new Date(`${date}T00:00:00.000Z`);
+    if (Number.isNaN(at.getTime())) return null;
+    // 31 February parses — as 3 March. A date that does not come back as
+    // itself was never a date.
+    const iso = at.toISOString();
+    return iso.startsWith(date.trim()) ? { iso, precision: 'date' } : null;
+  }
+
+  // No trailing Z: every engine reads this form as local time, which is what
+  // a clock time typed by a person means.
+  const at = new Date(`${date}T${time}`);
+  if (Number.isNaN(at.getTime())) return null;
+  if (toDateInput(at.toISOString(), 'minute') !== date.trim()) return null;
+  return { iso: at.toISOString(), precision: 'minute' };
 }
 
 /** The small line under a header: the time of day, when there is one. */
 export function timeLabel(placement: Placement): string | null {
   if (placement.kind !== 'date') return null;
 
-  const at = placement.at;
-  if (at.getUTCHours() === 0 && at.getUTCMinutes() === 0) return null;
+  // A day has no time to show. This used to be guessed from the clock reading
+  // midnight, which also hid any moment that genuinely was midnight.
+  if (placement.precision === 'date') return null;
 
-  return `${String(at.getUTCHours()).padStart(2, '0')}:${String(at.getUTCMinutes()).padStart(2, '0')}`;
+  const { hours, minutes } = partsOf(placement);
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 }
 
 /**
- * The same conversion as `toDateTimeInput`, but in the browser's own zone.
+ * An ISO instant as a `datetime-local` value, in the browser's own zone.
  *
- * Reminders are the one place the display layer's UTC convention is not
- * survivable. A verse rendered an hour off is cosmetic and the timeline has
- * always done it; a reminder is a promise to interrupt someone at a particular
- * moment, and "17:00" that fires at 19:00 because the person is in Madrid in
- * July is not a rendering quirk, it is the feature failing.
+ * The reminder form's converters. A reminder is always a moment — a promise to
+ * interrupt someone at a particular time — so it has no "day only" case and
+ * keeps the single combined control.
  *
- * So these two deliberately disagree with their UTC siblings above, and the
- * disagreement is contained to the reminder form. Quiet hours are already
- * zone-aware for the same reason (modules/notifications/domain/quiet-hours.ts);
- * having the fire time be UTC while the window around it was local would be an
- * inconsistency *inside one feature*, which is worse than one between two.
+ * These were once the odd ones out: the rest of this file read UTC parts, and
+ * reminders could not survive that ("17:00" firing at 19:00 in Madrid in July
+ * is the feature failing, not a rendering quirk). Since a verse's date learned
+ * to say whether it is a day or a moment, everything that is a moment is read
+ * this way, and the timeline agrees with the reminder screen about the time.
  */
 export function toLocalDateTimeInput(iso: string | null): string {
   if (iso === null) return '';
