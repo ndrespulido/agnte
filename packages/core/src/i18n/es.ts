@@ -43,6 +43,15 @@ export const es: Strings = {
     dayFirst: true as boolean,
   },
 
+  /** The full-screen photo viewer. */
+  photos: {
+    close: 'Cerrar',
+    previous: 'Foto anterior',
+    next: 'Foto siguiente',
+    open: 'Abrir foto',
+    position: (index: number, total: number) => `${index} / ${total}`,
+  },
+
   /** The composer bar and the card that shows what it understood. */
   composerBar: {
     attach: 'Adjuntar una foto o un archivo',
@@ -219,6 +228,11 @@ export const es: Strings = {
   timeline: {
     search: 'Buscar',
     searchPlaceholder: 'Buscar en la línea de tiempo',
+    filterPlace: 'Lugar',
+    filterFrom: 'Desde',
+    filterTo: 'Hasta',
+    nothingMatchesFilters: 'Nada coincide con esos filtros.',
+    filterPlaceLabel: 'Filtrar por lugar',
     clear: 'Limpiar',
     stopFilteringBy: (tag: string) => `Dejar de filtrar por ${tag}`,
     addAVerse: 'Añadir un verso',

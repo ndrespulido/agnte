@@ -47,6 +47,15 @@ export const en = {
     dayFirst: true as boolean,
   },
 
+  /** The full-screen photo viewer. */
+  photos: {
+    close: 'Close',
+    previous: 'Previous photo',
+    next: 'Next photo',
+    open: 'Open photo',
+    position: (index: number, total: number) => `${index} / ${total}`,
+  },
+
   /** The composer bar and the card that shows what it understood. */
   composerBar: {
     attach: 'Attach a photo or file',
@@ -215,6 +224,11 @@ export const en = {
   timeline: {
     search: 'Search',
     searchPlaceholder: 'Search the timeline',
+    filterPlace: 'Place',
+    filterFrom: 'From',
+    filterTo: 'To',
+    nothingMatchesFilters: 'Nothing matches those filters.',
+    filterPlaceLabel: 'Filter by place',
     clear: 'Clear',
     stopFilteringBy: (tag: string) => `Stop filtering by ${tag}`,
     addAVerse: 'Add a verse',

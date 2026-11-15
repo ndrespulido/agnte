@@ -428,8 +428,14 @@ button.tag:focus-visible {
   gap: var(--space-sm);
   overflow-x: auto;
   /* The row is the scroll container, so the page itself never scrolls
-     sideways however many photos a verse carries. */
+     sideways however many photos a verse carries. Snap makes it a carousel:
+     a swipe lands on a photo rather than between two. */
+  scroll-snap-type: x mandatory;
   scrollbar-width: none;
+  /* Above the stretched open button: a swipe and a tap here are for the
+     photos, not for opening the verse. */
+  position: relative;
+  z-index: 2;
 }
 
 .verse-media::-webkit-scrollbar {
@@ -437,23 +443,157 @@ button.tag:focus-visible {
 }
 
 .verse-media li {
-  flex: 0 0 auto;
-  width: 4.5rem;
-  height: 4.5rem;
-  border-radius: var(--radius-md);
+  flex: 0 0 78%;
+  height: 11rem;
+  scroll-snap-align: start;
+  border-radius: var(--radius-lg);
   overflow: hidden;
   background: var(--color-paper-raised);
   border: var(--hairline) solid var(--color-rule);
 }
 
+/* One photo has nothing to peek at, so it takes the row. */
+.verse-media.single li {
+  flex-basis: 100%;
+  height: 13rem;
+}
+
+.verse-media button {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: zoom-in;
+}
+
 .verse-media img {
   width: 100%;
   height: 100%;
-  /* Cover rather than contain: a thumbnail strip reads as a strip when the
-     tiles are the same shape, and the medium variant is what a detail view
-     will show uncropped. */
+  /* Cover rather than contain: the strip reads as a strip when the frames
+     are the same shape. The viewer is where a photo is shown uncropped. */
   object-fit: cover;
   display: block;
+}
+
+/* Uploaded, not yet thumbnailed. Left as an empty frame so the row does not
+   change shape when the variant arrives. */
+.verse-media li.pending {
+  background: var(--color-paper-raised);
+}
+
+/*
+ * The photo viewer: black, edge to edge, one photo per screen.
+ *
+ * Always dark, in both themes — a photo is judged against black, and a bone
+ * background behind it would tint every picture warm.
+ */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-sheet) + 10);
+  background: rgb(0 0 0 / 94%);
+  color: #f5f5f2;
+}
+
+.lightbox-strip {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+}
+
+.lightbox-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.lightbox-slide {
+  flex: 0 0 100%;
+  height: 100%;
+  scroll-snap-align: center;
+  scroll-snap-stop: always;
+  display: grid;
+  place-items: center;
+  padding: env(safe-area-inset-top, 0) 0 env(safe-area-inset-bottom, 0);
+}
+
+.lightbox-slide img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.lightbox-close,
+.lightbox-arrow {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: var(--size-min-tap-target);
+  height: var(--size-min-tap-target);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: rgb(255 255 255 / 12%);
+  color: inherit;
+  cursor: pointer;
+  transition: background-color var(--motion-fast) ease-out;
+}
+
+.lightbox-close:hover,
+.lightbox-arrow:hover {
+  background: rgb(255 255 255 / 22%);
+}
+
+.lightbox-close {
+  top: calc(var(--space-lg) + env(safe-area-inset-top, 0px));
+  right: var(--space-lg);
+}
+
+.lightbox-arrow {
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.lightbox-arrow.previous {
+  left: var(--space-md);
+}
+
+.lightbox-arrow.next {
+  right: var(--space-md);
+}
+
+.lightbox-arrow:disabled {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* On a phone the swipe is the control; arrows would only cover the photo. */
+@media (hover: none) {
+  .lightbox-arrow {
+    display: none;
+  }
+}
+
+.lightbox-count {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--space-lg) + env(safe-area-inset-bottom, 0px));
+  margin: 0;
+  text-align: center;
+  font-size: var(--text-small);
+  font-variant-numeric: tabular-nums;
+  color: rgb(255 255 255 / 70%);
+  pointer-events: none;
+}
+
+.sheet-delete {
+  margin-right: auto;
+  color: var(--color-failed);
 }
 
 /*
@@ -486,12 +626,6 @@ button.tag:focus-visible {
 
 .attachment-file {
   overflow-wrap: anywhere;
-}
-
-/* Uploaded, not yet thumbnailed. Left as an empty tile so the row does not
-   change width when the variant arrives. */
-.verse-media li.pending {
-  background: var(--color-paper-raised);
 }
 
 /*
@@ -2137,6 +2271,19 @@ button.danger {
   border-bottom: var(--hairline) solid var(--color-glass-edge);
 }
 
+/* Place and the two dates: one row where there is room, stacked where not. */
+.filter-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: var(--space-sm);
+}
+
+.filter-fields .control {
+  min-height: var(--size-min-tap-target);
+  padding: 0 var(--space-sm);
+  gap: var(--space-xs);
+}
+
 .filter-clear {
   align-self: flex-end;
   font-size: 0.85rem;
@@ -2196,9 +2343,18 @@ button.danger {
   color: var(--color-ink);
   background: var(--color-paper);
   border: var(--hairline) solid var(--color-rule);
-  border-radius: var(--radius-sm);
-  padding: var(--space-sm);
+  border-radius: var(--radius-pill);
+  padding: var(--space-sm) var(--space-lg);
   min-height: var(--size-min-tap-target);
+  transition:
+    border-color var(--motion-fast) ease-out,
+    box-shadow var(--motion-fast) ease-out;
+}
+
+.filter-search:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent);
 }
 
 /*

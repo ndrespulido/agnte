@@ -105,6 +105,19 @@ export interface TimelineQuery {
    * cannot disagree about what a word matches. Absent or blank is no filter.
    */
   readonly text?: string | null;
+  /**
+   * Only verses whose location contains this, ignoring case and accents.
+   * Substring like the text filter, and for the same reason: no fuzziness.
+   */
+  readonly place?: string | null;
+  /**
+   * Only verses that overlap [from, to) — `to` exclusive, so "to the 31st" is
+   * sent as the 1st. A verse overlaps when it starts before `to` and its end
+   * (or its start, for a moment) is not before `from`. Deep-time and undated
+   * verses have no place on the calendar and are never in a range.
+   */
+  readonly from?: Date | null;
+  readonly to?: Date | null;
 }
 
 export interface SearchQuery {

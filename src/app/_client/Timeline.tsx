@@ -26,6 +26,7 @@ import {
   timelinePosition,
 } from '@agnte/core';
 import { isImage, OtherMedia } from './Attachments';
+import { Lightbox } from './Lightbox';
 import { withPending, type TimelineVerse } from './pending';
 import { emptyMessage, showsCatalogue } from './timeline-filter';
 import { useStrings } from './locale';
@@ -112,12 +113,16 @@ export function Timeline({
   tagIds = [],
   tagLabels = [],
   text = '',
+  place = '',
+  from = '',
+  to = '',
   onFilterTag,
 }: {
   /** Reports the date of whatever is under the sticky header. */
   onDateChange: (label: string) => void;
   /** A row was tapped: the shell opens the detail view over the timeline. */
-  onOpen: (verseId: string) => void;
+  /** `field` is what was tapped on the row, so the editor can open on it. */
+  onOpen: (verseId: string, field?: string) => void;
   /**
    * Narrow the timeline to these tags. Empty is the whole timeline.
    *
@@ -130,6 +135,10 @@ export function Timeline({
   tagLabels?: readonly string[];
   /** Free text, narrowing the same timeline (§8.2). Blank is no filter. */
   text?: string;
+  /** Narrow to a place, and to a range of days (`YYYY-MM-DD`, both included). */
+  place?: string;
+  from?: string;
+  to?: string;
   /** A tag on a row was tapped. */
   onFilterTag?: (tagId: string) => void;
   /**
@@ -183,6 +192,14 @@ export function Timeline({
     const timer = setTimeout(() => setSettledText(text), 250);
     return () => clearTimeout(timer);
   }, [text]);
+  // The place is typed text too, so it settles the same way. The dates are
+  // picked, not typed, and need no wait.
+  const [settledPlace, setSettledPlace] = useState(place);
+  useEffect(() => {
+    const timer = setTimeout(() => setSettledPlace(place), 250);
+    return () => clearTimeout(timer);
+  }, [place]);
+  const narrowed = settledPlace.trim() !== '' || from !== '' || to !== '';
 
   /**
    * Whether the shared catalogue belongs on screen at all right now.
@@ -194,7 +211,7 @@ export function Timeline({
    * also means clearing the filter brings the catalogue straight back rather
    * than refetching it.
    */
-  const withCatalogue = showsCatalogue(tags, settledText);
+  const withCatalogue = showsCatalogue(tags, settledText, narrowed);
 
   const [past, setPast] = useState<VerseView[]>([]);
   const [future, setFuture] = useState<VerseView[]>([]);
@@ -228,6 +245,9 @@ export function Timeline({
         limit: PAGE,
         tagIds: tags,
         text: settledText,
+        place: settledPlace,
+        from,
+        to,
       }),
       fetchTimeline({
         anchor,
@@ -236,6 +256,9 @@ export function Timeline({
         limit: PAGE,
         tagIds: tags,
         text: settledText,
+        place: settledPlace,
+        from,
+        to,
       }),
     ])
       .then(([back, forward]) => {
@@ -265,7 +288,7 @@ export function Timeline({
     };
     // `key` and not the array itself: a new `[]` every render would re-run this
     // on every render, which is a refetch loop rather than a filter.
-  }, [anchor, tags, settledText]);
+  }, [anchor, tags, settledText, settledPlace, from, to]);
 
   /**
    * Where the today mark was on screen before older rows went in above it.
@@ -399,6 +422,9 @@ export function Timeline({
         limit: PAGE,
         tagIds: tags,
         text: settledText,
+        place: settledPlace,
+        from,
+        to,
       });
       // Older rows go in *above* what is being read, so the scroll position
       // has to be put back. Measured here rather than in the layout effect:
@@ -414,7 +440,18 @@ export function Timeline({
     } finally {
       setLoading(false);
     }
-  }, [anchor, pastCursor, loadCatalogue, tags, withCatalogue, settledText, holdPosition]);
+  }, [
+    anchor,
+    pastCursor,
+    loadCatalogue,
+    tags,
+    withCatalogue,
+    settledText,
+    settledPlace,
+    from,
+    to,
+    holdPosition,
+  ]);
 
   const loadFuture = useCallback(async () => {
     if (futureCursor === null) return;
@@ -428,6 +465,9 @@ export function Timeline({
         limit: PAGE,
         tagIds: tags,
         text: settledText,
+        place: settledPlace,
+        from,
+        to,
       });
 
       // Appended below the fold — nothing moves, so no anchoring needed.
@@ -440,7 +480,7 @@ export function Timeline({
     } finally {
       setLoading(false);
     }
-  }, [anchor, futureCursor, tags, settledText]);
+  }, [anchor, futureCursor, tags, settledText, settledPlace, from, to]);
 
   /**
    * The column, top to bottom: farthest future first, then today, then back
@@ -719,7 +759,11 @@ export function Timeline({
   }
 
   if (!loading && verses.length === 0) {
-    return <p className="notice">{emptyMessage(tagIds, tagLabels, settledText, s)}</p>;
+    return (
+      <p className="notice">
+        {emptyMessage(tagIds, tagLabels, settledText, s, narrowed)}
+      </p>
+    );
   }
 
   return (
@@ -872,7 +916,8 @@ function VerseRow({
   onFilterTag,
 }: {
   verse: TimelineVerse;
-  onOpen: (verseId: string) => void;
+  /** `field` is what was tapped on the row, so the editor can open on it. */
+  onOpen: (verseId: string, field?: string) => void;
   /** Which tags the timeline is currently narrowed to, so the chips can say so. */
   tagIds?: readonly string[];
   onFilterTag?: (tagId: string) => void;
@@ -900,7 +945,11 @@ function VerseRow({
       */}
       {verse.typedText ? <p className="verse-typed">{verse.typedText}</p> : null}
 
-      {time ? <span className="verse-time">{time}</span> : null}
+      {time ? (
+        <span className="verse-time" data-field="when">
+          {time}
+        </span>
+      ) : null}
 
       {/*
         An empty button stretched over the whole row, rather than wrapping the
@@ -915,7 +964,28 @@ function VerseRow({
       <button
         type="button"
         className="verse-open"
-        onClick={() => onOpen(verse.id)}
+        onClick={(event) => {
+          /*
+           * Which part of the row was tapped.
+           *
+           * This button covers the row, so it is always the event's target;
+           * what is *under* the pointer is found by asking the document. The
+           * first thing there that names a field decides where the editor
+           * opens — tap the place, land in the place. A keyboard activation
+           * has no pointer and simply opens the verse.
+           */
+          const under =
+            event.detail === 0
+              ? []
+              : document.elementsFromPoint(event.clientX, event.clientY);
+          // `closest`, not the element itself: a property's wrapper is
+          // `display: contents`, so it is never "under" anything — only its
+          // term and its value are — and the name lives on the wrapper.
+          const field = under
+            .map((element) => element.closest('[data-field]')?.getAttribute('data-field'))
+            .find((name) => name !== null && name !== undefined);
+          onOpen(verse.id, field ?? undefined);
+        }}
         aria-label={`Open ${verse.xp ? verse.xp.slice(0, 60) : 'this verse'}`}
       />
 
@@ -923,14 +993,22 @@ function VerseRow({
         <VerseMedia verse={verse} />
         <OtherMedia media={verse.media} />
 
-        {verse.xp ? <p className="verse-xp">{verse.xp}</p> : null}
+        {verse.xp ? (
+          <p className="verse-xp" data-field="xp">
+            {verse.xp}
+          </p>
+        ) : null}
 
-        {verse.location ? <p className="verse-meta">{verse.location}</p> : null}
+        {verse.location ? (
+          <p className="verse-meta" data-field="where">
+            {verse.location}
+          </p>
+        ) : null}
 
         {Object.keys(verse.properties).length > 0 ? (
           <dl className="verse-properties">
             {Object.entries(verse.properties).map(([key, value]) => (
-              <div key={key}>
+              <div key={key} data-field={`detail:${key}`}>
                 <dt>{key.replace(/-/g, ' ')}</dt>
                 <dd>{value}</dd>
               </div>
@@ -1001,7 +1079,9 @@ function VerseRow({
             ),
           )}
           {verse.rating !== null ? (
-            <span className="rating">{verse.rating}/10</span>
+            <span className="rating" data-field="rating">
+              {verse.rating}/10
+            </span>
           ) : null}
           {/* Only when it is not the default: a private badge on every row is
               noise, and noise is what stops a badge being read. */}
@@ -1029,6 +1109,7 @@ function VerseRow({
  */
 function VerseMedia({ verse }: { verse: VerseView }) {
   const s = useStrings();
+  const [viewing, setViewing] = useState<number | null>(null);
   // Pictures only: a voice note has no thumbnail and would sit here as a
   // tile that never fills in. `OtherMedia` draws the rest.
   const shown = verse.media.filter(
@@ -1036,25 +1117,55 @@ function VerseMedia({ verse }: { verse: VerseView }) {
   );
   if (shown.length === 0) return null;
 
+  // What the viewer shows: the upload itself, which is already downscaled to
+  // a screen's worth (§8.3), falling back to the medium variant.
+  const full = shown.flatMap((media) => {
+    const url = media.originalUrl ?? media.mediumUrl;
+    return url ? [{ id: media.id, url }] : [];
+  });
+
   return (
-    <ul className="verse-media">
-      {shown.map((media) =>
-        media.thumbUrl ? (
-          <li key={media.id}>
-            {/* eslint-disable-next-line @next/next/no-img-element --
-                next/image would route a short-lived signed URL through the
-                optimiser, which caches it past the point it stays valid. */}
-            <img src={media.thumbUrl} alt="" loading="lazy" />
-          </li>
-        ) : (
-          <li
-            key={media.id}
-            className="pending"
-            aria-label={s.timeline.photoProcessing}
-          />
-        ),
-      )}
-    </ul>
+    <>
+      {/*
+        A strip to swipe, not a grid of stamps: each photo is large enough to
+        read, and the next one shows at the edge so it is obvious there is
+        more. One photo alone takes the full width.
+      */}
+      <ul className={shown.length === 1 ? 'verse-media single' : 'verse-media'}>
+        {shown.map((media) => {
+          const preview = media.mediumUrl ?? media.thumbUrl;
+          const position = full.findIndex((photo) => photo.id === media.id);
+          return preview ? (
+            <li key={media.id}>
+              <button
+                type="button"
+                aria-label={s.photos.open}
+                onClick={() => setViewing(Math.max(0, position))}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element --
+                    next/image would route a short-lived signed URL through the
+                    optimiser, which caches it past the point it stays valid. */}
+                <img src={preview} alt="" loading="lazy" />
+              </button>
+            </li>
+          ) : (
+            <li
+              key={media.id}
+              className="pending"
+              aria-label={s.timeline.photoProcessing}
+            />
+          );
+        })}
+      </ul>
+
+      {viewing !== null && full.length > 0 ? (
+        <Lightbox
+          photos={full.map((photo) => photo.url)}
+          startAt={viewing}
+          onClose={() => setViewing(null)}
+        />
+      ) : null}
+    </>
   );
 }
 

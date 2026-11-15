@@ -216,6 +216,44 @@ export async function handleTimeline(request: Request): Promise<Response> {
     );
   }
 
+  // A place is the same kind of free text, so it gets the same cap.
+  const place = params.get('place');
+  if (place !== null && place.length > MAX_SEARCH_TEXT_LENGTH) {
+    return jsonError(
+      new DomainError(
+        'invalid_query',
+        `place must be ${MAX_SEARCH_TEXT_LENGTH} characters or fewer.`,
+      ),
+      400,
+      rateLimitHeaders(decision),
+    );
+  }
+
+  /*
+   * A date range, as days. `to` is the last day wanted and is made exclusive
+   * here — once, in one place — so every client says "to 31 January" and means
+   * the whole of it. Days are UTC midnights, the same instant a date-precision
+   * verse is stored at (§2.1).
+   */
+  const day = (value: string | null): Date | null | 'invalid' => {
+    if (value === null || value === '') return null;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return 'invalid';
+    const at = new Date(`${value}T00:00:00.000Z`);
+    return Number.isNaN(at.getTime()) || at.toISOString().slice(0, 10) !== value
+      ? 'invalid'
+      : at;
+  };
+  const fromDay = day(params.get('from'));
+  const toDay = day(params.get('to'));
+  if (fromDay === 'invalid' || toDay === 'invalid') {
+    return jsonError(
+      new DomainError('invalid_query', 'from and to must be dates like 2027-01-31.'),
+      400,
+      rateLimitHeaders(decision),
+    );
+  }
+  const to = toDay === null ? null : new Date(toDay.getTime() + 86_400_000);
+
   const result = await timelinePage(
     {
       ownerId: auth.userId,
@@ -227,6 +265,9 @@ export async function handleTimeline(request: Request): Promise<Response> {
       ...(tagIds.length > 0 ? { tagIds } : {}),
       matchAllTags: params.get('match') === 'all',
       ...(text === null ? {} : { text }),
+      ...(place === null ? {} : { place }),
+      ...(fromDay === null ? {} : { from: fromDay }),
+      ...(to === null ? {} : { to }),
     },
     {
       verses: new PrismaVerseRepository(),

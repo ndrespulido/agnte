@@ -28,6 +28,9 @@ const PATHS = {
   mic: 'M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM5.500 11a6.500 6.500 0 0 0 13 0M12 17.500V21',
   stop: 'M7 7h10v10H7z',
   send: 'M12 19V5M6 11l6-6 6 6',
+  chevronLeft: 'M15 5l-7 7 7 7',
+  chevronRight: 'M9 5l7 7-7 7',
+  trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5',
 } as const;
 
 export type IconName = keyof typeof PATHS;
