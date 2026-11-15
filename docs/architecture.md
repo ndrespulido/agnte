@@ -1338,6 +1338,16 @@ ships:
   `'minute'` in the typist's zone. This is the reason the event-precision work
   (branch `claude/event-precision`) had to land first.
 
+**Built:** `parseComposer` in `packages/core/src/composer.ts`, with each
+language's reserved words in its string table (`composer`). Rules settled in
+the building: an unreadable reserved value is kept as a property and listed in
+`unread`, never dropped; visibility is read only from an exact word and is
+otherwise unset; a range has one precision, so a time on one end only is
+ignored; an end typed without a year follows its start; English reads
+ambiguous numeric dates day-first. `Note: call mom` is a property by the rule
+— the card is what makes that visible. Not built yet: the composer UI, the
+card, tag shortcuts in typed text, and non-ASCII tag names.
+
 The parse is committed immediately and the card is editable afterwards — no
 confirmation step — because a composer that asks "is this right?" after every
 message is not a chat.
@@ -1447,6 +1457,14 @@ rewriting six workflows and the federation for a smaller free CI allowance.
 The history up to this point has been public and should be treated as such.
 
 ### 12.7 Order of work
+
+> **Spike result (step 2): share `core`, keep two UIs.** React Native's list
+> on web cannot hold scroll position when older rows load above
+> (`maintainVisibleContentPosition` is not implemented there), and the manual
+> fix is defeated by estimated row heights. Measurements and what was not
+> tried are in `apps/mobile/SPIKE.md`. The native half is **untested on a
+> device**. `apps/mobile` is outside the npm workspace on purpose: its own
+> lockfile and React version, and never in the web image.
 
 Each step is one deliverable ending in a merged pull request.
 

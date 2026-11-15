@@ -21,6 +21,33 @@ const plural = (n: string, word: string): string =>
 
 export const fr: Strings = {
   /**
+   * The composer's reserved words (§12.3) — what `key:` means a field rather
+   * than a property, in this language. English keys are accepted everywhere
+   * as a fallback; these are *added* to them. Lowercase, and a word listed
+   * here stops being available as a property name in this language.
+   */
+  composer: {
+    keys: {
+      from: ['du', 'depuis'],
+      to: ['au', 'à', 'jusque'],
+      when: ['quand'],
+      where: ['où', 'lieu'],
+      rating: ['note'],
+      visibility: ['visibilité', 'visibilite'],
+    } as Record<
+      'from' | 'to' | 'when' | 'where' | 'rating' | 'visibility',
+      readonly string[]
+    >,
+    visibility: {
+      private: ['privé', 'privée', 'prive'],
+      shared: ['partagé', 'partagée', 'partage'],
+      public: ['public', 'publique'],
+    } as Record<'private' | 'shared' | 'public', readonly string[]>,
+    /** Whether 05/01/27 is the 5th of January. False would make it May 1st. */
+    dayFirst: true as boolean,
+  },
+
+  /**
    * API failures, by the stable code the server sends (`error.code`).
    *
    * Only codes a person can reach from the screen. Anything not listed falls

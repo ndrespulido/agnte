@@ -12,3 +12,6 @@ docs/
 # generated file is churn nobody reads, and it would fight the drift test,
 # which compares the file byte for byte against the generator's output.
 src/app/tokens.css
+
+# The native app: its own toolchain, its own lockfile, never in the web image.
+apps

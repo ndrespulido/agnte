@@ -28,6 +28,33 @@ import type { Strings } from './en';
  */
 export const zh: Strings = {
   /**
+   * The composer's reserved words (§12.3) — what `key:` means a field rather
+   * than a property, in this language. English keys are accepted everywhere
+   * as a fallback; these are *added* to them. Lowercase, and a word listed
+   * here stops being available as a property name in this language.
+   */
+  composer: {
+    keys: {
+      from: ['从', '开始'],
+      to: ['到', '结束'],
+      when: ['时间', '日期'],
+      where: ['地点'],
+      rating: ['评分'],
+      visibility: ['可见性'],
+    } as Record<
+      'from' | 'to' | 'when' | 'where' | 'rating' | 'visibility',
+      readonly string[]
+    >,
+    visibility: {
+      private: ['私密', '私人'],
+      shared: ['共享'],
+      public: ['公开'],
+    } as Record<'private' | 'shared' | 'public', readonly string[]>,
+    /** Whether 05/01/27 is the 5th of January. False would make it May 1st. */
+    dayFirst: true as boolean,
+  },
+
+  /**
    * API failures, by the stable code the server sends (`error.code`).
    *
    * Only codes a person can reach from the screen. Anything not listed falls

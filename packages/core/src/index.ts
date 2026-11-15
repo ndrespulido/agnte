@@ -14,3 +14,4 @@ export * from './tokens';
 export * from './i18n';
 export * from './dates';
 export * from './timeline';
+export * from './composer';
