@@ -19,10 +19,11 @@ export {
   handleUpdatePreferences,
 } from './api/reminder-routes';
 
-export { handleNotificationsTick } from './api/tick-route';
+export { handleNotificationsTick, runReminderTick } from './api/tick-route';
 export {
   handlePushKey,
   handleSubscribePush,
+  handleTestPush,
   handleUnsubscribePush,
 } from './api/push-routes';
 

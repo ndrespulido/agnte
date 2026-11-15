@@ -70,6 +70,16 @@ export interface NotificationRepository {
    */
   claimDue(now: Date, limit: number): Promise<ScheduledNotification[]>;
 
+  /**
+   * When the next pending reminder is due, or null when nothing is pending.
+   *
+   * What a tick asks before it finishes, so it can leave a wake-up behind for
+   * whatever comes next (see `WakeUps`). Past times are returned as they are:
+   * a backlog larger than one tick's limit is "due now", and the caller is the
+   * one that knows what now is.
+   */
+  earliestPendingFireAt(): Promise<Date | null>;
+
   /** Writes back what the dispatcher decided about a claimed row. */
   settle(outcome: DispatchOutcome): Promise<void>;
 
@@ -151,4 +161,25 @@ export interface NotificationDelivery {
     body: string | null;
     verseId: string | null;
   }): Promise<void>;
+}
+
+/**
+ * Asking to be woken at a moment (§8.4).
+ *
+ * The dispatcher does not poll. It first shipped behind a five-minute cron,
+ * which worked and was the one design this platform cannot afford: the
+ * database suspends after five idle minutes, so a five-minute poll keeps it
+ * awake around the clock and spends roughly twice the free plan's compute
+ * allowance doing nothing. Instead each reminder asks for one callback at its
+ * own fire time, and the service and database sleep until it arrives.
+ *
+ * **A wake-up is a hint, never the truth.** It carries no reminder id and no
+ * payload: it only says "run a tick now", and the tick claims whatever is
+ * actually due from the table. That is what makes duplicates, late arrivals
+ * and lost wake-ups all safe — a duplicate claims nothing, a late one claims
+ * what is overdue, and a lost one is recovered by the daily sweep's own tick.
+ */
+export interface WakeUps {
+  readonly description: string;
+  at(when: Date): Promise<void>;
 }

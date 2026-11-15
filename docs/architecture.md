@@ -138,6 +138,153 @@ wins; otherwise the **most restrictive** among its tags; default `private`.
 > and bank screenshots; the failure mode of getting it wrong is disclosure, so
 > it fails closed and it gets tested directly.
 
+### 2.1 How the database works
+
+The rules above are what the data *means*. This is the machinery under them —
+written down because it was spread across `prisma/schema.prisma`,
+`prisma.config.ts`, `shared/infra/database.ts` and a dozen migration comments,
+and three of the decisions here have already been rediscovered the hard way.
+
+**Seven schemas: six modules plus `platform`.** No cross-schema foreign keys
+and no cross-schema joins (§1.1). A module reaches another's data through its
+`index.ts`, never its tables — `notifications` asking identity for an address
+and a language goes through `contactFor(userId)`, not a join. The consequence
+worth naming: some invariants cannot be database constraints. "A verse has at
+least one tag" is one, which is why `countVersesOnlyTaggedWith` exists and the
+application asks before deleting a tag.
+
+**One Prisma client, through a driver adapter.** Prisma 7 connects via
+`PrismaPg` rather than a bundled native engine, which also removed the
+arm64/amd64 engine-binary mismatch between a Snapdragon dev machine and an
+amd64 container. The client is cached on `globalThis` because Next reloads
+modules on every edit in development and would otherwise open a pool per edit
+until Postgres refused connections.
+
+**`getDatabase()` returns `undefined`, not a throw, when `DATABASE_URL` is
+unset.** `npm run dev` has to work with no database at all (§7.1), and a
+preview legitimately runs ahead of the database it will later use. Callers that
+genuinely require one say so themselves — `requireDatabase()` in each
+repository — so the failure names the module rather than surfacing from inside
+the driver.
+
+**Two connection URLs, and they are not interchangeable.** The application uses
+the pooled URL; migrations use `DIRECT_URL`. The migration engine takes
+advisory locks and runs multi-statement DDL in a session, both of which
+PgBouncer's transaction pooling breaks. `prisma.config.ts` falls back with `||`
+rather than `??` deliberately: an empty-string `DIRECT_URL` is unset in every
+way that matters, and `??` would only catch `undefined`.
+
+**Repositories write raw SQL, not the typed client.** Every query in
+`modules/*/infrastructure/` is `$queryRaw` or `$executeRaw`. That is a choice,
+not an omission: the queries here are keyset pagination, conditional updates
+and visibility predicates, all of which read more clearly as SQL than as a
+query-builder expression, and the domain ports already define the shape the
+application wants back. The cost is that nothing type-checks the column list
+against the table, which leads directly to the next rule.
+
+> **Columns are always listed explicitly. Never `SELECT *`.** Paid for once:
+> adding a `tsvector` column broke every read in the verse module at once,
+> because the driver cannot deserialize a tsvector and `SELECT *` had been
+> quietly promising to return whatever the table happened to hold. A column
+> list is a contract between the query and its row interface, and adding a
+> column should change nothing that does not name it.
+
+**CHECK constraints are a backstop, not the validation.** There are 44 of them.
+The real rules live in the domain constructors; the constraints exist so a
+write path that forgets to call one fails loudly instead of persisting
+something the domain would have refused. Several integration tests assert
+exactly that — "the database refuses what the domain refuses" — by inserting
+bad rows directly and expecting a rejection. Where a CHECK would have to
+re-implement real logic it is deliberately loose: the email constraint enforces
+normalisation and a crude shape, not RFC 5322.
+
+**Optimistic concurrency is a conditional UPDATE.** Writes carry the version
+they read, the UPDATE ends `AND version = $expected`, and zero rows affected
+means the row moved — which the application turns into `409` with the server's
+current state rather than a silent overwrite. One exception, argued where it
+lives: `updateLocale` is unconditional, because two devices disagreeing about
+an interface language is one person changing their mind, not a conflict.
+
+**A date is not an instant, and the column says which.** `event_precision` is
+`'date'` or `'minute'`, non-null exactly when `event_start` is. At `'date'` the
+stored instant is exactly midnight UTC and only its UTC date parts carry
+meaning; at `'minute'` it is a real moment, rendered in the reader's own zone.
+
+> **Why this was worth a migration rather than a display fix.** Both kinds of
+> fact were stored in one `timestamptz` and rendered with UTC parts, which made
+> each of them wrong in a different way. A typed "14:00" was stored as 14:00Z
+> regardless of where the typist was standing — so it is not the moment they
+> meant, and the export says so. And a genuine instant, a reminder's fire time
+> written through the already zone-aware reminder path, was displayed with UTC
+> parts: a reminder set for 17:00 in Madrid read as **15:00 on the timeline**.
+> Same row, two times, one app. That one is demonstrable and was the trigger.
+>
+> Fixing only the display would have been smaller and worse. Rendering
+> everything local moves every existing entry by the reader's offset, and a
+> date-only verse — `2026-03-01T00:00:00Z` — gains a time it never had and, west
+> of Greenwich, lands on **28 February**. The data was ambiguous, so no
+> rendering rule could be right for both kinds of row; the ambiguity had to go.
+>
+> **The backfill is the point of the migration**, not an afterthought: midnight
+> UTC becomes `'date'`, anything else `'minute'`. That is not a guess — the old
+> client wrote a `datetime-local` value straight through as UTC, so a date-only
+> entry landed on exactly midnight and a timed one did not. Reading existing
+> rows that way is what makes the change a no-op on screen for everything
+> already written, which was the requirement.
+>
+> The same rule runs at the edges as an **inference, not a default**: a write
+> queued offline by an older build, or an export written before the field
+> existed, carries no precision and must still mean what it meant when it was
+> written. An *unrecognised* precision is refused rather than falling back,
+> because falling back to `'minute'` would render somebody's bare date in their
+> own zone and move the day. A `'date'` carrying a time of day is refused too,
+> rather than truncated: truncating hides the caller's bug while changing what
+> the verse says.
+>
+> Three CHECKs police it — presence (`precision IS NULL` iff `event_start IS
+> NULL`), the value set, and midnight-at-`'date'` — because the symptom of a
+> raw write path getting it wrong is a verse that silently moves day when read
+> from another zone.
+
+**Conventions worth knowing before writing a migration:**
+
+- Primary keys are client-generated UUIDv7 (§2), so `gen_random_uuid()` appears
+  only in tests and fixtures.
+- Timestamps are `timestamptz(3)`. Millisecond precision, always with a zone.
+- `version Int @default(0)` and `updatedAt` on every mutable row.
+- Indexes follow the read paths, not the columns: `(owner_id, timeline_years,
+  id)` is the timeline's keyset index and the `id` tiebreak is what makes
+  pagination stable when two verses share a position. Search deliberately has
+  **no** index right now — see §8.2 for why, and what it would cost to add one.
+
+**Migrations ship inside the image.** `prisma migrate deploy` runs in CI and in
+the production deploy; `migrate dev` is for authoring locally and needs a
+shadow database. The Dockerfile copies `prisma/migrations` into the runtime
+image so `shippedMigrations()` can read them at runtime, which is what makes
+the health check meaningful.
+
+> **The health check compares shipped migrations against applied ones**, and
+> that is the second version of it. The first asserted that the seven schemas
+> existed — and every migration after `platform` adds *tables* to schemas that
+> already exist, so a database migrated only as far as an older release still
+> reported every schema present. Verified at the time: a database with all
+> seven schemas and none of identity's tables passed. The deploy smoke test
+> gates on this check, so anything it does not look at can ship green.
+
+**Four environments, three kinds of Postgres.** Local is a native Postgres
+(no Docker on the dev machine); CI runs a `postgres:16` service container;
+previews get a Neon branch per PR; production is Neon. The database-backed
+suites skip silently when `DATABASE_URL` is missing or wrong — which looks
+exactly like a green run — so CI has an explicit step that **fails if any test
+was skipped**. Backups are §8.8.
+
+> **The local database can drift from the branch you are on**, and it has
+> twice. Migrations are per-branch, so switching between a branch that drops a
+> column and one that expects it leaves the database matching neither; the
+> symptom is a wall of failures in tests that have nothing to do with the
+> change. `prisma migrate status` against the branch is the first thing to
+> check when a suite fails on code that passed an hour ago.
+
 ---
 
 ## 3. Platform
@@ -533,7 +680,8 @@ This is what makes the original medication/prescription/task use cases possible.
 ScheduledNotification { id, userId, verseId?, fireAt, kind, payload, status, attempts }
 ```
 
-- Cloud Scheduler → `/internal/notifications/tick` every 5 minutes.
+- ~~Cloud Scheduler → `/internal/notifications/tick` every 5 minutes.~~
+  Replaced: a wake-up at each reminder's own time. See the note below.
 - Claims due rows with `SELECT ... FOR UPDATE SKIP LOCKED` — safe if two
   instances tick concurrently.
 - **Web Push** primary (free; works on Android Chrome and iOS 16.4+ when
@@ -543,6 +691,45 @@ ScheduledNotification { id, userId, verseId?, fireAt, kind, payload, status, att
 - Quiet hours per user — never dispatch a medication reminder at 03:00 because
   of a timezone bug.
 
+> **The dispatcher is woken, not polled.** The five-minute cron shipped and
+> worked — a reminder was delivered end to end on it — and it was still the
+> wrong shape for this platform. Its deploy script accounted for what 288
+> wake-ups a day cost Cloud Run (nothing) and not for what they cost the
+> database: Neon suspends after five idle minutes, so a five-minute poll means
+> it never does, and the free plan's monthly compute allowance covers a little
+> over half a month of that. A feature that quietly spends the whole database
+> budget on asking "anything due?" is the opposite of §3.1.
+>
+> So each reminder asks for one callback at its own fire time, through the
+> deferred-jobs queue that already exists for thumbnails (§1.3), and the
+> service and database sleep until it arrives. Three rules hold it together:
+>
+> - **A wake-up is a hint, never the truth.** It names no reminder and carries
+>   no payload; it says "run a tick", and the tick claims whatever is actually
+>   due. A duplicate claims nothing, a late one claims what is overdue.
+> - **Every tick leaves the next wake-up behind.** One query for the earliest
+>   pending reminder covers a recurrence's next occurrence, a quiet-hours
+>   deferral, a retry's backoff and a backlog in the same line. Wake-ups are
+>   deduplicated by the second, or each duplicate would schedule its own
+>   successor and the callbacks per reminder would only grow.
+> - **The daily sweep runs a tick too.** A callback can be lost, and a reminder
+>   set weeks ahead is beyond the two-day horizon when it is created; the
+>   sweep's tick is what catches the first and schedules the second. Worst
+>   case for a lost wake-up is a day late, not never.
+>
+> Creating a reminder asks for the wake-up *before* writing the row. Asking and
+> then failing to store costs one empty tick; the other order stores a reminder
+> with nothing to fire it and answers 201. Wake-ups are asked for two seconds
+> after the fire time, because the queue's clock and the service's are two
+> clocks and an early callback finds nothing due.
+>
+> Reminders are also now accurate to seconds rather than to five minutes.
+> Locally there is no scheduler and no timer standing in for one: the tick
+> route is called by hand, like the retention sweep (§7.1). **Not proven in
+> production** — the scheduled-delivery half of Cloud Tasks cannot be reached
+> from the development sandbox, so the first real reminder after this deploys
+> is the test.
+>
 > **Built in two halves.** Email first and Web Push second, deliberately: Resend
 > was already wired and proven, while push needs VAPID keys, a service worker
 > and — on iOS — the PWA installed to the home screen before it delivers
@@ -571,15 +758,39 @@ ScheduledNotification { id, userId, verseId?, fireAt, kind, payload, status, att
 > duplicates that all buzz one device. Subscriptions are purged with the account
 > (§8.7): a subscription is an address for reaching someone.
 >
-> **Not proven end to end.** The encryption is checked against an independent
-> implementation, the fallback logic and the worker's handlers are unit-tested,
-> and the subscription endpoints are integration-tested — but no real push has
-> been delivered to a real device. Headless Chromium refuses to register with a
-> push service (`AbortError: Registration failed - permission denied`) and the
-> sandbox cannot reach FCM, so the last link is untested. This is precisely the
-> shape of the trap the reminder tick sat in for two days, and it is only closed
-> by doing it on a phone: set VAPID keys, open the app, Menu → Reminders → Turn
-> on, set a reminder a few minutes out, and watch for the notification.
+> **`POST /v1/push/test` exists so this can be answered at all.** Turning
+> notifications on used to produce no visible result: the subscription was
+> stored, and the next thing that would ever arrive was a reminder, at its own
+> fire time, dispatched by a five-minute cron. Nothing on screen distinguished a
+> working subscription from a dead one. The first report from a phone was "I
+> tried push but didn't understand how it works", which is what a feature with
+> no feedback feels like from outside.
+>
+> The endpoint is **push only — never the email fallback**. `PushWithEmailFallback`
+> is right for a reminder and exactly wrong here: an email arriving would let the
+> test answer "sent" while push itself was dead, retiring the one question the
+> button exists to settle. It reports per-subscription counts (`delivered`,
+> `removed`, `failures`) rather than a boolean, because the four answers need
+> four different pieces of advice. `pushToAll` is shared with the reminder path,
+> so the test runs the real encryption, the real VAPID signature and the real
+> dead-endpoint cleanup; a test that shortcut any of those would prove the
+> shortcut.
+>
+> **"Not configured" is not "unsupported".** Those shared one state until a
+> local run rendered "add Agnte to your home screen" on a desktop browser that
+> was perfectly capable — the actual cause was a server with no VAPID keys. The
+> advice is opposite in the two cases (install the PWA; nothing you can do,
+> reminders are arriving by email), so they are now separate states.
+>
+> **Still not proven end to end.** The encryption is checked against an
+> independent implementation, the fallback logic and the worker's handlers are
+> unit-tested, and the subscription and test endpoints are integration-tested —
+> but no real push has been delivered to a real device. Headless Chromium
+> refuses to register with a push service (`AbortError: Registration failed -
+> permission denied`) and the sandbox cannot reach FCM, so the last link can
+> only be closed on a phone: open the app, Menu → Reminders → Turn on, then
+> **Send a test notification**. That last step is the part this endpoint added;
+> before it, the only way to try was to schedule a reminder and wait.
 >
 > **A reminder is a Verse.** Scheduling one writes two rows: a Verse carrying
 > what it says, when it is for and whatever tags it was given, and a
@@ -1015,3 +1226,219 @@ three different things here: what a tag looks like *over time* (a sparkline of
 when you actually went to restaurants), what it looks like *against other tags*
 (the co-tag data the dashboard already returns), and what a filtered timeline
 looks like when it is a whole screen rather than a filter on the main one.
+
+---
+
+## 12. v3 — the chat redesign (planned, not built)
+
+Asked for in November 2026, after v2's nine phases shipped. Everything in this
+section is a plan and a set of decisions; none of it is code yet. It is written
+down before the first line for the reason §11 was: each item collides with
+something already decided, and the collisions are cheaper to find here.
+
+### 12.1 What changes for the person using it
+
+- **The timeline reads like a chat.** Still centred on today and scrollable
+  both ways, but the past is up and the future is down. Today it is the other
+  way round (`Timeline.tsx` renders the future reversed above the past).
+- **A composer replaces the add button.** A text box pinned to the bottom, a
+  microphone on one side for voice notes, and a `+` on the other for photos and
+  video, files, reminders, locations, contacts, visibility and tags. Pasting an
+  image, a link or a file into it makes a verse.
+- **Typed text is parsed, not just stored.** `Trip to Recife from: 5 January
+  2027 to: 24/02/27 where: Recife Airport rating: 8 .travel` becomes a verse
+  with a range, a location, a rating and a tag. What was typed appears on the
+  right; what Agnte understood appears on the left as an editable card. The
+  form stays, as the way to edit a card.
+- **Replying to a verse edits it.** `seat: 4A airplane: A320` sent as a reply
+  adds two properties to the verse it replies to.
+- **Screenshots become verses.** A flight confirmation yields origin,
+  destination, times and the booking reference (§11.1, now scheduled).
+- **Tags Agnte inferred are distinguishable from tags the person typed.**
+- **Filtering grows**: tags as now, plus a date range and a place.
+- **A tag can be published.** A public URL anyone can open — a restaurant's
+  daily menu is the motivating case.
+- **Native apps** for Android and iPhone.
+
+### 12.2 Decisions made
+
+1. **One timeline, ordered by event date.** A chat orders by when something was
+   typed and this timeline orders by when it happened, and the request's own
+   example separates them: a trip typed today belongs in January 2027. The
+   event-date axis is the product, so it wins. The literal text is stored on
+   the verse and shown beside its card *where the verse lives*; for an entry
+   dated today, which is most of them, that is indistinguishable from a chat.
+   For one filed elsewhere the composer answers with where it went and a jump.
+2. **Ratings stay 0–10.**
+3. **Voice notes are transcribed**, so they are searchable and go through the
+   same parser as typed text.
+4. **Still one person's app first.** No billing, no organisation accounts, no
+   moderation queue. That bounds 12.5 below: metered features get hard
+   per-day caps rather than a pricing model, and the billing kill switch stays
+   exactly as it is, because the only account it can take down is the owner's.
+   Publishing still needs the minimum a public page needs — see 12.4.
+5. **One UI codebase is the preferred outcome, decided by a spike.** See 12.6.
+
+### 12.3 The grammar
+
+Deterministic and client-side. No model reads typed text: a parser is free,
+instant, works offline, and can be tested exhaustively in four languages. It
+lives in the shared `core` package (12.6) so every client parses identically.
+
+- `key: value` sets a field or a property; `.name` adds a tag; whatever is left
+  is `xp`.
+- Reserved keys map to fields: `from`, `to`, `when`, `where`, `rating`,
+  `visibility`. Anything else is a property — `seat: 4A`, `plat: rice with
+  setas`.
+- A value runs to the next key, so `entrée: croquetas plat: rice dessert: ice
+  cream` is three properties.
+
+Traps already known, each of which needs a rule and a test before the composer
+ships:
+
+- **Colons that are not keys.** `Note: call mom`, `10:30`, `https://…`. A key
+  must be a single word directly followed by a colon and a space or a value,
+  and times and URLs are recognised first.
+- **Ambiguous dates.** `24/02/27` can only be day-first; `05/01/27` cannot be
+  told apart. The reader's locale decides, and the card shows the
+  interpretation so a wrong guess is visible rather than silent.
+- **Property keys were ASCII-only** (`^[a-z0-9]+(?:-[a-z0-9]+)*$`), so
+  `entrée:` was refused by the domain. **Fixed ahead of the composer:** a key
+  is now letters and digits in any script, NFC-normalised so a composed `é` and
+  an `e` with a combining accent are one key, and accents are *not* folded —
+  `entree` and `entrée` stay different, because a key is the label the person
+  chose. Tag names are still ASCII; that was not asked for and is a separate
+  decision, since a tag name is also a URL segment once tags can be published.
+- **Keywords are localised with the interface** (decided). `from:` in English
+  is `desde:` in Spanish, and each string table carries its own reserved keys
+  the same way it carries its own month names. Two consequences to design for:
+  a reserved key in one language is an ordinary property key in another (`de:`
+  is "from" in Spanish and nothing in English), so the same text parses
+  differently under a different interface language — which is why the literal
+  text and the parsed result are both stored, and a re-parse is never automatic.
+  And English keys are accepted in every language as a fallback, so a habit
+  formed in one language keeps working after switching.
+- **Precision.** A parsed date with no time is `'date'`; with a time it is
+  `'minute'` in the typist's zone. This is the reason the event-precision work
+  (branch `claude/event-precision`) had to land first.
+
+The parse is committed immediately and the card is editable afterwards — no
+confirmation step — because a composer that asks "is this right?" after every
+message is not a chat.
+
+### 12.4 What the data model has to grow, and what each collides with
+
+- **The literal text, and the history of replies.** A verse gains the entries
+  that produced it: raw text, attachments, and the change each one made.
+  Reply-to-edit is "append an entry", which also gives an edit history for free.
+  Collides with nothing; it is new.
+- **Inferred tags carry their origin.** `verse_tag` gains a source — typed or
+  inferred. **An inferred tag must never widen visibility** (CLAUDE.md: fail
+  closed). Today a verse inherits the most restrictive visibility among its
+  tags, so a verse whose *only* tag is an inferred `.travel`, where `.travel`
+  has been published, would be made public by a machine. Inferred tags are
+  therefore excluded from resolution in the permissive direction, in the one
+  function that resolves visibility, with a test that names this case.
+  Inferred tags come from a fixed vocabulary at first, so extraction cannot
+  mint tags.
+- **Location becomes structured.** It is a bare string today. Filtering by
+  place needs a place id and coordinates alongside the label; typed
+  `where:` text needs a decision on whether it is geocoded (a metered call) or
+  matched as text.
+- **Media stops being images only.** `ALLOWED_CONTENT_TYPES` is JPEG, PNG and
+  WebP. Audio, video and arbitrary files each need a size cap; video is stored
+  as uploaded with a poster frame and is **never transcoded**, or it becomes
+  the bill. Recorded audio differs by browser (WebM/Opus against MP4/AAC).
+- **Contacts are other people's personal data.** A contact attached to a verse
+  is third-party data under GDPR and is covered by export and erasure.
+- **Publishing needs things that do not exist:** a handle on the user, an
+  unauthenticated read path (there is none — every read authenticates), public
+  media URLs that are not short-lived signed links and serve only derived
+  variants with metadata stripped, and CDN caching. The read path goes through
+  the same visibility resolver as every other (§2); it does not get its own
+  query. Publishing is **retroactive** — every verse carrying only that tag
+  becomes public — so it is confirmed against a count. Even for a one-person
+  app, a public page needs a report address and a way to take a page down.
+- **Link previews fetch arbitrary URLs from the server**, which is a
+  request-forgery surface: private address ranges are blocked and the fetch is
+  size- and time-bounded.
+
+### 12.5 Metered dependencies: the rule changes, deliberately
+
+§3.1's discipline allowed exactly one metered dependency (place suggestions).
+v3 adds two: **vision extraction** for screenshots and **transcription** for
+voice notes. The rule is not dropped; it is restated for more than one:
+
+- every metered call sits behind a per-user daily cap enforced server-side,
+- each is switched off by leaving its key unset, like Places, so `npm run dev`
+  still needs no account,
+- extraction runs as a deferred job (§1.3) and produces a **proposed** verse
+  the person confirms, shown beside the screenshot it came from — a wrong date
+  extracted silently is the worst failure this feature has,
+- text inside an image is untrusted input: the extractor returns fields and
+  nothing else, and nothing it returns is acted on,
+- sending an image to a third party is asked for, not assumed. This app holds
+  medical and financial screenshots; the processor, its region and its
+  retention are written into §8.7 before the first image leaves.
+
+### 12.6 Stack
+
+**Kept:** TypeScript, Postgres, the modular monolith and its boundaries, R2,
+Cloudflare, Cloud Run, the API inside the web deployable. The route handlers
+are plain `Request → Response` functions, so moving them to their own service
+later is mechanical and there is no reason to pay for it now.
+
+**Changed:**
+
+- **A monorepo with a shared `core` package** — design tokens, string tables,
+  date formatting, the parser, the timeline arithmetic and the offline queue's
+  rules. `format.ts` already carries a hand-copied duplicate of the verse
+  module's timeline maths with a comment admitting what happens when they
+  drift; a second client would make it three copies.
+- **API errors are consumed by code, not prose** (§8.6.1's open gap). A native
+  build in someone's pocket for months cannot depend on English sentences, and
+  `/v1` becomes additive-only from the first store release.
+- **Native apps on Expo (React Native).** A chat input, hold-to-record and the
+  keyboard are where a wrapped web view feels wrong. iOS builds run in a cloud
+  build service because the development machine is not a Mac. Push needs a
+  native delivery adapter beside Web Push. The share sheet — "Share to Agnte"
+  from any app — is the real successor to messaging things to yourself, and is
+  the first native-only feature worth building.
+- **Sign in with Apple**, required by the App Store once Google sign-in is
+  offered.
+
+**The spike.** Whether the signed-in app becomes one Expo codebase for web,
+iOS and Android, or stays two (Next for web, Expo for native), is decided by
+building the hardest screen once: a two-directional, date-sectioned timeline
+with a sticky header and a keyboard-attached composer, on React Native, running
+on the web and on a phone. One codebase halves every future UI change for a
+solo developer, and its web output can be driven in a browser the same way the
+current client is. The risk is that screen. If it holds, v3's UI is built once;
+if it does not, `core` is shared and the two UIs are not. Public pages are
+server-rendered either way.
+
+**Repository.** Goes private, and stays on GitHub. Deployment is not limited by
+the host — it happens on GCP through workload identity — and moving would mean
+rewriting six workflows and the federation for a smaller free CI allowance.
+The history up to this point has been public and should be treated as such.
+
+### 12.7 Order of work
+
+Each step is one deliverable ending in a merged pull request.
+
+1. **Foundations.** Merge `claude/event-precision`, 
+   `claude/push-test-notification` and `claude/pause-runbook`; finish the display half of event
+   precision; replace the five-minute reminder cron with wake-ups (§8.4); the
+   monorepo and `core`; error codes.
+2. **The spike** (12.6), which decides how steps 3 and 8 are built.
+3. **Composer and chat timeline.** Grammar, entries, reply-to-edit, the flip,
+   paste, the `+` menu over what already exists.
+4. **Media kinds.** Voice with transcription, files, capped video, contacts.
+5. **Structured location and the new filters.**
+6. **Publishing.**
+7. **Screenshot extraction and inferred tags.**
+8. **Native apps**, starting with the share sheet.
+
+Not addressed here and still open: live updates across devices (a chat implies
+them; nothing provides them today), the `contribute` permission (§10), and the
+v1 converter, which is still blocked on v1's schema.

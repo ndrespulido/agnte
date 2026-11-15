@@ -15,6 +15,14 @@ export const verseBody = (v: VisibleVerse) => ({
   id: v.verse.id,
   eventStart: v.verse.eventStart?.toISOString() ?? null,
   eventEnd: v.verse.eventEnd?.toISOString() ?? null,
+  /**
+   * Which kind of fact the two fields above are (§2.1).
+   *
+   * Additive, and load-bearing for any client that renders a date: without it
+   * a client has to guess, and the only guess available — midnight means a
+   * date — is the convention this field exists to replace.
+   */
+  eventPrecision: v.verse.eventPrecision,
   deepTimeYears: v.verse.deepTimeYears,
   location: v.verse.location,
   rating: v.verse.rating,

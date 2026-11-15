@@ -480,3 +480,134 @@ describe.skipIf(!DATABASE_URL)('reminder emails follow the account language', ()
     expect(await send(user.id)).toContain('You set this reminder in Agnte.');
   });
 });
+
+/**
+ * The dispatcher's entry point, through the app's own route file.
+ *
+ * Through the route file on purpose rather than the handler: a handler that is
+ * exported, tested and routed to nowhere passes every test that imports it
+ * directly, and the only thing that proves the URL exists is calling the URL.
+ */
+describe.skipIf(!DATABASE_URL)('POST /internal/notifications/tick', () => {
+  const SECRET = 'a-shared-secret-for-internal-routes';
+  const repo = new PrismaNotificationRepository();
+  const users = new PrismaUserRepository();
+
+  let sent: string[] = [];
+
+  beforeEach(async () => {
+    process.env.APP_ENV = 'local';
+    process.env.INTERNAL_TASKS_SECRET = SECRET;
+    delete process.env.RESEND_API_KEY;
+    delete process.env.EMAIL_FROM;
+    delete process.env.VAPID_PUBLIC_KEY;
+    resetConfigForTests();
+    resetEmailTransportForTests();
+
+    sent = [];
+    vi.spyOn(console, 'info').mockImplementation((...args: unknown[]) => {
+      sent.push(args.join(' '));
+    });
+
+    const db = getDatabase()!;
+    await db.$executeRawUnsafe('DELETE FROM notifications.scheduled_notification');
+    await db.$executeRawUnsafe('DELETE FROM notifications.push_subscription');
+    await db.$executeRawUnsafe('DELETE FROM identity."user"');
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    process.env = { ...ORIGINAL_ENV };
+    resetConfigForTests();
+    resetEmailTransportForTests();
+  });
+
+  const call = async (headers: Record<string, string> = {}) => {
+    const { POST } = await import('@/app/internal/notifications/tick/route');
+    return POST(
+      new Request('https://agnte.test/internal/notifications/tick', {
+        method: 'POST',
+        headers,
+      }),
+    );
+  };
+
+  const account = async () => {
+    const user = createVerifiedUser({
+      email: `tick-${uuidv7()}@example.com` as never,
+      passwordHash: null,
+      clock: systemClock,
+    });
+    await users.create(user);
+    return user;
+  };
+
+  it('refuses a caller without the shared secret', async () => {
+    expect((await call()).status).toBe(401);
+    expect((await call({ authorization: 'Bearer wrong' })).status).toBe(401);
+  });
+
+  it('fires what is due and leaves the rest', async () => {
+    const user = await account();
+    const due = reminder({ userId: user.id, fireAt: new Date(Date.now() - 60_000) });
+    const later = reminder({
+      userId: user.id,
+      title: 'Not yet',
+      fireAt: new Date(Date.now() + 3_600_000),
+    });
+    await repo.create(due);
+    await repo.create(later);
+
+    const response = await call({ authorization: `Bearer ${SECRET}` });
+    const body = (await response.json()) as {
+      claimed: number;
+      sent: number;
+      nextWakeUp: string | null;
+    };
+
+    expect(response.status).toBe(200);
+    expect(body).toMatchObject({ claimed: 1, sent: 1 });
+    // The email fallback, on the console transport: proof it went all the way.
+    expect(sent.join('\n')).toContain('Take the tablet');
+    expect(sent.join('\n')).not.toContain('Not yet');
+
+    expect((await repo.findById(due.id))?.status).toBe('sent');
+    expect((await repo.findById(later.id))?.status).toBe('pending');
+
+    // And it asked to be woken for the one still pending.
+    expect(body.nextWakeUp).not.toBeNull();
+    expect(Date.parse(body.nextWakeUp!)).toBeGreaterThan(later.fireAt.getTime());
+  });
+
+  it('answers with nothing to do when nothing is pending', async () => {
+    const response = await call({ authorization: `Bearer ${SECRET}` });
+
+    expect(await response.json()).toMatchObject({
+      claimed: 0,
+      sent: 0,
+      nextWakeUp: null,
+    });
+  });
+
+  /** The query the chain of wake-ups hangs on, against real Postgres. */
+  it('finds the earliest pending reminder, ignoring finished ones', async () => {
+    const user = await account();
+    expect(await repo.earliestPendingFireAt()).toBeNull();
+
+    const soon = new Date('2026-12-01T10:00:00.000Z');
+    await repo.create(
+      reminder({ userId: user.id, fireAt: new Date('2026-12-05T10:00:00Z') }),
+    );
+    await repo.create(reminder({ userId: user.id, fireAt: soon }));
+    // Earlier than both, but already sent: it must not be what wakes the tick.
+    await repo.create(
+      reminder({
+        userId: user.id,
+        fireAt: new Date('2026-11-01T10:00:00Z'),
+        status: 'sent',
+      }),
+    );
+
+    expect(await repo.earliestPendingFireAt()).toEqual(soon);
+  });
+});

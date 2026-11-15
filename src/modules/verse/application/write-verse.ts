@@ -12,6 +12,7 @@ import {
   parsePlacement,
   parseProperties,
   parseRating,
+  parseEventPrecision,
   parseXp,
   type Placement,
   type Verse,
@@ -66,6 +67,14 @@ async function assertOwnedMedia(
  */
 export interface VerseFields {
   eventStart?: string | null | undefined;
+  /**
+   * Whether `eventStart` means a calendar date or a real instant (§2.1).
+   *
+   * Optional, and absent is inferred rather than defaulted — see
+   * `parsePlacement`. A write queued offline by an older build carries no
+   * precision and must still mean what it meant when it was queued.
+   */
+  eventPrecision?: string | null | undefined;
   eventEnd?: string | null | undefined;
   deepTimeYears?: number | null | undefined;
   location?: string | null | undefined;
@@ -101,6 +110,7 @@ function parseFields(fields: VerseFields): Result<Parsed, DomainError> {
   const touchesTime =
     fields.eventStart !== undefined ||
     fields.eventEnd !== undefined ||
+    fields.eventPrecision !== undefined ||
     fields.deepTimeYears !== undefined;
 
   if (touchesTime) {
@@ -110,10 +120,14 @@ function parseFields(fields: VerseFields): Result<Parsed, DomainError> {
     const eventEnd = toDate(fields.eventEnd, 'eventEnd');
     if (!eventEnd.ok) return eventEnd;
 
+    const precision = parseEventPrecision(fields.eventPrecision);
+    if (!precision.ok) return precision;
+
     const placement = parsePlacement({
       eventStart: eventStart.value,
       eventEnd: eventEnd.value,
       deepTimeYears: fields.deepTimeYears ?? null,
+      eventPrecision: precision.value,
     });
     if (!placement.ok) return placement;
     parsed.placement = placement.value;
@@ -162,6 +176,7 @@ function parseFields(fields: VerseFields): Result<Parsed, DomainError> {
 }
 
 /** Dates arrive as strings; an unparseable one is refused, not silently null. */
+
 function toDate(
   value: string | null | undefined,
   field: string,

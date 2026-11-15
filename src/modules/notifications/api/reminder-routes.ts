@@ -6,7 +6,8 @@ import { idempotently } from '@/shared/infra/idempotent-write';
 import { authenticate } from '@/modules/identity';
 import { PrismaNotificationRepository } from '../infrastructure/prisma-notification-repository';
 import { PrismaPreferenceRepository } from '../infrastructure/prisma-preference-repository';
-import { scheduleReminder } from '../application/schedule';
+import { saveReminder, scheduleReminder } from '../application/schedule';
+import { getWakeUps } from '../infrastructure/wake-ups';
 import { parseQuietHours } from '../domain/quiet-hours';
 import type { ScheduledNotification } from '../domain/ports';
 
@@ -81,7 +82,11 @@ export async function handleCreateReminder(request: Request): Promise<Response> 
         };
       }
 
-      await new PrismaNotificationRepository().create(reminder.value);
+      await saveReminder(reminder.value, {
+        notifications: new PrismaNotificationRepository(),
+        wakeUps: getWakeUps(),
+        now: systemClock.now(),
+      });
 
       return {
         status: 201,

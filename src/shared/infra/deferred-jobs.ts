@@ -29,7 +29,36 @@ import { loadConfig } from './config';
  */
 export interface DeferredJobs {
   readonly description: string;
-  enqueue(input: { path: string; body: Record<string, unknown> }): Promise<void>;
+  enqueue(input: DeferredJob): Promise<void>;
+}
+
+export interface DeferredJob {
+  path: string;
+  body: Record<string, unknown>;
+  /**
+   * Deliver no earlier than this. Absent means as soon as possible.
+   *
+   * What makes a *scheduled* callback possible without a cron: a reminder asks
+   * for one wake-up at its own fire time instead of the service being polled
+   * every five minutes to ask whether anything is due. On a scale-to-zero
+   * platform the difference is the whole idle bill — a five-minute poll keeps
+   * the database awake around the clock, and a wake-up costs nothing until it
+   * arrives. Cloud Tasks accepts up to thirty days ahead; callers stay well
+   * inside that and rely on a daily sweep for anything further out.
+   */
+  notBefore?: Date;
+  /**
+   * Two jobs with the same key are one job.
+   *
+   * For callbacks that are *hints* rather than work — "wake up at 17:00" —
+   * where several callers can independently ask for the same thing and the
+   * second request should be absorbed rather than delivered twice. Without it
+   * every duplicate wake-up runs, each schedules its own successor, and the
+   * number of callbacks per reminder only ever grows.
+   *
+   * Letters, digits, hyphens and underscores only: it becomes the task's name.
+   */
+  dedupeKey?: string;
 }
 
 /**
@@ -41,6 +70,10 @@ export interface TaskCreator {
   createTask(request: {
     parent: string;
     task: {
+      /** Full resource name. Present only for a deduplicated job. */
+      name?: string;
+      /** Protobuf timestamp. Present only for a job with `notBefore`. */
+      scheduleTime?: { seconds: number };
       httpRequest: {
         httpMethod: 'POST';
         url: string;
@@ -65,12 +98,34 @@ export class CloudTasksJobs implements DeferredJobs {
     this.description = `cloud-tasks:${queue}`;
   }
 
-  async enqueue(input: { path: string; body: Record<string, unknown> }): Promise<void> {
+  async enqueue(input: DeferredJob): Promise<void> {
     const parent = this.client.queuePath(this.projectId, this.location, this.queue);
 
+    try {
+      await this.createTask(parent, input);
+    } catch (cause) {
+      /*
+       * ALREADY_EXISTS (gRPC code 6) on a deduplicated job is the dedupe
+       * working, not a failure: somebody already asked for this exact
+       * callback. Swallowed only when a key was given — without one, the same
+       * error would mean something this adapter does not understand, and that
+       * should reach the caller.
+       */
+      if (input.dedupeKey !== undefined && isAlreadyExists(cause)) return;
+      throw cause;
+    }
+  }
+
+  private async createTask(parent: string, input: DeferredJob): Promise<void> {
     await this.client.createTask({
       parent,
       task: {
+        ...(input.dedupeKey === undefined
+          ? {}
+          : { name: `${parent}/tasks/${input.dedupeKey}` }),
+        ...(input.notBefore === undefined
+          ? {}
+          : { scheduleTime: { seconds: Math.floor(input.notBefore.getTime() / 1000) } }),
         httpRequest: {
           httpMethod: 'POST',
           url: new URL(input.path, this.baseUrl).toString(),
@@ -178,4 +233,13 @@ export function getDeferredJobs(): DeferredJobs | undefined {
 export function resetDeferredJobsForTests(): void {
   cached = undefined;
   cachedFor = undefined;
+}
+
+/** gRPC status 6, as the Cloud Tasks client reports a task name that is taken. */
+function isAlreadyExists(cause: unknown): boolean {
+  return (
+    typeof cause === 'object' &&
+    cause !== null &&
+    (cause as { code?: unknown }).code === 6
+  );
 }

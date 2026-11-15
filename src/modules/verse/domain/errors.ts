@@ -21,6 +21,7 @@ export const VerseErrorCode = {
   RatingOutOfRange: 'verse.rating_out_of_range',
   TimeConflict: 'verse.time_conflict',
   EventRangeInverted: 'verse.event_range_inverted',
+  EventPrecisionInvalid: 'verse.event_precision_invalid',
   DateInvalid: 'verse.date_invalid',
   DeepTimeOutOfRange: 'verse.deep_time_out_of_range',
   PropertyKeyInvalid: 'verse.property_key_invalid',
@@ -129,6 +130,18 @@ export const eventRangeInverted = (): DomainError =>
     VerseErrorCode.EventRangeInverted,
     'The end of an event cannot come before its start.',
   );
+
+/**
+ * A date-precision event whose instant is not midnight UTC.
+ *
+ * Refused rather than truncated. Truncating would quietly accept a client that
+ * had sent a real instant while claiming it was a bare date — and the whole
+ * reason precision exists is that those two must not be confused. The import
+ * endpoint takes the same line with every other field: refuse with a reason
+ * rather than silently reshape.
+ */
+export const eventPrecisionInvalid = (reason: string): DomainError =>
+  new DomainError(VerseErrorCode.EventPrecisionInvalid, `Event precision: ${reason}.`);
 
 /**
  * An unparseable date is refused rather than becoming an Invalid Date, which

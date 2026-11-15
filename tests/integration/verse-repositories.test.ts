@@ -5,7 +5,7 @@ import { PrismaTagRepository } from '@/modules/verse/infrastructure/prisma-tag-r
 import { PrismaVerseRepository } from '@/modules/verse/infrastructure/prisma-verse-repository';
 import { PrismaShareRepository } from '@/modules/verse/infrastructure/prisma-share-repository';
 import { createTag } from '@/modules/verse/domain/tag';
-import { createVerse } from '@/modules/verse/domain/verse';
+import { createVerse, type NewVerse } from '@/modules/verse/domain/verse';
 
 /**
  * Runs against a real Postgres and skips without one (architecture.md §7.1).
@@ -37,8 +37,19 @@ describe.skipIf(!DATABASE_URL)('verse repositories against real Postgres', () =>
   const newTag = (ownerId: string, name: string, overrides = {}) =>
     createTag({ ownerId, name, clock, ...overrides });
 
-  const newVerse = (ownerId: string, tagIds: string[], overrides = {}) =>
-    unwrap(createVerse({ ownerId, tagIds, clock, ...overrides }));
+  /*
+   * `Partial<NewVerse>` rather than `{}`.
+   *
+   * Untyped, this helper laundered away the compiler's knowledge of
+   * `Placement` — so a fixture building a range without its `event_precision`
+   * type-checked, and the database CHECK was what caught it. The constraint
+   * doing its job is good; a test helper that defeats the type system is not.
+   */
+  const newVerse = (
+    ownerId: string,
+    tagIds: string[],
+    overrides: Partial<NewVerse> = {},
+  ) => unwrap(createVerse({ ownerId, tagIds, clock, ...overrides }));
 
   describe('tags', () => {
     it('round-trips every field', async () => {
@@ -145,6 +156,9 @@ describe.skipIf(!DATABASE_URL)('verse repositories against real Postgres', () =>
           kind: 'range' as const,
           start: new Date('2026-07-01T06:00:00.000Z'),
           end: new Date('2026-07-01T09:30:00.000Z'),
+          // A real flight, so a real instant — and the column is non-null
+          // whenever a start exists (§2.1).
+          precision: 'minute' as const,
         },
         location: 'Barcelona',
         rating: 7.5,

@@ -645,3 +645,22 @@ export const saveLocale = (locale: string): Promise<void> =>
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ locale }),
   }).then((r) => json<unknown>(r).then(() => undefined));
+
+/**
+ * What a test push did, per subscription.
+ *
+ * Counts rather than a boolean because the four outcomes are different news:
+ * push is switched off on this server, no browser is subscribed, it was
+ * delivered, or it failed with a reason. A boolean would collapse the three
+ * that need different advice into one unhelpful "no".
+ */
+export interface PushTestResult {
+  configured: boolean;
+  subscriptions: number;
+  delivered: number;
+  removed: number;
+  failures: string[];
+}
+
+export const sendTestPush = (): Promise<PushTestResult> =>
+  authedFetch('/v1/push/test', { method: 'POST' }).then((r) => json<PushTestResult>(r));

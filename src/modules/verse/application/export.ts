@@ -21,7 +21,7 @@ export async function exportForUser(userId: string): Promise<VerseExport> {
   if (!db) throw new Error('verse requires a database; DATABASE_URL is not set');
 
   const verses = await db.$queryRaw<unknown[]>`
-    SELECT v.id, v.event_start, v.event_end, v.deep_time_years, v.location,
+    SELECT v.id, v.event_start, v.event_end, v.event_precision, v.deep_time_years, v.location,
            v.rating, v.xp, v.properties, v.visibility, v.created_at, v.updated_at,
            COALESCE(
              (SELECT array_agg(vt.tag_id) FROM verse.verse_tag vt WHERE vt.verse_id = v.id),

@@ -1,6 +1,11 @@
 import { DomainError, type Clock, type Result, err, ok } from '@/shared/kernel';
 import { parseRecurrence, nextOccurrence } from '../domain/recurrence';
-import type { NotificationRepository, ScheduledNotification } from '../domain/ports';
+import type {
+  NotificationRepository,
+  ScheduledNotification,
+  WakeUps,
+} from '../domain/ports';
+import { requestWakeUp } from './dispatch';
 
 export const MAX_TITLE_LENGTH = 200;
 export const MAX_BODY_LENGTH = 2000;
@@ -103,9 +108,22 @@ export function scheduleReminder(
   });
 }
 
+/**
+ * Stores a reminder and makes sure something will wake the dispatcher for it.
+ *
+ * **The wake-up is asked for first, the row written second**, and the order is
+ * the design. A wake-up is only a hint (see `WakeUps`): asking for one and
+ * then failing to store the reminder costs a tick that finds nothing. The
+ * other order fails the other way — a reminder stored with nothing scheduled
+ * to fire it, which answers 201 and then stays silent until the daily sweep.
+ * For "take the tablet in ten minutes" that is the feature not working, and
+ * nobody is told. This way a scheduler outage is an error the person sees and
+ * can retry, with nothing half-created behind it.
+ */
 export async function saveReminder(
   notification: ScheduledNotification,
-  repository: NotificationRepository,
+  deps: { notifications: NotificationRepository; wakeUps: WakeUps; now: Date },
 ): Promise<void> {
-  await repository.create(notification);
+  await requestWakeUp(notification.fireAt, deps.now, deps.wakeUps);
+  await deps.notifications.create(notification);
 }

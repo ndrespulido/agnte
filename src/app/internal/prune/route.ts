@@ -11,6 +11,7 @@ import {
 import { prunePendingMedia, requeueStalledThumbnails } from '@/modules/media';
 import { retryDeadLetters } from '@/shared/events';
 import { registerErasureHandlers, sweepErasures } from '@/modules/privacy';
+import { runReminderTick } from '@/modules/notifications';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -92,8 +93,22 @@ export async function POST(request: Request): Promise<Response> {
   registerErasureHandlers();
   const erased = { accounts: await sweepErasures(now) };
 
+  /*
+   * A reminder tick, as the safety net under the wake-ups (§8.4).
+   *
+   * Reminders are fired by a callback at their own time rather than by a
+   * polling cron, and a callback can be lost — a queue outage, a deploy at the
+   * wrong second. This run catches whatever is overdue because of that, at
+   * worst a day late rather than never. It is also how a reminder set weeks
+   * ahead gets its wake-up: it was beyond the horizon when it was created, and
+   * the tick that runs here is what schedules it once it comes within range.
+   *
+   * Last, so a failure here cannot stop the sweeps above from running.
+   */
+  const reminders = await runReminderTick(now);
+
   return Response.json(
-    { swept, requeued, recovered, erased, at: now.toISOString() },
+    { swept, requeued, recovered, erased, reminders, at: now.toISOString() },
     { status: 200, headers: { 'cache-control': 'no-store' } },
   );
 }

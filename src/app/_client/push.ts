@@ -13,8 +13,19 @@ import { fetchPushKey, subscribeToPush, unsubscribeFromPush } from './api';
  */
 
 export type PushState =
-  /** No service worker, no PushManager, or no VAPID key configured here. */
+  /** No service worker, no PushManager — this browser cannot do push at all. */
   | 'unsupported'
+  /**
+   * This browser could, but the deployment has no VAPID keys.
+   *
+   * Separate from `unsupported` because the advice is opposite. "Add Agnte to
+   * your home screen" is right for an iPhone that cannot subscribe and wrong —
+   * actively misleading — for a server that was never given keys, where there
+   * is nothing the person can do and reminders are arriving by email. The two
+   * shared one state until a local run showed the home-screen sentence on a
+   * desktop browser that was perfectly capable.
+   */
+  | 'not-configured'
   /** Available, not yet asked for. */
   | 'off'
   /** Subscribed on this browser. */
@@ -69,7 +80,7 @@ export async function pushState(): Promise<PushState> {
   const existing = await registration.pushManager.getSubscription();
   if (existing) return 'on';
 
-  return (await fetchPushKey()) ? 'off' : 'unsupported';
+  return (await fetchPushKey()) ? 'off' : 'not-configured';
 }
 
 /**
@@ -83,7 +94,7 @@ export async function enablePush(): Promise<PushState> {
   if (!supported()) return 'unsupported';
 
   const key = await fetchPushKey();
-  if (!key) return 'unsupported';
+  if (!key) return 'not-configured';
 
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') return permission === 'denied' ? 'denied' : 'off';

@@ -225,6 +225,16 @@ export const es: Strings = {
     justAMoment: 'Un momento…',
     turnOff: 'Desactivar',
     turnOn: 'Activar',
+    sendTest: 'Enviar una notificación de prueba',
+    testSending: 'Enviando…',
+    testArrived: 'Enviada. Debería aparecer en este dispositivo en unos segundos.',
+    testNoSubscription:
+      'Todavía no hay ningún navegador suscrito en esta cuenta. Activa primero las notificaciones.',
+    pushNotConfigured:
+      'Las notificaciones push están desactivadas en este servidor, así que los recordatorios llegan por correo.',
+    testFailed: (reason: string) => `No ha llegado: ${reason}`,
+    testGone:
+      'La suscripción de este navegador había caducado, así que se ha eliminado. Desactiva y vuelve a activar las notificaciones.',
     everyDay: 'Cada día',
     everyWeekday: 'Cada día laborable',
     everyWeek: 'Cada semana',

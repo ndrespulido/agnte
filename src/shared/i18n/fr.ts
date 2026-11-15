@@ -229,6 +229,17 @@ export const fr: Strings = {
     justAMoment: 'Un instant…',
     turnOff: 'Désactiver',
     turnOn: 'Activer',
+    sendTest: 'Envoyer une notification de test',
+    testSending: 'Envoi…',
+    testArrived:
+      'Envoyée. Elle devrait apparaître sur cet appareil dans quelques secondes.',
+    testNoSubscription:
+      "Aucun navigateur n'est encore abonné sur ce compte. Activez d'abord les notifications.",
+    pushNotConfigured:
+      'Les notifications push sont désactivées sur ce serveur, les rappels arrivent donc par e-mail.',
+    testFailed: (reason: string) => `Elle n'est pas arrivée${NB}: ${reason}`,
+    testGone:
+      "L'abonnement de ce navigateur avait expiré, il a donc été supprimé. Désactivez puis réactivez les notifications.",
     everyDay: 'Chaque jour',
     everyWeekday: 'Chaque jour ouvré',
     everyWeek: 'Chaque semaine',

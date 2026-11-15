@@ -34,6 +34,7 @@ const verse = (over: Partial<Verse> = {}): Verse => ({
   ownerId: 'owner',
   eventStart: null,
   eventEnd: null,
+  eventPrecision: null,
   deepTimeYears: null,
   location: null,
   rating: null,

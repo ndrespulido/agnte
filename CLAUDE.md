@@ -241,6 +241,27 @@ Two of these need a decision before any code: a second **metered** dependency
 (§3.1 allows exactly one today, and says why), and what an **inherited tag does
 to visibility** — which resolves to the most restrictive and must fail closed.
 
+## v3 — the chat redesign
+
+Planned, not built. `docs/architecture.md` §12 is the record: what changes, the
+decisions already made, what each change collides with, and the order of work.
+Read it before touching the timeline, the composer, media kinds, publishing or
+the native apps.
+
+Decided: one timeline ordered by **event date** (the typed text is stored on
+the verse and shown beside its card where the verse lives); ratings stay 0–10;
+voice notes are transcribed; still one person's app first, so metered features
+get hard daily caps rather than billing; one UI codebase is preferred and is
+decided by a spike on the hardest screen.
+
+Two rules from §12 that are easy to break by accident:
+
+- **An inferred tag must never widen visibility.** Machine-added tags are
+  excluded from visibility resolution in the permissive direction.
+- **Typed text is parsed deterministically, client-side.** No model reads the
+  composer; models are only for images and audio, behind caps, as proposals
+  the person confirms.
+
 ## Blocked on you
 
 **The v1 converter (Phase 9) cannot be written without v1's schema.** It needs
