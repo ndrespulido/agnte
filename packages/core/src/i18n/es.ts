@@ -17,6 +17,33 @@ const decimal = (n: string): string => n.replace('.', ',');
 
 export const es: Strings = {
   /**
+   * The composer's reserved words (§12.3) — what `key:` means a field rather
+   * than a property, in this language. English keys are accepted everywhere
+   * as a fallback; these are *added* to them. Lowercase, and a word listed
+   * here stops being available as a property name in this language.
+   */
+  composer: {
+    keys: {
+      from: ['desde', 'de'],
+      to: ['hasta'],
+      when: ['cuando', 'cuándo', 'fecha'],
+      where: ['donde', 'dónde', 'lugar'],
+      rating: ['nota', 'valoración', 'valoracion'],
+      visibility: ['visibilidad'],
+    } as Record<
+      'from' | 'to' | 'when' | 'where' | 'rating' | 'visibility',
+      readonly string[]
+    >,
+    visibility: {
+      private: ['privado', 'privada'],
+      shared: ['compartido', 'compartida'],
+      public: ['público', 'pública', 'publico', 'publica'],
+    } as Record<'private' | 'shared' | 'public', readonly string[]>,
+    /** Whether 05/01/27 is the 5th of January. False would make it May 1st. */
+    dayFirst: true as boolean,
+  },
+
+  /**
    * API failures, by the stable code the server sends (`error.code`).
    *
    * Only codes a person can reach from the screen. Anything not listed falls
