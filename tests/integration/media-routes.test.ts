@@ -200,6 +200,70 @@ describe.skipIf(!DATABASE_URL)('media routes', () => {
     expect(deleted.status).toBe(204);
   });
 
+  /**
+   * A voice note has nothing to thumbnail, so confirming it must land on
+   * `ready` directly. Queuing an image job for it would decode-fail and mark
+   * a perfectly good recording `failed`.
+   */
+  it('takes a voice note straight to ready, keeping its name', async () => {
+    const { token } = await signUp('voice@example.com');
+
+    const requested = await requestUpload(token, {
+      contentType: 'audio/webm;codecs=opus',
+      declaredSizeBytes: 2_000,
+      fileName: '/tmp/recordings/note.webm',
+    });
+    expect(requested.status).toBe(201);
+    const created = (await requested.json()) as {
+      media: {
+        id: string;
+        version: number;
+        kind: string;
+        fileName: string;
+        contentType: string;
+      };
+      upload: { url: string };
+    };
+    expect(created.media).toMatchObject({
+      kind: 'audio',
+      contentType: 'audio/webm',
+      fileName: 'note.webm',
+    });
+
+    const key = created.upload.url.replace('/dev/media/', '');
+    uploadedKeys.push(key);
+    expect(key.endsWith('.weba')).toBe(true);
+    await localStore.writeBuffer(
+      key,
+      Buffer.from('not really audio, and nothing checks'),
+    );
+
+    const confirmed = await confirm(token, created.media.id, {
+      expectedVersion: created.media.version,
+    });
+    expect(confirmed.status).toBe(200);
+    expect(((await confirmed.json()) as { status: string }).status).toBe('ready');
+  });
+
+  it('refuses a type a browser would run, and a video past its cap', async () => {
+    const { token } = await signUp('refuse@example.com');
+
+    const html = await requestUpload(token, {
+      contentType: 'text/html',
+      declaredSizeBytes: 10,
+    });
+    expect(html.status).toBe(422);
+
+    const huge = await requestUpload(token, {
+      contentType: 'video/mp4',
+      declaredSizeBytes: 50_000_001,
+    });
+    expect(huge.status).toBe(422);
+    expect(((await huge.json()) as { error: { code: string } }).error.code).toBe(
+      'media.too_large',
+    );
+  });
+
   it('replays the same response for a repeated Idempotency-Key rather than creating a second row', async () => {
     const { token } = await signUp('c@example.com');
     const body = { contentType: 'image/jpeg', declaredSizeBytes: 400_000 };

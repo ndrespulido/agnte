@@ -23,6 +23,7 @@ import { mediaBody } from './media-body';
 const RequestUploadBody = z.object({
   contentType: z.string(),
   declaredSizeBytes: z.number(),
+  fileName: z.string().max(1000).nullish(),
   id: z.uuid().optional(),
 });
 

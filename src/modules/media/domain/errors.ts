@@ -26,16 +26,14 @@ export const contentTypeNotAllowed = (
 ): DomainError =>
   new DomainError(
     MediaErrorCode.ContentTypeNotAllowed,
-    `${contentType} is not an accepted image type. Send one of: ${allowed.join(', ')}.`,
+    `${contentType} is not an accepted file type. Send one of: ${allowed.join(', ')}.`,
     { details: { contentType, allowed } },
   );
 
 export const tooLarge = (maxBytes: number): DomainError =>
   new DomainError(
     MediaErrorCode.TooLarge,
-    `That file is larger than the ${Math.round(maxBytes / 1_000_000)}MB limit. ` +
-      'Downscale it in the browser before uploading (this should already ' +
-      'happen automatically — seeing this means it did not).',
+    `That file is larger than the ${Math.round(maxBytes / 1_000_000)}MB limit.`,
     { details: { maxBytes } },
   );
 

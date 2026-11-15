@@ -34,6 +34,10 @@ export interface VerseView {
     originalUrl: string | null;
     thumbUrl: string | null;
     mediumUrl: string | null;
+    /** Absent from a response cached before media had kinds: treat as image. */
+    kind?: 'image' | 'audio' | 'video' | 'file';
+    contentType?: string;
+    fileName?: string | null;
   }[];
   createdAt: string;
   updatedAt: string;

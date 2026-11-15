@@ -567,6 +567,10 @@ model Media {
   /// what actually landed in storage when the upload is confirmed.
   declaredSizeBytes Int @map("declared_size_bytes")
 
+  /// The name the file had on the device it came from. Display only — never
+  /// part of a storage key.
+  fileName String? @map("file_name")
+
   /// Where the original lives in object storage. Never returned in an API
   /// response — a caller gets a short-lived signed URL instead (§8.3).
   storageKey String @unique @map("storage_key")

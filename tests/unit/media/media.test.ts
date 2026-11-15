@@ -4,6 +4,9 @@ import { MediaErrorCode } from '@/modules/media/domain/errors';
 import {
   ALLOWED_CONTENT_TYPES,
   MAX_DECLARED_BYTES,
+  MAX_FILE_NAME_LENGTH,
+  kindOf,
+  parseFileName,
   canTransition,
   createPendingMedia,
   extensionFor,
@@ -22,20 +25,80 @@ describe('parseContentType', () => {
     expect(result.ok && result.value).toBe(type);
   });
 
-  it.each(['image/heic', 'image/gif', 'video/mp4', 'application/pdf', 'text/plain', ''])(
-    'refuses %j',
-    (type) => {
-      const result = parseContentType(type);
-      expect(result.ok).toBe(false);
-      expect(!result.ok && result.error.code).toBe(MediaErrorCode.ContentTypeNotAllowed);
-    },
-  );
+  /**
+   * What is refused is the point of the list: nothing a browser would run if
+   * it were opened from a signed URL, and nothing the app cannot show.
+   */
+  it.each([
+    'image/heic',
+    'image/gif',
+    'image/svg+xml',
+    'text/html',
+    'application/xhtml+xml',
+    'text/javascript',
+    'application/javascript',
+    'application/octet-stream',
+    'application/zip',
+    '',
+  ])('refuses %j', (type) => {
+    const result = parseContentType(type);
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.error.code).toBe(MediaErrorCode.ContentTypeNotAllowed);
+  });
 
-  it('is case-sensitive, matching how a browser actually sends it', () => {
-    // A MIME type is lowercase by convention but not by grammar; refusing an
-    // unexpected case is safer than silently normalising something the
-    // browser never actually sends this way.
-    expect(parseContentType('IMAGE/JPEG').ok).toBe(false);
+  it('reads past the parameters a recorder adds', () => {
+    // MediaRecorder reports the codec; storage keys on the bare type.
+    const result = parseContentType('audio/webm;codecs=opus');
+    expect(result.ok && result.value).toBe('audio/webm');
+    // And a parameter is not a way to smuggle a refused type through.
+    expect(parseContentType('text/html;audio/webm').ok).toBe(false);
+  });
+});
+
+describe('kinds and their caps', () => {
+  it('knows what each type is', () => {
+    expect(kindOf('image/webp')).toBe('image');
+    expect(kindOf('audio/mp4')).toBe('audio');
+    expect(kindOf('video/quicktime')).toBe('video');
+    expect(kindOf('text/vcard')).toBe('file');
+    // Unknown is an opaque file, never something to draw.
+    expect(kindOf('application/x-unknown')).toBe('file');
+  });
+
+  it('caps video higher than everything else, and nothing above it', () => {
+    expect(parseDeclaredSize(15_000_001, 'audio/webm').ok).toBe(false);
+    expect(parseDeclaredSize(15_000_001, 'application/pdf').ok).toBe(false);
+    expect(parseDeclaredSize(15_000_001, 'video/mp4').ok).toBe(true);
+    expect(parseDeclaredSize(50_000_000, 'video/mp4').ok).toBe(true);
+    expect(parseDeclaredSize(50_000_001, 'video/mp4').ok).toBe(false);
+  });
+
+  it('gives every type its own extension, so a key says what it holds', () => {
+    const extensions = ALLOWED_CONTENT_TYPES.map(extensionFor);
+    // Unique, because local storage reads the type back from the extension.
+    expect(new Set(extensions).size).toBe(extensions.length);
+  });
+});
+
+describe('parseFileName', () => {
+  it('keeps a plain name', () => {
+    expect(parseFileName('boarding pass.pdf')).toBe('boarding pass.pdf');
+  });
+
+  it('keeps only the last segment of a path', () => {
+    expect(parseFileName('C:\\Users\\me\\ticket.pdf')).toBe('ticket.pdf');
+    expect(parseFileName('../../etc/passwd')).toBe('passwd');
+  });
+
+  it('drops control characters and treats nothing as no name', () => {
+    expect(parseFileName('a\u0000b\n.pdf')).toBe('ab.pdf');
+    expect(parseFileName('   ')).toBe(null);
+    expect(parseFileName(null)).toBe(null);
+    expect(parseFileName(undefined)).toBe(null);
+  });
+
+  it('cuts a very long name rather than refusing the file', () => {
+    expect([...parseFileName('x'.repeat(500))!]).toHaveLength(MAX_FILE_NAME_LENGTH);
   });
 });
 

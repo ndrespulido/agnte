@@ -247,6 +247,10 @@ export interface VerseMedia {
   readonly originalUrl: string | null;
   readonly thumbUrl: string | null;
   readonly mediumUrl: string | null;
+  /** image | audio | video | file. Verse draws nothing; it passes this on. */
+  readonly kind: string;
+  readonly contentType: string;
+  readonly fileName: string | null;
 }
 
 /** Verse's own name for "ask media whether these ids belong to this owner". */

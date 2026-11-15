@@ -1,3 +1,4 @@
+import { kindOf } from '../domain/media';
 import { getMediaBlobStore } from '../infrastructure/blob-store';
 import { PrismaMediaRepository } from '../infrastructure/prisma-media-repository';
 
@@ -38,6 +39,10 @@ export async function ownedMediaIds(
 export interface MediaSummaryForVerse {
   readonly id: string;
   readonly status: string;
+  /** image | audio | video | file — what a client should draw it as. */
+  readonly kind: string;
+  readonly contentType: string;
+  readonly fileName: string | null;
   /** Null while `pending` — the upload has not been confirmed yet, so there
    * is nothing verified at the key to hand out a link to. */
   readonly originalUrl: string | null;
@@ -80,6 +85,9 @@ export async function resolveMediaForVerse(
         return {
           id: media.id,
           status: media.status,
+          kind: kindOf(media.contentType),
+          contentType: media.contentType,
+          fileName: media.fileName,
           originalUrl: null,
           thumbUrl: null,
           mediumUrl: null,
@@ -98,7 +106,16 @@ export async function resolveMediaForVerse(
           : Promise.resolve(null),
       ]);
 
-      return { id: media.id, status: media.status, originalUrl, thumbUrl, mediumUrl };
+      return {
+        id: media.id,
+        status: media.status,
+        kind: kindOf(media.contentType),
+        contentType: media.contentType,
+        fileName: media.fileName,
+        originalUrl,
+        thumbUrl,
+        mediumUrl,
+      };
     }),
   );
 }

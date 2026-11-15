@@ -1,5 +1,5 @@
 import { type Clock, type DomainError, type Result, err, ok } from '@/shared/kernel';
-import { MAX_DECLARED_BYTES, transition, type Media } from '../domain/media';
+import { kindOf, maxBytesFor, transition, type Media } from '../domain/media';
 import { notFound, notPending, uploadMismatch, versionConflict } from '../domain/errors';
 import type {
   MediaBlobStore,
@@ -46,7 +46,7 @@ export function checkUpload(
 ): DomainError | null {
   if (!info) return uploadMismatch('no file was found at the upload location');
   if (info.sizeBytes <= 0) return uploadMismatch('the uploaded file is empty');
-  if (info.sizeBytes > MAX_DECLARED_BYTES) {
+  if (info.sizeBytes > maxBytesFor(media.contentType)) {
     return uploadMismatch('the uploaded file is larger than allowed');
   }
   if (info.contentType !== media.contentType) {
@@ -91,6 +91,24 @@ export async function confirmUpload(
 
   const processing = transition(media, 'processing', deps.clock);
   if (!processing.ok) return processing;
+
+  /*
+   * Only an image has anything to process. A voice note, a video or a file is
+   * stored as it arrived — no thumbnail, no variant — so it is ready the
+   * moment the upload checks out, and queuing a thumbnail job for it would
+   * only mark it failed when the image decoder refused it.
+   */
+  if (kindOf(media.contentType) !== 'image') {
+    const ready = transition(processing.value, 'ready', deps.clock);
+    if (!ready.ok) return ready;
+
+    const stored = await deps.media.update(ready.value, input.expectedVersion);
+    if (!stored) {
+      const current = await deps.media.findById(input.mediaId);
+      return err(versionConflict(input.expectedVersion, current?.version ?? -1));
+    }
+    return ok((await deps.media.findById(input.mediaId)) ?? ready.value);
+  }
 
   const applied = await deps.media.update(processing.value, input.expectedVersion);
   if (!applied) {

@@ -1,5 +1,10 @@
 import { type Clock, type DomainError, type Result, ok } from '@/shared/kernel';
-import { createPendingMedia, parseContentType, parseDeclaredSize } from '../domain/media';
+import {
+  createPendingMedia,
+  parseContentType,
+  parseDeclaredSize,
+  parseFileName,
+} from '../domain/media';
 import type { Media } from '../domain/media';
 import type { MediaBlobStore, MediaRepository, UploadTarget } from '../domain/ports';
 
@@ -13,6 +18,7 @@ export interface RequestUploadInput {
   ownerId: string;
   contentType: string;
   declaredSizeBytes: number;
+  fileName?: string | null | undefined;
   /** Client-generated UUIDv7 (architecture.md §2), when the client made one —
    * an offline-composed Verse (§8.1) needs a Media id to point at before this
    * call, let alone before the bytes exist. */
@@ -44,7 +50,7 @@ export async function requestUpload(
   const contentType = parseContentType(input.contentType);
   if (!contentType.ok) return contentType;
 
-  const declaredSizeBytes = parseDeclaredSize(input.declaredSizeBytes);
+  const declaredSizeBytes = parseDeclaredSize(input.declaredSizeBytes, contentType.value);
   if (!declaredSizeBytes.ok) return declaredSizeBytes;
 
   const media = createPendingMedia({
@@ -52,6 +58,7 @@ export async function requestUpload(
     ownerId: input.ownerId,
     contentType: contentType.value,
     declaredSizeBytes: declaredSizeBytes.value,
+    fileName: parseFileName(input.fileName),
     clock: deps.clock,
   });
 
