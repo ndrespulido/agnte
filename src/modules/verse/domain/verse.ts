@@ -12,6 +12,7 @@ import {
   eventPrecisionInvalid,
   eventRangeInverted,
   locationInvalid,
+  typedTextTooLong,
   noTags,
   propertyKeyInvalid,
   propertyValueTooLong,
@@ -72,6 +73,15 @@ export interface Verse {
   readonly deepTimeYears: number | null;
 
   readonly location: string | null;
+  /**
+   * What was typed into the composer to make this verse, verbatim (§12.3).
+   *
+   * A record, not a source: the fields above are what the verse *is*, and
+   * editing them does not rewrite this. It is kept because the same text
+   * parses differently under another interface language, so the parse can
+   * never be re-derived — and because the chat view shows it beside the card.
+   */
+  readonly typedText: string | null;
   readonly rating: number | null;
   readonly xp: string | null;
 
@@ -106,6 +116,7 @@ export const MIN_RATING = 0;
 export const MAX_RATING = 10;
 export const MAX_XP_LENGTH = 20_000;
 export const MAX_LOCATION_LENGTH = 200;
+export const MAX_TYPED_TEXT_LENGTH = 20_000;
 export const MAX_PROPERTIES = 50;
 export const MAX_PROPERTY_KEY_LENGTH = 64;
 export const MAX_PROPERTY_VALUE_LENGTH = 2_000;
@@ -357,6 +368,13 @@ export function parseXp(value: string): Result<string, DomainError> {
   return ok(value);
 }
 
+export function parseTypedText(value: string): Result<string, DomainError> {
+  if ([...value].length > MAX_TYPED_TEXT_LENGTH) {
+    return err(typedTextTooLong(MAX_TYPED_TEXT_LENGTH));
+  }
+  return ok(value);
+}
+
 export function parseLocation(value: string): Result<string, DomainError> {
   const trimmed = value.trim();
   if (trimmed.length === 0) return err(locationInvalid('it is empty'));
@@ -425,6 +443,7 @@ export interface NewVerse {
   tagIds: readonly string[];
   placement?: Placement;
   location?: string | null;
+  typedText?: string | null;
   rating?: number | null;
   xp?: string | null;
   properties?: Readonly<Record<string, string>>;
@@ -446,6 +465,7 @@ export function createVerse(input: NewVerse): Result<Verse, DomainError> {
     ownerId: input.ownerId,
     ...placementFields(placement),
     location: input.location ?? null,
+    typedText: input.typedText ?? null,
     rating: input.rating ?? null,
     xp: input.xp ?? null,
     properties: Object.freeze({ ...input.properties }),
@@ -467,6 +487,7 @@ export function createVerse(input: NewVerse): Result<Verse, DomainError> {
 export interface VerseChanges {
   placement?: Placement;
   location?: string | null;
+  typedText?: string | null;
   rating?: number | null;
   xp?: string | null;
   properties?: Readonly<Record<string, string>>;
@@ -503,6 +524,7 @@ export function applyChanges(
     ...verse,
     ...placementPart,
     location: changes.location === undefined ? verse.location : changes.location,
+    typedText: changes.typedText === undefined ? verse.typedText : changes.typedText,
     rating: changes.rating === undefined ? verse.rating : changes.rating,
     xp: changes.xp === undefined ? verse.xp : changes.xp,
     properties:

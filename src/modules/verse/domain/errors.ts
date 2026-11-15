@@ -29,6 +29,7 @@ export const VerseErrorCode = {
   TooManyProperties: 'verse.too_many_properties',
   XpTooLong: 'verse.xp_too_long',
   LocationInvalid: 'verse.location_invalid',
+  TypedTextTooLong: 'verse.typed_text_too_long',
   NoTags: 'verse.no_tags',
   VersionConflict: 'verse.version_conflict',
   Forbidden: 'verse.forbidden',
@@ -185,6 +186,13 @@ export const xpTooLong = (maximum: number): DomainError =>
   new DomainError(VerseErrorCode.XpTooLong, `xp must be at most ${maximum} characters.`, {
     details: { maximum },
   });
+
+export const typedTextTooLong = (maximum: number): DomainError =>
+  new DomainError(
+    VerseErrorCode.TypedTextTooLong,
+    `That is longer than ${maximum} characters.`,
+    { details: { maximum } },
+  );
 
 export const locationInvalid = (reason: string): DomainError =>
   new DomainError(VerseErrorCode.LocationInvalid, `Location is not valid: ${reason}.`);

@@ -47,6 +47,17 @@ export const fr: Strings = {
     dayFirst: true as boolean,
   },
 
+  /** The composer bar and the card that shows what it understood. */
+  composerBar: {
+    placeholder: 'Écrivez un verset — .étiquette, clé: valeur',
+    send: 'Ajouter ce verset',
+    openForm: 'Ajouter avec le formulaire',
+    needsTag: 'Ajoutez une étiquette pour l’enregistrer, comme .voyage',
+    notUnderstood: 'Non compris, conservé tel quel :',
+    newTag: 'nouvelle',
+    understood: 'Ce qu’agnte a compris',
+  },
+
   /**
    * API failures, by the stable code the server sends (`error.code`).
    *

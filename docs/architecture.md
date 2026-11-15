@@ -1345,8 +1345,17 @@ the building: an unreadable reserved value is kept as a property and listed in
 otherwise unset; a range has one precision, so a time on one end only is
 ignored; an end typed without a year follows its start; English reads
 ambiguous numeric dates day-first. `Note: call mom` is a property by the rule
-— the card is what makes that visible. Not built yet: the composer UI, the
-card, tag shortcuts in typed text, and non-ASCII tag names.
+— the card is what makes that visible.
+
+**Built on the web client:** a composer bar pinned to the bottom of the
+timeline, with the card above it showing what was understood *before* saving.
+The literal text is stored in `verse.typed_text`, verbatim, and is never
+rewritten by an edit to a field. A typed tag resolves to a tag of that name,
+then to a tag with that shortcut, then to a new tag. A verse still needs a
+tag, so text with none cannot be sent — the card says so. The plus in the bar
+opens the form for what typing cannot say. Not built yet: the chat layout
+(past up, future down, typed text beside the card), reply-to-edit, paste and
+attachments in the bar, and non-ASCII tag names.
 
 The parse is committed immediately and the card is editable afterwards — no
 confirmation step — because a composer that asks "is this right?" after every

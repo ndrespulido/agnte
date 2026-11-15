@@ -36,6 +36,7 @@ interface VerseRow {
   event_precision: string | null;
   deep_time_years: number | null;
   location: string | null;
+  typed_text: string | null;
   rating: number | null;
   xp: string | null;
   properties: unknown;
@@ -89,6 +90,7 @@ const toVerse = (row: VerseRow, tagIds: readonly string[]): Verse => ({
   eventPrecision: row.event_precision as EventPrecision | null,
   deepTimeYears: row.deep_time_years,
   location: row.location,
+  typedText: row.typed_text,
   rating: row.rating,
   xp: row.xp,
   properties: Object.freeze(toProperties(row.properties)),
@@ -161,7 +163,7 @@ export class PrismaVerseRepository
     const db = requireDatabase();
 
     const rows = await db.$queryRaw<VerseRow[]>`
-      SELECT id, owner_id, event_start, event_end, event_precision, deep_time_years, location,
+      SELECT id, owner_id, event_start, event_end, event_precision, deep_time_years, location, typed_text,
              rating, xp, properties, visibility, media_ids, timeline_years,
              created_at, updated_at, version
       FROM verse.verse WHERE id = ${id}::uuid LIMIT 1
@@ -217,7 +219,7 @@ export class PrismaVerseRepository
     await requireDatabase().$transaction(async (tx) => {
       await tx.$executeRaw`
         INSERT INTO verse.verse
-          (id, owner_id, event_start, event_end, event_precision, deep_time_years, location,
+          (id, owner_id, event_start, event_end, event_precision, deep_time_years, location, typed_text,
            rating, xp, properties, visibility, media_ids, timeline_years,
            created_at, updated_at, version)
         VALUES (
@@ -228,6 +230,7 @@ export class PrismaVerseRepository
           ${verse.eventPrecision},
           ${verse.deepTimeYears},
           ${verse.location},
+          ${verse.typedText},
           ${verse.rating},
           ${verse.xp},
           ${JSON.stringify(verse.properties)}::jsonb,
@@ -261,6 +264,7 @@ export class PrismaVerseRepository
             event_precision = ${verse.eventPrecision},
             deep_time_years = ${verse.deepTimeYears},
             location = ${verse.location},
+            typed_text = ${verse.typedText},
             rating = ${verse.rating},
             xp = ${verse.xp},
             properties = ${JSON.stringify(verse.properties)}::jsonb,
@@ -354,7 +358,7 @@ export class PrismaVerseRepository
     const rows =
       query.direction === 'past'
         ? await requireDatabase().$queryRaw<VerseRow[]>`
-            SELECT v.id, v.owner_id, v.event_start, v.event_end, v.event_precision, v.deep_time_years, v.location,
+            SELECT v.id, v.owner_id, v.event_start, v.event_end, v.event_precision, v.deep_time_years, v.location, v.typed_text,
                    v.rating, v.xp, v.properties, v.visibility, v.media_ids,
                    v.timeline_years, v.created_at, v.updated_at, v.version
             FROM verse.verse v
@@ -377,7 +381,7 @@ export class PrismaVerseRepository
             LIMIT ${limit}
           `
         : await requireDatabase().$queryRaw<VerseRow[]>`
-            SELECT v.id, v.owner_id, v.event_start, v.event_end, v.event_precision, v.deep_time_years, v.location,
+            SELECT v.id, v.owner_id, v.event_start, v.event_end, v.event_precision, v.deep_time_years, v.location, v.typed_text,
                    v.rating, v.xp, v.properties, v.visibility, v.media_ids,
                    v.timeline_years, v.created_at, v.updated_at, v.version
             FROM verse.verse v
@@ -458,7 +462,7 @@ export class PrismaVerseRepository
 
     const rows = await requireDatabase().$queryRaw<VerseRow[]>`
       WITH matched AS (
-        SELECT v.id, v.owner_id, v.event_start, v.event_end, v.event_precision, v.deep_time_years, v.location,
+        SELECT v.id, v.owner_id, v.event_start, v.event_end, v.event_precision, v.deep_time_years, v.location, v.typed_text,
                v.rating, v.xp, v.properties, v.visibility, v.media_ids,
                v.timeline_years, v.created_at, v.updated_at, v.version
         FROM verse.verse v
