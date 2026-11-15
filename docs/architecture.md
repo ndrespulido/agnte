@@ -1391,6 +1391,14 @@ dark mode — only the shapes changed. Applied to the verse form and the
 composer; the other forms (sign-in, reminders, tags) took the new shape of
 inputs and buttons but still have titles above their fields.
 
+**The bar and the form are one draft.** Pressing plus opens the form with
+what the bar holds — the typed text already parsed into the fields, typed tags
+as names, and anything attached in the bar carried along by name — so "write,
+then plus, then add photos" continues the same verse. Saving from the form
+stores the bar's text as `typedText` and clears the bar. The plus is no longer
+the metallic button: at that size the gradient read as a grey disc, so it is
+an accent-tinted one.
+
 Not built: **transcription of voice notes** (decided, but it is the second
 metered dependency and needs a provider, a key and the daily cap of §12.5
 before any code), stripping metadata from non-image files on erasure, video

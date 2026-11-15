@@ -14,6 +14,7 @@ import {
 } from './api';
 import { downscaleImage } from './downscale';
 import {
+  type Composed,
   fromDateAndTime,
   placementOf,
   splitTagNames,
@@ -38,31 +39,56 @@ import { failureMessage, useStrings } from './locale';
  * a stale write is refused (409) rather than quietly overwriting whatever
  * changed underneath.
  */
+/**
+ * What the composer bar hands over when the form is opened from it.
+ *
+ * The bar and the form are two ways of writing the same verse, so opening the
+ * form mid-sentence must not throw the sentence away: what was typed arrives
+ * already parsed into the fields, and anything attached in the bar comes with
+ * it. Saving from the form then clears the bar.
+ */
+export interface SheetDraft {
+  /** The bar's text, verbatim — stored with the verse as `typedText`. */
+  typedText: string;
+  composed: Composed;
+  /** Already uploaded in the bar; shown by name and saved with the verse. */
+  attachments: { mediaId: string; name: string }[];
+}
+
 export function VerseSheet({
   initial,
+  draft,
   onClose,
   onSaved,
 }: {
   initial?: VerseView;
+  draft?: SheetDraft;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const editing = initial !== undefined;
+  const typed = draft?.composed;
 
   const [tags, setTags] = useState<TagView[]>([]);
   const [selected, setSelected] = useState<string[]>(
     initial ? initial.tags.map((t) => t.id) : [],
   );
   const s = useStrings();
-  const [newTag, setNewTag] = useState('');
-  const [xp, setXp] = useState(initial?.xp ?? '');
-  const [location, setLocation] = useState(initial?.location ?? '');
-  const [rating, setRating] = useState(
-    initial?.rating === null || initial?.rating === undefined
-      ? ''
-      : String(initial.rating),
+  // Typed tags go in as names: the save path already finds an existing tag by
+  // name and creates the rest, so there is one rule for both ways in.
+  const [newTag, setNewTag] = useState(
+    typed ? typed.tags.map((name) => `.${name}`).join(', ') : '',
   );
-  const [visibility, setVisibility] = useState(initial?.explicitVisibility ?? '');
+  const [xp, setXp] = useState(initial?.xp ?? typed?.xp ?? '');
+  const [location, setLocation] = useState(initial?.location ?? typed?.location ?? '');
+  const [carried, setCarried] = useState(draft?.attachments ?? []);
+  const startingRating = initial ? initial.rating : (typed?.rating ?? null);
+  const [rating, setRating] = useState(
+    startingRating === null ? '' : String(startingRating),
+  );
+  const [visibility, setVisibility] = useState<string>(
+    initial?.explicitVisibility ?? typed?.visibility ?? '',
+  );
   /*
    * A date field and an optional time, for each end of the range.
    *
@@ -72,22 +98,19 @@ export function VerseSheet({
    * timeline is already showing it.
    */
   const initialPlacement = initial ? placementOf(initial) : null;
-  const initialPrecision =
-    initialPlacement?.kind === 'date' ? initialPlacement.precision : null;
-  const [startDate, setStartDate] = useState(
-    toDateInput(initial?.eventStart ?? null, initialPrecision),
-  );
-  const [startTime, setStartTime] = useState(
-    toTimeInput(initial?.eventStart ?? null, initialPrecision),
-  );
-  const [endDate, setEndDate] = useState(
-    toDateInput(initial?.eventEnd ?? null, initialPrecision),
-  );
-  const [endTime, setEndTime] = useState(
-    toTimeInput(initial?.eventEnd ?? null, initialPrecision),
-  );
+  const initialPrecision = initial
+    ? initialPlacement?.kind === 'date'
+      ? initialPlacement.precision
+      : null
+    : (typed?.eventPrecision ?? null);
+  const initialStart = initial ? initial.eventStart : (typed?.eventStart ?? null);
+  const initialEnd = initial ? initial.eventEnd : (typed?.eventEnd ?? null);
+  const [startDate, setStartDate] = useState(toDateInput(initialStart, initialPrecision));
+  const [startTime, setStartTime] = useState(toTimeInput(initialStart, initialPrecision));
+  const [endDate, setEndDate] = useState(toDateInput(initialEnd, initialPrecision));
+  const [endTime, setEndTime] = useState(toTimeInput(initialEnd, initialPrecision));
   const [properties, setProperties] = useState<PropertyRow[]>(
-    initial ? asRows(initial.properties) : [],
+    initial ? asRows(initial.properties) : typed ? asRows(typed.properties) : [],
   );
   const [images, setImages] = useState<PickedImage[]>(
     initial ? initial.media.map(asPicked) : [],
@@ -279,9 +302,13 @@ export function VerseSheet({
         return;
       }
 
-      const mediaIds = images
-        .filter((image) => image.status === 'ready' && image.mediaId !== null)
-        .map((image) => image.mediaId as string);
+      const mediaIds = [
+        // What was attached in the bar first: it was added first.
+        ...carried.map((item) => item.mediaId),
+        ...images
+          .filter((image) => image.status === 'ready' && image.mediaId !== null)
+          .map((image) => image.mediaId as string),
+      ];
 
       const fields = {
         tagIds,
@@ -311,6 +338,9 @@ export function VerseSheet({
             // "Now" is a moment, not a day: it sorts into this afternoon
             // rather than to the top of today.
             eventPrecision: fields.eventPrecision ?? 'minute',
+            // What the bar held when the form was opened from it. A record of
+            // what was typed, even if the fields were changed here afterwards.
+            ...(draft && draft.typedText !== '' ? { typedText: draft.typedText } : {}),
           },
           // The labels the timeline draws the queued row with, taken from the
           // list this sheet already loaded plus anything it just created.
@@ -452,6 +482,26 @@ export function VerseSheet({
 
         <fieldset className="field">
           <legend className="visually-hidden">{s.verse.photos}</legend>
+          {carried.length > 0 ? (
+            <ul className="composer-attachments carried">
+              {carried.map((item) => (
+                <li key={item.mediaId}>
+                  <span>{item.name}</span>
+                  <button
+                    type="button"
+                    aria-label={`${s.composerBar.remove} ${item.name}`}
+                    onClick={() =>
+                      setCarried((current) =>
+                        current.filter((other) => other.mediaId !== item.mediaId),
+                      )
+                    }
+                  >
+                    <Icon name="close" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
           {images.length > 0 ? (
             <ul className="picked-images">
               {images.map((image) => (

@@ -12,6 +12,7 @@ import {
 import { dateLine, resolveTags, verseFrom } from './compose';
 import { Icon } from './Icon';
 import { useStrings } from './locale';
+import { VerseSheet } from './VerseSheet';
 
 /**
  * The composer bar: type a verse the way you would message yourself (§12.3).
@@ -24,8 +25,8 @@ import { useStrings } from './locale';
  * Photos, files and voice notes are attached from the bar too — picked,
  * pasted or recorded — and upload while the person is still typing.
  *
- * `onOpenForm` is the way out: anything the grammar cannot say (deep time)
- * still goes through the form.
+ * The plus opens the form *with* what the bar holds, for what typing cannot
+ * say (deep time) and for carrying on in fields instead of text.
  */
 interface Attachment {
   key: number;
@@ -36,13 +37,7 @@ interface Attachment {
   reason: string | null;
 }
 
-export function Composer({
-  onAdded,
-  onOpenForm,
-}: {
-  onAdded: () => void;
-  onOpenForm: () => void;
-}) {
+export function Composer({ onAdded }: { onAdded: () => void }) {
   const s = useStrings();
   const [text, setText] = useState('');
   const [tags, setTags] = useState<TagView[]>([]);
@@ -50,6 +45,7 @@ export function Composer({
   const [error, setError] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [recording, setRecording] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
   const nextKey = useRef(0);
   const picker = useRef<HTMLInputElement | null>(null);
   const recorder = useRef<MediaRecorder | null>(null);
@@ -307,7 +303,10 @@ export function Composer({
           type="button"
           className="composer-plus"
           aria-label={s.composerBar.openForm}
-          onClick={onOpenForm}
+          // Not mid-upload: the form takes over what is attached, and a file
+          // still on its way would be left behind in the bar.
+          disabled={uploading}
+          onClick={() => setFormOpen(true)}
         >
           <Icon name="plus" />
         </button>
@@ -372,6 +371,36 @@ export function Composer({
           <Icon name="send" />
         </button>
       </form>
+
+      {formOpen ? (
+        <VerseSheet
+          // The bar's own state, handed over: what was typed is already in
+          // the fields when the form opens, so "write, then press plus to add
+          // photos" continues the same verse instead of starting another.
+          {...(composed !== null
+            ? {
+                draft: {
+                  typedText: typed,
+                  // Shortcuts expanded here, where the tag list is known.
+                  composed: { ...composed, tags: resolved.map((tag) => tag.name) },
+                  attachments: attachments.flatMap((item) =>
+                    item.mediaId === null
+                      ? []
+                      : [{ mediaId: item.mediaId, name: item.name }],
+                  ),
+                },
+              }
+            : {})}
+          onClose={() => setFormOpen(false)}
+          onSaved={() => {
+            setFormOpen(false);
+            // The verse is saved; the bar must not still be holding it.
+            setText('');
+            setAttachments([]);
+            onAdded();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
