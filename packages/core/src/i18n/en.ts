@@ -47,6 +47,17 @@ export const en = {
     dayFirst: true as boolean,
   },
 
+  /** The composer bar and the card that shows what it understood. */
+  composerBar: {
+    placeholder: 'Write a verse — .tag, key: value',
+    send: 'Add this verse',
+    openForm: 'Add with the form',
+    needsTag: 'Add a tag to save this, like .travel',
+    notUnderstood: 'Not understood, kept as written:',
+    newTag: 'new',
+    understood: 'What agnte understood',
+  },
+
   /**
    * API failures, by the stable code the server sends (`error.code`).
    *

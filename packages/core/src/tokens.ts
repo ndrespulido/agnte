@@ -225,6 +225,8 @@ export const zIndex = {
  */
 export const size = {
   addButton: 56,
+  /** The plus inside the composer bar: a thumb target, not a landmark. */
+  composerPlus: 44,
   minTapTarget: 44,
 } as const;
 

@@ -54,6 +54,17 @@ export const zh: Strings = {
     dayFirst: true as boolean,
   },
 
+  /** The composer bar and the card that shows what it understood. */
+  composerBar: {
+    placeholder: '写一条记录 — .标签，键: 值',
+    send: '添加这条记录',
+    openForm: '用表单添加',
+    needsTag: '添加一个标签才能保存，例如 .travel',
+    notUnderstood: '未能理解，按原样保留：',
+    newTag: '新',
+    understood: 'agnte 的理解',
+  },
+
   /**
    * API failures, by the stable code the server sends (`error.code`).
    *

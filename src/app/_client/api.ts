@@ -17,6 +17,8 @@ export interface VerseView {
    * `placementOf` infers it the way the server's backfill did.
    */
   eventPrecision?: 'date' | 'minute' | null;
+  /** The composer text, verbatim. Absent or null for a verse made in the form. */
+  typedText?: string | null;
   deepTimeYears: number | null;
   location: string | null;
   rating: number | null;
@@ -145,6 +147,8 @@ export interface NewVerse {
   eventStart?: string | null;
   eventEnd?: string | null;
   eventPrecision?: 'date' | 'minute' | null;
+  /** The composer text, verbatim. Absent or null for a verse made in the form. */
+  typedText?: string | null;
   visibility?: string | null;
   properties?: Record<string, string>;
   mediaIds?: string[];
@@ -261,6 +265,8 @@ export interface VerseEdit {
   eventStart?: string | null;
   eventEnd?: string | null;
   eventPrecision?: 'date' | 'minute' | null;
+  /** The composer text, verbatim. Absent or null for a verse made in the form. */
+  typedText?: string | null;
   visibility?: string | null;
   properties?: Record<string, string>;
   mediaIds?: string[];

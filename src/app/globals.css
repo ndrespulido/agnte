@@ -178,6 +178,7 @@ a {
      so the last verse is never underneath it. */
   padding: calc(var(--space-xxxl) + var(--space-xl)) var(--space-lg)
     calc(var(--size-add-button) + var(--space-xxl));
+  /* ^ the composer bar is no taller than the button it replaced. */
 }
 
 /*
@@ -491,14 +492,51 @@ button.tag:focus-visible {
  * No gloss and no bevel: no second highlight, no inner glow, nothing that
  * suggests a curved surface.
  */
-.add-button {
+/*
+ * The composer: a glass bar pinned to the bottom, and above it the card that
+ * shows what was understood. Glass for the same reason as the date header —
+ * the timeline scrolls beneath it — with the same translucent base keeping
+ * the text at contrast.
+ */
+.composer {
   position: fixed;
-  right: var(--space-xl);
-  bottom: var(--space-xl);
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: var(--z-add-button);
 
-  width: var(--size-add-button);
-  height: var(--size-add-button);
+  background: var(--color-glass);
+  backdrop-filter: blur(var(--blur-glass));
+  -webkit-backdrop-filter: blur(var(--blur-glass));
+  border-top: var(--hairline) solid var(--color-glass-edge);
+  /* The home indicator on a phone with no button. */
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+.composer-bar,
+.composer-card {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: var(--space-sm) var(--space-lg);
+}
+
+.composer-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.composer-bar input {
+  flex: 1;
+  min-width: 0;
+  /* 16px or iOS zooms the page when the field is focused. */
+  font-size: var(--text-body);
+}
+
+.composer-plus {
+  flex: none;
+  width: var(--size-composer-plus);
+  height: var(--size-composer-plus);
   border-radius: var(--radius-pill);
   border: none;
 
@@ -513,17 +551,71 @@ button.tag:focus-visible {
     var(--shadow-button);
 
   color: var(--color-ink);
-  font-size: var(--text-date);
+  font-size: var(--text-large);
   line-height: 1;
   cursor: pointer;
-
-  transition: transform var(--motion-fast) var(--motion-ease-out);
 }
 
-.add-button:active {
+.composer-plus:active {
   /* Barely there. A button that visibly sinks is a button pretending to be
      hardware. */
   transform: scale(0.97);
+}
+
+.composer-send {
+  flex: none;
+}
+
+.composer-card {
+  max-height: 40vh;
+  overflow-y: auto;
+  border-bottom: var(--hairline) solid var(--color-rule);
+  font-size: var(--text-small);
+}
+
+.composer-note {
+  font-size: var(--text-body);
+  margin: 0 0 var(--space-xs);
+}
+
+.composer-facts {
+  margin: 0;
+}
+
+.composer-facts > div {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.composer-facts dt {
+  color: var(--color-ink-soft);
+  flex: none;
+}
+
+.composer-facts dt::after {
+  content: ':';
+}
+
+.composer-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.composer-tags {
+  margin: var(--space-xs) 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.composer-tags em,
+.composer-hint {
+  color: var(--color-ink-soft);
+}
+
+.composer-hint {
+  margin: var(--space-xs) 0 0;
 }
 
 /* Sheets, forms and notices. */

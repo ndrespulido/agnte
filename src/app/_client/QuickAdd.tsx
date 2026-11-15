@@ -1,36 +1,24 @@
 'use client';
 
 import { useState } from 'react';
+import { Composer } from './Composer';
 import { VerseSheet } from './VerseSheet';
-import { useStrings } from './locale';
 
 /**
- * The add button.
+ * Adding a verse: the composer bar, and the form behind its plus.
  *
- * The button is the "metallic paper" from CLAUDE.md: a soft vertical
- * silver-to-pewter gradient with a 1px lighter top edge and darker bottom edge,
- * and a very soft shadow. No gloss, no bevel — the styling is in globals.css so
- * the gradient and its two edges sit together where they can be read as one
- * idea.
- *
- * The sheet it opens is `VerseSheet`, the same one editing uses; see that file
- * for why there is only one.
+ * The bar is the fast path — type it the way you would message yourself. The
+ * plus opens `VerseSheet`, the same sheet editing uses, for what typing cannot
+ * say. The plus is the "metallic paper" from CLAUDE.md: a soft vertical
+ * silver-to-pewter gradient with a 1px lighter top edge and darker bottom
+ * edge. No gloss, no bevel — the styling is in globals.css.
  */
 export function QuickAdd({ onAdded }: { onAdded: () => void }) {
-  const s = useStrings();
   const [open, setOpen] = useState(false);
 
   return (
     <>
-      <button
-        type="button"
-        className="add-button"
-        aria-label={s.timeline.addAVerse}
-        aria-expanded={open}
-        onClick={() => setOpen(true)}
-      >
-        <span aria-hidden="true">+</span>
-      </button>
+      <Composer onAdded={onAdded} onOpenForm={() => setOpen(true)} />
 
       {open ? (
         <VerseSheet
