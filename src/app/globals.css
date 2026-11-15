@@ -456,6 +456,38 @@ button.tag:focus-visible {
   display: block;
 }
 
+/*
+ * Voice notes, videos and files. Above the stretched open button for the same
+ * reason a tag chip is: a tap on a player has to reach the player.
+ */
+.verse-attachments {
+  list-style: none;
+  margin: 0 0 var(--space-sm);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  position: relative;
+  z-index: 2;
+}
+
+.verse-attachments audio,
+.verse-attachments video {
+  display: block;
+  width: 100%;
+  max-width: 22rem;
+}
+
+.verse-attachments video {
+  max-height: 16rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-paper-raised);
+}
+
+.attachment-file {
+  overflow-wrap: anywhere;
+}
+
 /* Uploaded, not yet thumbnailed. Left as an empty tile so the row does not
    change width when the variant arrives. */
 .verse-media li.pending {
@@ -599,6 +631,70 @@ button.tag:focus-visible {
 
 .composer-send {
   flex: none;
+}
+
+/* Attach and record: quiet text-sized controls, not a second landmark. */
+.composer-tool {
+  flex: none;
+  min-width: var(--size-min-tap-target);
+  min-height: var(--size-min-tap-target);
+  border: none;
+  background: none;
+  color: var(--color-ink-soft);
+  font-size: var(--text-large);
+  cursor: pointer;
+}
+
+.composer-tool[aria-pressed='true'] {
+  color: var(--color-failed);
+}
+
+.composer-error {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: var(--space-xs) var(--space-lg) 0;
+}
+
+.composer-attachments {
+  list-style: none;
+  margin: var(--space-xs) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.composer-attachments li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xxs) var(--space-sm);
+  border: var(--hairline) solid var(--color-rule);
+  border-radius: var(--radius-pill);
+  max-width: 100%;
+}
+
+.composer-attachments li.working {
+  color: var(--color-ink-faint);
+}
+
+.composer-attachments li.failed {
+  color: var(--color-failed);
+}
+
+.composer-attachments span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 12rem;
+}
+
+.composer-attachments button {
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 var(--space-xxs);
 }
 
 .composer-card {

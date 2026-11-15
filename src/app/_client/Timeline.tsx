@@ -25,6 +25,7 @@ import {
   timeLabel,
   timelinePosition,
 } from '@agnte/core';
+import { isImage, OtherMedia } from './Attachments';
 import { withPending, type TimelineVerse } from './pending';
 import { emptyMessage, showsCatalogue } from './timeline-filter';
 import { useStrings } from './locale';
@@ -920,6 +921,7 @@ function VerseRow({
 
       <div className="verse-body">
         <VerseMedia verse={verse} />
+        <OtherMedia media={verse.media} />
 
         {verse.xp ? <p className="verse-xp">{verse.xp}</p> : null}
 
@@ -1027,7 +1029,11 @@ function VerseRow({
  */
 function VerseMedia({ verse }: { verse: VerseView }) {
   const s = useStrings();
-  const shown = verse.media.filter((media) => media.status !== 'failed');
+  // Pictures only: a voice note has no thumbnail and would sit here as a
+  // tile that never fills in. `OtherMedia` draws the rest.
+  const shown = verse.media.filter(
+    (media) => media.status !== 'failed' && isImage(media),
+  );
   if (shown.length === 0) return null;
 
   return (

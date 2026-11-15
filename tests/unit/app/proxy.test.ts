@@ -100,6 +100,11 @@ describe('the media origin in the policy', () => {
     expect(directive(policy, 'img-src')).toContain(
       'https://abc123.r2.cloudflarestorage.com',
     );
+    // Voice notes and video play from there too. Missing, they fall under
+    // `default-src 'self'` and only a deployed build shows the failure.
+    expect(directive(policy, 'media-src')).toBe(
+      "media-src 'self' blob: https://abc123.r2.cloudflarestorage.com",
+    );
   });
 
   it('names the origin only, never a path from the endpoint', () => {
@@ -133,6 +138,11 @@ describe('the other security headers', () => {
     expect(headers.get('referrer-policy')).toBe('strict-origin-when-cross-origin');
     expect(headers.get('x-content-type-options')).toBe('nosniff');
     expect(headers.get('permissions-policy')).toContain('camera=()');
+    // Voice notes: this origin may ask for the microphone, and nothing
+    // embedded in it may. `microphone=()` here is what made the record button
+    // fail the first time it was pressed in a browser.
+    expect(headers.get('permissions-policy')).toContain('microphone=(self)');
+    expect(headers.get('permissions-policy')).not.toContain('microphone=*');
   });
 });
 
