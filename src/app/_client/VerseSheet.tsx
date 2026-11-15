@@ -14,12 +14,14 @@ import {
 } from './api';
 import { downscaleImage } from './downscale';
 import {
+  type Composed,
   fromDateAndTime,
   placementOf,
   splitTagNames,
   toDateInput,
   toTimeInput,
 } from '@agnte/core';
+import { Icon } from './Icon';
 import { failureMessage, useStrings } from './locale';
 
 /**
@@ -37,31 +39,56 @@ import { failureMessage, useStrings } from './locale';
  * a stale write is refused (409) rather than quietly overwriting whatever
  * changed underneath.
  */
+/**
+ * What the composer bar hands over when the form is opened from it.
+ *
+ * The bar and the form are two ways of writing the same verse, so opening the
+ * form mid-sentence must not throw the sentence away: what was typed arrives
+ * already parsed into the fields, and anything attached in the bar comes with
+ * it. Saving from the form then clears the bar.
+ */
+export interface SheetDraft {
+  /** The bar's text, verbatim — stored with the verse as `typedText`. */
+  typedText: string;
+  composed: Composed;
+  /** Already uploaded in the bar; shown by name and saved with the verse. */
+  attachments: { mediaId: string; name: string }[];
+}
+
 export function VerseSheet({
   initial,
+  draft,
   onClose,
   onSaved,
 }: {
   initial?: VerseView;
+  draft?: SheetDraft;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const editing = initial !== undefined;
+  const typed = draft?.composed;
 
   const [tags, setTags] = useState<TagView[]>([]);
   const [selected, setSelected] = useState<string[]>(
     initial ? initial.tags.map((t) => t.id) : [],
   );
   const s = useStrings();
-  const [newTag, setNewTag] = useState('');
-  const [xp, setXp] = useState(initial?.xp ?? '');
-  const [location, setLocation] = useState(initial?.location ?? '');
-  const [rating, setRating] = useState(
-    initial?.rating === null || initial?.rating === undefined
-      ? ''
-      : String(initial.rating),
+  // Typed tags go in as names: the save path already finds an existing tag by
+  // name and creates the rest, so there is one rule for both ways in.
+  const [newTag, setNewTag] = useState(
+    typed ? typed.tags.map((name) => `.${name}`).join(', ') : '',
   );
-  const [visibility, setVisibility] = useState(initial?.explicitVisibility ?? '');
+  const [xp, setXp] = useState(initial?.xp ?? typed?.xp ?? '');
+  const [location, setLocation] = useState(initial?.location ?? typed?.location ?? '');
+  const [carried, setCarried] = useState(draft?.attachments ?? []);
+  const startingRating = initial ? initial.rating : (typed?.rating ?? null);
+  const [rating, setRating] = useState(
+    startingRating === null ? '' : String(startingRating),
+  );
+  const [visibility, setVisibility] = useState<string>(
+    initial?.explicitVisibility ?? typed?.visibility ?? '',
+  );
   /*
    * A date field and an optional time, for each end of the range.
    *
@@ -71,22 +98,19 @@ export function VerseSheet({
    * timeline is already showing it.
    */
   const initialPlacement = initial ? placementOf(initial) : null;
-  const initialPrecision =
-    initialPlacement?.kind === 'date' ? initialPlacement.precision : null;
-  const [startDate, setStartDate] = useState(
-    toDateInput(initial?.eventStart ?? null, initialPrecision),
-  );
-  const [startTime, setStartTime] = useState(
-    toTimeInput(initial?.eventStart ?? null, initialPrecision),
-  );
-  const [endDate, setEndDate] = useState(
-    toDateInput(initial?.eventEnd ?? null, initialPrecision),
-  );
-  const [endTime, setEndTime] = useState(
-    toTimeInput(initial?.eventEnd ?? null, initialPrecision),
-  );
+  const initialPrecision = initial
+    ? initialPlacement?.kind === 'date'
+      ? initialPlacement.precision
+      : null
+    : (typed?.eventPrecision ?? null);
+  const initialStart = initial ? initial.eventStart : (typed?.eventStart ?? null);
+  const initialEnd = initial ? initial.eventEnd : (typed?.eventEnd ?? null);
+  const [startDate, setStartDate] = useState(toDateInput(initialStart, initialPrecision));
+  const [startTime, setStartTime] = useState(toTimeInput(initialStart, initialPrecision));
+  const [endDate, setEndDate] = useState(toDateInput(initialEnd, initialPrecision));
+  const [endTime, setEndTime] = useState(toTimeInput(initialEnd, initialPrecision));
   const [properties, setProperties] = useState<PropertyRow[]>(
-    initial ? asRows(initial.properties) : [],
+    initial ? asRows(initial.properties) : typed ? asRows(typed.properties) : [],
   );
   const [images, setImages] = useState<PickedImage[]>(
     initial ? initial.media.map(asPicked) : [],
@@ -278,9 +302,13 @@ export function VerseSheet({
         return;
       }
 
-      const mediaIds = images
-        .filter((image) => image.status === 'ready' && image.mediaId !== null)
-        .map((image) => image.mediaId as string);
+      const mediaIds = [
+        // What was attached in the bar first: it was added first.
+        ...carried.map((item) => item.mediaId),
+        ...images
+          .filter((image) => image.status === 'ready' && image.mediaId !== null)
+          .map((image) => image.mediaId as string),
+      ];
 
       const fields = {
         tagIds,
@@ -310,6 +338,9 @@ export function VerseSheet({
             // "Now" is a moment, not a day: it sorts into this afternoon
             // rather than to the top of today.
             eventPrecision: fields.eventPrecision ?? 'minute',
+            // What the bar held when the form was opened from it. A record of
+            // what was typed, even if the fields were changed here afterwards.
+            ...(draft && draft.typedText !== '' ? { typedText: draft.typedText } : {}),
           },
           // The labels the timeline draws the queued row with, taken from the
           // list this sheet already loaded plus anything it just created.
@@ -337,34 +368,50 @@ export function VerseSheet({
         aria-label={editing ? s.verse.editHeading : s.verse.addHeading}
         onClick={(event) => event.stopPropagation()}
       >
-        <label className="field">
-          <span>{s.verse.whatHappened}</span>
+        {/* A handle, because a sheet that slides up from the bottom should
+            look like something that can be put back down. Decoration only —
+            Escape and the backdrop are what close it. */}
+        <div className="sheet-grabber" aria-hidden="true" />
+
+        {/*
+          The field's name is inside the box, as its placeholder and an icon,
+          rather than above it as a title. The name still exists for a screen
+          reader (`aria-label`) — a placeholder alone disappears on the first
+          keystroke and is not announced as a label by every reader.
+        */}
+        <label className="control control-area">
+          <Icon name="note" />
           <textarea
             ref={firstFieldRef}
             value={xp}
             onChange={(event) => setXp(event.target.value)}
             rows={3}
-            placeholder={s.verse.xpPlaceholder}
+            placeholder={s.verse.whatHappened}
+            aria-label={s.verse.whatHappened}
           />
         </label>
 
         <LocationField value={location} onChange={setLocation} />
 
         <fieldset className="field">
-          <legend>{s.verse.when}</legend>
+          <legend className="visually-hidden">{s.verse.when}</legend>
           {/* A date and an optional time, not one `datetime-local`: that
               control cannot say "no time", and a day with no time is what
               most entries are. */}
-          <div className="field-pair">
-            <label>
-              <span>{s.verse.starts}</span>
+          <div className="field-pair when-row">
+            <label className="control">
+              <Icon name="calendar" />
+              {/* A date input cannot hold a placeholder, so the word sits in
+                  the box beside it. */}
+              <span className="control-prefix">{s.verse.starts}</span>
               <input
                 type="date"
                 value={startDate}
                 onChange={(event) => setStartDate(event.target.value)}
               />
             </label>
-            <label>
+            <label className="control">
+              <Icon name="clock" />
               <input
                 type="time"
                 aria-label={s.verse.startTime}
@@ -373,18 +420,20 @@ export function VerseSheet({
               />
             </label>
           </div>
-          <div className="field-pair">
-            <label>
+          <div className="field-pair when-row">
+            <label className="control">
+              <Icon name="calendar" />
               {/* A range, not a second event: leaving it empty is the common
                   case, because most things happen at a moment. */}
-              <span>{s.verse.ends}</span>
+              <span className="control-prefix">{s.verse.ends}</span>
               <input
                 type="date"
                 value={endDate}
                 onChange={(event) => setEndDate(event.target.value)}
               />
             </label>
-            <label>
+            <label className="control">
+              <Icon name="clock" />
               <input
                 type="time"
                 aria-label={s.verse.endTime}
@@ -400,21 +449,23 @@ export function VerseSheet({
         </fieldset>
 
         <div className="field-pair">
-          <label className="field">
-            <span>{s.verse.rating}</span>
+          <label className="control">
+            <Icon name="star" />
             <input
               type="number"
               min={0}
               max={10}
               value={rating}
               onChange={(event) => setRating(event.target.value)}
-              placeholder={s.verse.ratingPlaceholder}
+              placeholder={`${s.verse.rating} ${s.verse.ratingPlaceholder}`}
+              aria-label={s.verse.rating}
             />
           </label>
 
-          <label className="field">
-            <span>{s.verse.visibility}</span>
+          <label className="control">
+            <Icon name="eye" />
             <select
+              aria-label={s.verse.visibility}
               value={visibility}
               onChange={(event) => setVisibility(event.target.value)}
             >
@@ -430,7 +481,27 @@ export function VerseSheet({
         </div>
 
         <fieldset className="field">
-          <legend>{s.verse.photos}</legend>
+          <legend className="visually-hidden">{s.verse.photos}</legend>
+          {carried.length > 0 ? (
+            <ul className="composer-attachments carried">
+              {carried.map((item) => (
+                <li key={item.mediaId}>
+                  <span>{item.name}</span>
+                  <button
+                    type="button"
+                    aria-label={`${s.composerBar.remove} ${item.name}`}
+                    onClick={() =>
+                      setCarried((current) =>
+                        current.filter((other) => other.mediaId !== item.mediaId),
+                      )
+                    }
+                  >
+                    <Icon name="close" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
           {images.length > 0 ? (
             <ul className="picked-images">
               {images.map((image) => (
@@ -479,12 +550,13 @@ export function VerseSheet({
                 void addFiles(files);
               }}
             />
+            <Icon name="image" />
             <span>{images.length === 0 ? s.verse.addPhotos : s.verse.addAnother}</span>
           </label>
         </fieldset>
 
         <fieldset className="field">
-          <legend>{s.verse.tags}</legend>
+          <legend className="visually-hidden">{s.verse.tags}</legend>
           <div className="tag-picker">
             {tags.map((tag) => (
               <button
@@ -498,12 +570,15 @@ export function VerseSheet({
               </button>
             ))}
           </div>
-          <input
-            value={newTag}
-            onChange={(event) => setNewTag(event.target.value)}
-            placeholder={s.verse.newTagsPlaceholder}
-            aria-label={s.verse.newTag}
-          />
+          <label className="control">
+            <Icon name="tag" />
+            <input
+              value={newTag}
+              onChange={(event) => setNewTag(event.target.value)}
+              placeholder={s.verse.newTagsPlaceholder}
+              aria-label={s.verse.newTag}
+            />
+          </label>
         </fieldset>
 
         <Properties rows={properties} onChange={setProperties} />
@@ -628,13 +703,14 @@ function LocationField({
 
   return (
     <div className="field location-field">
-      <label>
-        <span>{s.verse.where}</span>
+      <label className="control">
+        <Icon name="pin" />
         <input
+          aria-label={s.verse.where}
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onFocus={() => setOpen(suggestions.length > 0)}
-          placeholder={s.verse.wherePlaceholder}
+          placeholder={s.verse.where}
           // The browser's own history dropdown would sit on top of this one.
           autoComplete="off"
           role="combobox"
@@ -752,7 +828,7 @@ function Properties({
 
   return (
     <fieldset className="field">
-      <legend>{s.verse.details}</legend>
+      <legend className="visually-hidden">{s.verse.details}</legend>
 
       {rows.map((row) => (
         <div className="field-pair property-row" key={row.key}>
@@ -774,7 +850,7 @@ function Properties({
             aria-label={s.verse.removeDetail(row.name || s.verse.thisDetail)}
             onClick={() => onChange(rows.filter((other) => other.key !== row.key))}
           >
-            ×
+            <Icon name="close" />
           </button>
         </div>
       ))}
@@ -786,6 +862,7 @@ function Properties({
           onChange([...rows, { key: crypto.randomUUID(), name: '', value: '' }])
         }
       >
+        <Icon name="list" />
         {s.verse.addADetail}
       </button>
     </fieldset>

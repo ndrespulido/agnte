@@ -1,4 +1,4 @@
-import type { Media } from '../domain/media';
+import { kindOf, type Media } from '../domain/media';
 
 /**
  * The response shape for `/v1/media`.
@@ -15,6 +15,8 @@ export const mediaBody = (media: Media) => ({
   status: media.status,
   contentType: media.contentType,
   declaredSizeBytes: media.declaredSizeBytes,
+  kind: kindOf(media.contentType),
+  fileName: media.fileName,
   createdAt: media.createdAt.toISOString(),
   updatedAt: media.updatedAt.toISOString(),
   version: media.version,

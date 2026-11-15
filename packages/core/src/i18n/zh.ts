@@ -56,6 +56,15 @@ export const zh: Strings = {
 
   /** The composer bar and the card that shows what it understood. */
   composerBar: {
+    attach: '添加照片或文件',
+    record: '录制语音备注',
+    stopRecording: '停止录音',
+    recording: '正在录音…',
+    voiceNote: '语音备注',
+    file: '文件',
+    attachFailed: '无法添加该附件。',
+    remove: '移除',
+    noMicrophone: '无法使用麦克风。',
     placeholder: '写一条记录 — .标签，键: 值',
     send: '添加这条记录',
     openForm: '用表单添加',

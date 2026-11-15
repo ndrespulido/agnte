@@ -125,6 +125,8 @@ export const radius = {
   sm: 4,
   md: 8,
   lg: 14,
+  /** Sheets and cards: large enough to read as soft, not as a pill. */
+  xl: 24,
   pill: 999,
 } as const;
 
@@ -228,6 +230,9 @@ export const size = {
   /** The plus inside the composer bar: a thumb target, not a landmark. */
   composerPlus: 44,
   minTapTarget: 44,
+  /** A form control's height: a little more than the tap minimum, so a
+   *  rounded box has room to look rounded. */
+  control: 48,
 } as const;
 
 export const tokens = {

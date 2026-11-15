@@ -49,6 +49,15 @@ export const fr: Strings = {
 
   /** The composer bar and the card that shows what it understood. */
   composerBar: {
+    attach: 'Joindre une photo ou un fichier',
+    record: 'Enregistrer une note vocale',
+    stopRecording: 'Arrêter l’enregistrement',
+    recording: 'Enregistrement…',
+    voiceNote: 'Note vocale',
+    file: 'Fichier',
+    attachFailed: 'Impossible de joindre cela.',
+    remove: 'Retirer',
+    noMicrophone: 'Le microphone n’est pas disponible.',
     placeholder: 'Écrivez un verset — .étiquette, clé: valeur',
     send: 'Ajouter ce verset',
     openForm: 'Ajouter avec le formulaire',

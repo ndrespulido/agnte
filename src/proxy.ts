@@ -86,6 +86,12 @@ export function proxy(request: NextRequest): NextResponse {
     // thumbnails actually load from once deployed.
     withMedia("img-src 'self' blob: data:"),
 
+    // Voice notes and videos play straight from object storage, the same way
+    // thumbnails load. Without this they fall back to `default-src 'self'`
+    // and a deployed player is silently refused; locally the media route is
+    // same-origin, so only a deployed build would have shown it.
+    withMedia("media-src 'self' blob:"),
+
     "font-src 'self'",
 
     // The app talks to its own API, and — for the presigned upload only —
@@ -136,11 +142,12 @@ export function proxy(request: NextRequest): NextResponse {
   // in a Referer header.
   response.headers.set('referrer-policy', 'strict-origin-when-cross-origin');
   response.headers.set('x-content-type-options', 'nosniff');
-  // Nothing here uses a camera, a microphone or geolocation. Saying so stops a
-  // future dependency from quietly asking.
+  // Nothing here uses a camera or geolocation. Saying so stops a future
+  // dependency from quietly asking. The microphone is allowed to this origin
+  // only — the composer records voice notes — and to no frame inside it.
   response.headers.set(
     'permissions-policy',
-    'camera=(), microphone=(), geolocation=(), interest-cohort=()',
+    'camera=(), microphone=(self), geolocation=(), interest-cohort=()',
   );
 
   return response;

@@ -34,6 +34,10 @@ export interface VerseView {
     originalUrl: string | null;
     thumbUrl: string | null;
     mediumUrl: string | null;
+    /** Absent from a response cached before media had kinds: treat as image. */
+    kind?: 'image' | 'audio' | 'video' | 'file';
+    contentType?: string;
+    fileName?: string | null;
   }[];
   createdAt: string;
   updatedAt: string;
@@ -347,6 +351,8 @@ interface UploadTargetView {
 export async function uploadImage(image: {
   blob: Blob;
   contentType: string;
+  /** Shown beside a file or a voice note. A photo has no use for one. */
+  fileName?: string | null;
 }): Promise<string> {
   const requested = await authedFetch('/v1/media', {
     method: 'POST',
@@ -359,6 +365,7 @@ export async function uploadImage(image: {
     body: JSON.stringify({
       contentType: image.contentType,
       declaredSizeBytes: image.blob.size,
+      fileName: image.fileName ?? null,
     }),
   }).then((r) => json<{ media: MediaView; upload: UploadTargetView }>(r));
 
@@ -376,7 +383,7 @@ export async function uploadImage(image: {
     headers: requested.upload.headers,
     body: image.blob,
   });
-  if (!put.ok) throw new Error(`Could not upload the image (${put.status}).`);
+  if (!put.ok) throw new Error(`Could not upload that (${put.status}).`);
 
   const confirmed = await authedFetch(`/v1/media/${requested.media.id}/confirm`, {
     method: 'POST',

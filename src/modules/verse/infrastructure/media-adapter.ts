@@ -28,6 +28,9 @@ export class MediaModuleAdapter implements MediaOwnership, MediaResolver {
       originalUrl: media.originalUrl,
       thumbUrl: media.thumbUrl,
       mediumUrl: media.mediumUrl,
+      kind: media.kind,
+      contentType: media.contentType,
+      fileName: media.fileName,
     }));
   }
 }

@@ -49,6 +49,15 @@ export const en = {
 
   /** The composer bar and the card that shows what it understood. */
   composerBar: {
+    attach: 'Attach a photo or file',
+    record: 'Record a voice note',
+    stopRecording: 'Stop recording',
+    recording: 'Recording…',
+    voiceNote: 'Voice note',
+    file: 'File',
+    attachFailed: 'Could not attach that.',
+    remove: 'Remove',
+    noMicrophone: 'The microphone is not available.',
     placeholder: 'Write a verse — .tag, key: value',
     send: 'Add this verse',
     openForm: 'Add with the form',

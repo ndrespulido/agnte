@@ -1,5 +1,6 @@
 import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, extname, join, normalize } from 'node:path';
+import { ALLOWED_CONTENT_TYPES, extensionFor } from '../domain/media';
 import type { MediaBlobStore, StoredObjectInfo, UploadTarget } from '../domain/ports';
 
 /**
@@ -14,11 +15,17 @@ import type { MediaBlobStore, StoredObjectInfo, UploadTarget } from '../domain/p
  * origin when the browser calls `fetch`, so there is nothing to configure.
  */
 
-const EXTENSION_CONTENT_TYPES: Record<string, string> = {
-  '.jpg': 'image/jpeg',
-  '.png': 'image/png',
-  '.webp': 'image/webp',
-};
+/**
+ * The local stand-in for the content type real object storage remembers.
+ *
+ * The filesystem keeps no metadata, so the type is read back from the key's
+ * extension — which the domain chose from the type in the first place. Built
+ * from the domain's own table so a kind added there works here without a
+ * second list to forget.
+ */
+const EXTENSION_CONTENT_TYPES: Record<string, string> = Object.fromEntries(
+  ALLOWED_CONTENT_TYPES.map((type) => [`.${extensionFor(type)}`, type]),
+);
 
 /**
  * Keys come from application code, not directly from user input, but a key

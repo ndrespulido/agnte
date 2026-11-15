@@ -9,6 +9,7 @@ interface MediaRow {
   status: string;
   content_type: string;
   declared_size_bytes: number;
+  file_name: string | null;
   storage_key: string;
   created_at: Date;
   updated_at: Date;
@@ -36,6 +37,7 @@ const toMedia = (row: MediaRow): Media => ({
   status: row.status as MediaStatus,
   contentType: row.content_type as AllowedContentType,
   declaredSizeBytes: row.declared_size_bytes,
+  fileName: row.file_name,
   storageKey: row.storage_key,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -72,7 +74,7 @@ const requireDatabase = () => {
 export class PrismaMediaRepository implements MediaRepository {
   async findById(id: string): Promise<Media | null> {
     const rows = await requireDatabase().$queryRaw<MediaRow[]>`
-      SELECT id, owner_id, status, content_type, declared_size_bytes,
+      SELECT id, owner_id, status, content_type, declared_size_bytes, file_name,
              storage_key, created_at, updated_at, version
       FROM media.media
       WHERE id = ${id}::uuid
@@ -85,7 +87,7 @@ export class PrismaMediaRepository implements MediaRepository {
     if (ids.length === 0) return [];
 
     const rows = await requireDatabase().$queryRaw<MediaRow[]>`
-      SELECT id, owner_id, status, content_type, declared_size_bytes,
+      SELECT id, owner_id, status, content_type, declared_size_bytes, file_name,
              storage_key, created_at, updated_at, version
       FROM media.media
       WHERE owner_id = ${ownerId}::uuid
@@ -97,7 +99,7 @@ export class PrismaMediaRepository implements MediaRepository {
   async create(media: Media): Promise<void> {
     await requireDatabase().$executeRaw`
       INSERT INTO media.media
-        (id, owner_id, status, content_type, declared_size_bytes, storage_key,
+        (id, owner_id, status, content_type, declared_size_bytes, file_name, storage_key,
          created_at, updated_at, version)
       VALUES (
         ${media.id}::uuid,
@@ -105,6 +107,7 @@ export class PrismaMediaRepository implements MediaRepository {
         ${media.status},
         ${media.contentType},
         ${media.declaredSizeBytes},
+        ${media.fileName},
         ${media.storageKey},
         ${media.createdAt},
         ${media.updatedAt},
@@ -143,7 +146,7 @@ export class PrismaMediaRepository implements MediaRepository {
 
   async findAbandonedPending(before: Date): Promise<Media[]> {
     const rows = await requireDatabase().$queryRaw<MediaRow[]>`
-      SELECT id, owner_id, status, content_type, declared_size_bytes,
+      SELECT id, owner_id, status, content_type, declared_size_bytes, file_name,
              storage_key, created_at, updated_at, version
       FROM media.media
       WHERE status = 'pending'
@@ -157,7 +160,7 @@ export class PrismaMediaRepository implements MediaRepository {
 
   async findStalledProcessing(before: Date): Promise<Media[]> {
     const rows = await requireDatabase().$queryRaw<MediaRow[]>`
-      SELECT id, owner_id, status, content_type, declared_size_bytes,
+      SELECT id, owner_id, status, content_type, declared_size_bytes, file_name,
              storage_key, created_at, updated_at, version
       FROM media.media
       WHERE status = 'processing'

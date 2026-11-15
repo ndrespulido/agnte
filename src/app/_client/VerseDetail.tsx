@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { deleteVerse, fetchVerse, type VerseView } from './api';
+import { isImage, OtherMedia } from './Attachments';
 import { VerseSheet } from './VerseSheet';
 import { deepTimeLabel, headerLabel, placementOf, timeLabel } from '@agnte/core';
 import { failureMessage, useStrings } from './locale';
@@ -118,9 +119,9 @@ export function VerseDetail({
           <>
             <p className="detail-date">{whenOf(verse, s)}</p>
 
-            {verse.media.length > 0 ? (
+            {verse.media.some(isImage) ? (
               <ul className="detail-media">
-                {verse.media.map((media) =>
+                {verse.media.filter(isImage).map((media) =>
                   media.mediumUrl ? (
                     <li key={media.id}>
                       {/* eslint-disable-next-line @next/next/no-img-element --
@@ -138,6 +139,8 @@ export function VerseDetail({
                 )}
               </ul>
             ) : null}
+
+            <OtherMedia media={verse.media} />
 
             {verse.xp ? <p className="detail-xp">{verse.xp}</p> : null}
 

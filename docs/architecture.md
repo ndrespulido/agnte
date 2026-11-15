@@ -1368,8 +1368,42 @@ headless Chromium at phone width: five loads of older rows moved the tracked
 row 0–1px. **Not checked on Safari/iOS**, which is the browser the manual
 correction exists for. Known limit: the date header follows headings as they
 scroll past, so after a programmatic jump it can lag until the next heading.
-Not built yet: reply-to-edit, paste and attachments in the bar, and non-ASCII
-tag names.
+**Attachments and media kinds are built.** The composer bar attaches by
+picking, by pasting, and by recording a voice note; each uploads as it is
+added and the verse carries only media ids. Media is no longer images only:
+a closed list of eighteen types — audio, video, PDF, text, CSV, calendar,
+contact card, docx, xlsx — with nothing a browser would run (no HTML, SVG or
+script). Caps are per kind: video 50MB, everything else 15MB. Only images are
+thumbnailed and decoded; the other kinds go straight to `ready` and **their
+bytes are not inspected**, so the declared type is trusted. A contact is a
+`.vcf` attachment, not a structured field. Two header changes came with it:
+`microphone=(self)` in the permissions policy and a `media-src` for object
+storage — both found by pressing record in a browser.
+
+**Restyle.** Controls are rounded boxes that carry their own name: an icon
+and a placeholder inside, instead of a title above (`.control`, with the name
+kept as `aria-label`). Icons are a small inline-SVG set in `Icon.tsx` — no
+icon font, no package. The sheet has a larger radius and a grabber; quiet
+buttons lose the underline for a soft wash; the composer is one pill holding
+the text with attach and record inside it, and send is the one filled control.
+The direction in CLAUDE.md stands — paper palette, hairlines, 150ms motion,
+dark mode — only the shapes changed. Applied to the verse form and the
+composer; the other forms (sign-in, reminders, tags) took the new shape of
+inputs and buttons but still have titles above their fields.
+
+**The bar and the form are one draft.** Pressing plus opens the form with
+what the bar holds — the typed text already parsed into the fields, typed tags
+as names, and anything attached in the bar carried along by name — so "write,
+then plus, then add photos" continues the same verse. Saving from the form
+stores the bar's text as `typedText` and clears the bar. The plus is no longer
+the metallic button: at that size the gradient read as a grey disc, so it is
+an accent-tinted one.
+
+Not built: **transcription of voice notes** (decided, but it is the second
+metered dependency and needs a provider, a key and the daily cap of §12.5
+before any code), stripping metadata from non-image files on erasure, video
+thumbnails, and non-ASCII tag names. **Good to have, not a priority:**
+reply-to-edit.
 
 The parse is committed immediately and the card is editable afterwards — no
 confirmation step — because a composer that asks "is this right?" after every
