@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { en, parseComposer } from '@agnte/core';
 import type { TagView } from '@/app/_client/api';
-import { dateLine, resolveTags, verseFrom } from '@/app/_client/compose';
+import {
+  dateLine,
+  draftToText,
+  resolveTags,
+  verseFrom,
+  type DraftFields,
+} from '@/app/_client/compose';
 
 process.env.TZ = 'UTC';
 
@@ -93,5 +99,75 @@ describe('dateLine', () => {
 
   it('says nothing when no date was typed', () => {
     expect(dateLine(parse('Coffee .daily'), NOW, en)).toBe(null);
+  });
+});
+
+describe('draftToText', () => {
+  const base: DraftFields = {
+    xp: '',
+    tags: [],
+    properties: {},
+    start: null,
+    endIso: null,
+    location: '',
+    rating: null,
+    visibility: '',
+  };
+  const say = (over: Partial<DraftFields>) => draftToText({ ...base, ...over }, en, NOW);
+
+  it('says a whole form in the bar’s own words, and reads back the same', () => {
+    const result = say({
+      xp: 'Dinner at Ramiro',
+      tags: ['restaurant', 'lisbon'],
+      properties: { plat: 'prawns', 'Sea View': 'yes' },
+      start: { iso: '2027-01-05T20:30:00.000Z', precision: 'minute' },
+      location: 'Lisbon',
+      rating: 9,
+      visibility: 'private',
+    });
+    expect(result.lossless).toBe(true);
+    expect(result.text).toBe(
+      'Dinner at Ramiro where: Lisbon rating: 9 visibility: private when: 2027-01-05 20:30 plat: prawns sea-view: yes .restaurant .lisbon',
+    );
+  });
+
+  it('says a range of days', () => {
+    const result = say({
+      xp: 'Trip',
+      tags: ['travel'],
+      start: { iso: '2027-01-05T00:00:00.000Z', precision: 'date' },
+      endIso: '2027-02-24T00:00:00.000Z',
+    });
+    expect(result.lossless).toBe(true);
+    expect(result.text).toContain('from: 2027-01-05 to: 2027-02-24');
+  });
+
+  it('says an empty form as nothing at all', () => {
+    expect(say({})).toEqual({ text: '', lossless: true });
+  });
+
+  it('keeps accented and non-Latin detail names', () => {
+    const result = say({ tags: ['menu'], properties: { entrée: 'soup', 座位: '4A' } });
+    expect(result.lossless).toBe(true);
+    expect(result.text).toBe('entrée: soup 座位: 4A .menu');
+  });
+
+  /**
+   * The cases the bar cannot say. Each would read back as something else, so
+   * the form must stay open rather than minimise into it.
+   */
+  it('refuses what would read back differently', () => {
+    expect(say({ xp: 'Note: call mom', tags: ['a'] }).lossless).toBe(false);
+    expect(say({ location: 'Lisbon: Alfama', tags: ['a'] }).lossless).toBe(false);
+    expect(say({ properties: { rating: 'lots' }, tags: ['a'] }).lossless).toBe(false);
+    expect(say({ xp: 'see https://x.test and .5 of it', tags: ['a'] }).lossless).toBe(
+      true,
+    );
+  });
+
+  it('collapses a note’s line breaks into spaces, and says that is fine', () => {
+    const result = say({ xp: 'one\n\ntwo', tags: ['a'] });
+    expect(result.text).toBe('one two .a');
+    expect(result.lossless).toBe(true);
   });
 });

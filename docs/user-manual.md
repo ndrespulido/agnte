@@ -203,15 +203,24 @@ The form has one rounded box per field, with the name inside it:
 | Field | Notes |
 |---|---|
 | **What happened** | The note. Up to 20,000 characters. |
+| **Attachments** (the three icons right under the note) | **Photo library**, **Take a photo or video** (opens the camera on a phone) and **Choose files** — one tap each, no second menu. Photos are shrunk automatically; videos, voice notes and files go up as they are. Chips and thumbnails show what is attached; remove one with its ✕. |
 | **Where** | A place, up to 200 characters. If place suggestions are switched on, they appear as you type. |
 | **Starts / Ends** + times | A date and an **optional** time for each end. Leave the time empty for a whole day. If the start has a time, the end needs one too. A time needs a date. |
 | **Rating** | 0 to 10. |
 | **Visibility** | *Inherit from tags* (the default), Private, Shared or Public. |
-| **Add photos** | Photos from your device. They are shrunk automatically before upload. |
 | **Tags** | Tap existing tags to choose them; type new ones in the box, separated by commas (`.barcelona, .restaurant`). |
 | **Add a detail** | Any `name` and `value`. Up to 50 per verse. Names may use letters in any script, digits and hyphens: `entrée`, `座位`, `seat` are all fine. `entree` and `entrée` are different names. |
 
 If you do not give a date, the verse is placed **now**, as a moment.
+
+**Minimise.** When you opened the form from the bar with **+**, a small **chevron**
+at the top right puts the form down and **moves everything back into the bar**
+— your note, place, dates, rating, details and tags as one line of text, and
+the attachments as chips — so you can keep writing there. It is greyed out
+while something is still uploading. If the bar cannot say what the form says
+(a colon in the note or place, or a detail named like a field such as
+`rating`), the form stays open and tells you; reword it or save from the form.
+A note's line breaks become spaces when it moves to the bar.
 
 **Add** saves. While a photo is still uploading the button waits, so a verse
 never quietly loses its picture.

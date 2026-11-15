@@ -58,6 +58,13 @@ export const fr: Strings = {
 
   /** The composer bar and the card that shows what it understood. */
   composerBar: {
+    photo: 'Photo',
+    library: 'Photothèque',
+    camera: 'Prendre une photo ou une vidéo',
+    files: 'Choisir des fichiers',
+    minimize: 'Réduire — continuer à écrire dans la barre',
+    cannotMinimize:
+      'Cela ne peut pas s’écrire dans la barre tel quel : deux-points dans la note ou le lieu, ou un détail nommé comme un champ. Reformulez, ou enregistrez ici.',
     attach: 'Joindre une photo ou un fichier',
     record: 'Enregistrer une note vocale',
     stopRecording: 'Arrêter l’enregistrement',

@@ -392,6 +392,23 @@ export function Composer({ onAdded }: { onAdded: () => void }) {
               }
             : {})}
           onClose={() => setFormOpen(false)}
+          onMinimise={(back) => {
+            // The form's contents become the bar's: the text, and everything
+            // attached as chips. The form is closed, not hidden — what it held
+            // now lives here, and reopening it starts from here.
+            setText(back.text);
+            setAttachments(
+              back.attachments.map((item) => ({
+                key: (nextKey.current += 1),
+                name: item.name,
+                kind: item.kind,
+                status: 'ready' as const,
+                mediaId: item.mediaId,
+                reason: null,
+              })),
+            );
+            setFormOpen(false);
+          }}
           onSaved={() => {
             setFormOpen(false);
             // The verse is saved; the bar must not still be holding it.

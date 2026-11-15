@@ -1425,6 +1425,18 @@ metered call per save) and is not made. Known limit: a date range reads
 moments in UTC while the timeline displays them in the reader's zone, so a
 verse within hours of a range boundary can sit on the other side of it.
 
+**The form's attachments and minimise.** The form shows attachments directly
+under the note, with three sources in one row — photo library, camera (photo
+or video, via `capture`) and files — instead of one button that opens the
+platform's menu of the same three. Pictures keep their preview and downscale;
+anything else uploads as it is and shows as a chip, and editing a verse that
+has voice notes or files now lists them instead of drawing empty tiles.
+Opened from the bar, the form has a minimise button that hands its contents
+back as bar text (`draftToText`), but only when parsing that text again gives
+the same verse; otherwise the form stays open and says why. Known loss: a
+note's line breaks collapse to spaces. A typed tag that already exists shows
+as an unselected chip beside its name in the new-tags box until saved.
+
 Not built: **transcription of voice notes** (decided, but it is the second
 metered dependency and needs a provider, a key and the daily cap of §12.5
 before any code), stripping metadata from non-image files on erasure, video
