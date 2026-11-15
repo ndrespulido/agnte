@@ -27,7 +27,7 @@ Everything below is a one-time setup step. Per-deploy infrastructure lives in
 | Cloud Tasks | Thumbnail queue + enqueuer role (in the GCP bootstrap) | 4.9 | ☑ |
 | Task callback secret | Shared secret for `/internal/*` (by set-secrets.sh) | 4.9 | ☑ |
 | Retention sweep | Daily Cloud Scheduler job → `/internal/prune` | 4.10 | ☑ ran 200 on 2026-09-15 |
-| Reminder tick | Cloud Scheduler job → `/internal/notifications/tick` | 7.x | ☑ delivered end to end 2026-09-17 |
+| Reminder tick | Cloud Scheduler job → `/internal/notifications/tick` | 7.x | ☑ delivered end to end 2026-09-17 · **being retired** in favour of per-reminder wake-ups, see §3a |
 | R2 CORS | Bucket CORS rule so the browser's presigned upload isn't blocked | 4.11 | ☑ 2026-09-18, after a re-run including agnte.app — an upload was watched to succeed |
 | Custom domain | Cloud Run Domain Mapping, Cloudflare-proxied, `APP_BASE_URL` pinned | 4.12 | ☑ |
 | Place suggestions | Places API key for the location field, production only | 6.2 | ☐ key not valid |
@@ -1588,18 +1588,30 @@ Less than it looks like, which is worth knowing before switching things off:
 | Kill switch | **~€0** | Budget → Pub/Sub → Function. **Leave it on.** |
 | `agnte-backup-nightly` | wakes Run **and** Neon, 03:17 UTC | Cloud Scheduler. |
 | `agnte-prune-daily` | wakes Run **and** Neon, 04:40 UTC | Cloud Scheduler. |
+| `agnte-notifications-tick` | wakes Run **and** Neon **every 5 minutes** | Cloud Scheduler. The largest idle consumer by far. |
 | `sweep-previews` | one Actions run, 03:17 UTC | GitHub, authenticates to GCP. |
 
-So the only things that run on their own are the **two Cloud Scheduler jobs and
+So the only things that run on their own are **three Cloud Scheduler jobs and
 one GitHub schedule**. Nothing else wakes up unless somebody opens the app or
 pushes a commit. Cloud Run and Neon both idle at nothing; the schedulers are
 what keep poking them awake.
 
-> **There is no notifications tick in production.** `handleNotificationsTick`
-> is exported by the module and has no `/internal/...` route, so no scheduler
-> can be calling it and scheduled reminders have never fired. Noted here
-> because it is the thing you would expect to be the biggest idle consumer —
-> a five-minute cron — and it is not running at all. See §8.4.
+> **Correction.** The first version of this section said there was no
+> notifications tick in production and listed two scheduler jobs. That was
+> wrong: it was checked against a stale branch in a fresh checkout, not against
+> `main`. The route exists, `agnte-notifications-tick` calls it every five
+> minutes, and a reminder was delivered end to end on 2026-09-17. Anyone who
+> paused using the earlier text left the busiest job running.
+>
+> **The five-minute tick is also the one job that can exhaust the database.**
+> Neon suspends a compute after five idle minutes and the free plan allows
+> 100 CU-hours a month (§2). A query every five minutes means it never
+> suspends: at the 0.25 CU minimum that is roughly 180 CU-hours a month, so the
+> allowance runs out a little past the middle of the month. That is arithmetic
+> from this document's own figures, not a measurement — check the Neon
+> console's usage graph before trusting either number. It is the reason the
+> tick is being replaced by a wake-up at each reminder's own time (§8.4), after
+> which this job is deleted rather than paused.
 
 ### Pausing
 
@@ -1611,14 +1623,18 @@ gcloud scheduler locations list --project=agnte-prod
 gcloud scheduler jobs list --location=<region> --project=agnte-prod
 ```
 
-Then pause both jobs:
+Then pause all three jobs — the tick first, since it is the one that matters:
 
 ```sh
+gcloud scheduler jobs pause agnte-notifications-tick \
+  --location=<region> --project=agnte-prod
 gcloud scheduler jobs pause agnte-backup-nightly \
   --location=<region> --project=agnte-prod
 gcloud scheduler jobs pause agnte-prune-daily \
   --location=<region> --project=agnte-prod
 ```
+
+While the tick is paused **no reminder fires**, by push or by email.
 
 That is the whole pause. With nothing poking it, Cloud Run stays at zero
 instances and Neon suspends itself, so the recurring spend goes to
@@ -1654,6 +1670,24 @@ gcloud scheduler jobs resume agnte-prune-daily \
   --location=<region> --project=agnte-prod
 gh workflow enable sweep-previews.yml --repo ndrespulido/agnte
 ```
+
+Whether to resume `agnte-notifications-tick` depends on what is deployed:
+
+- **Wake-ups not deployed yet** (the build on `main` still polls): resume it,
+  or reminders stay silent.
+- **Wake-ups deployed:** do not resume it — delete it. Reminders are then fired
+  by a Cloud Tasks callback at each reminder's own time, with the daily
+  `agnte-prune-daily` run as the safety net, so that job must be running.
+
+  ```sh
+  gcloud scheduler jobs delete agnte-notifications-tick \
+    --location=<region> --project=agnte-prod
+  ```
+
+  Delete it only **after** that build is live. Deleting first leaves nothing
+  firing reminders until the deploy lands. Leaving both running is harmless —
+  a tick that finds nothing due does nothing — it merely keeps paying for the
+  poll.
 
 Then check the app still answers and the database is migrated, which is one
 unauthenticated request — the same one the deploy's smoke test gates on:

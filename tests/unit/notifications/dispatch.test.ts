@@ -4,7 +4,10 @@ import {
   MAX_PER_TICK,
   tick,
   type DispatchDeps,
+  WAKE_HORIZON_MS,
+  WAKE_MARGIN_MS,
 } from '@/modules/notifications/application/dispatch';
+import { saveReminder } from '@/modules/notifications/application/schedule';
 import type {
   DispatchOutcome,
   NotificationPreference,
@@ -48,10 +51,13 @@ function harness(options: {
   due: ScheduledNotification[];
   quietHours?: NotificationPreference['quietHours'];
   send?: () => Promise<void>;
+  /** What the table says is due next, once this tick has settled. */
+  earliest?: Date | null;
 }) {
   const settled: DispatchOutcome[] = [];
   let claimedWith: { now: Date; limit: number } | null = null;
   let sends = 0;
+  const wokenAt: Date[] = [];
 
   const notifications: NotificationRepository = {
     create: async () => undefined,
@@ -64,6 +70,7 @@ function harness(options: {
     settle: async (outcome) => {
       settled.push(outcome);
     },
+    earliestPendingFireAt: async () => options.earliest ?? null,
     deleteForUser: async () => 0,
   };
 
@@ -87,12 +94,19 @@ function harness(options: {
         if (options.send) await options.send();
       },
     },
+    wakeUps: {
+      description: 'fake',
+      at: async (when) => {
+        wokenAt.push(when);
+      },
+    },
   };
 
   return {
     deps,
     settled,
     sends: () => sends,
+    wokenAt,
     claimedWith: () => claimedWith,
   };
 }
@@ -239,5 +253,135 @@ describe('tick', () => {
     expect(h.sends()).toBe(1);
     expect(h.settled[0]).toMatchObject({ status: 'failed', nextFireAt: null });
     expect(h.settled[0]?.lastError).toContain('HOURLY');
+  });
+});
+
+/**
+ * The dispatcher is not polled (§8.4). A five-minute cron would keep the
+ * database awake around the clock and overspend its free allowance doing
+ * nothing, so each tick leaves behind a wake-up for whatever is due next —
+ * and these are the rules that keep that chain from breaking or multiplying.
+ */
+describe('wake-ups', () => {
+  it('asks to be woken for the next pending reminder, a moment after it is due', async () => {
+    const next = at('2026-09-15T18:00:00Z');
+    const h = harness({ due: [], earliest: next });
+
+    const result = await tick(NOW, h.deps);
+
+    expect(h.wokenAt).toEqual([new Date(next.getTime() + WAKE_MARGIN_MS)]);
+    expect(result.nextWakeUp).toEqual(h.wokenAt[0]);
+  });
+
+  /**
+   * Never exactly on the fire time. The queue's clock and the service's are
+   * two clocks: a callback a few milliseconds early finds nothing due, and the
+   * reminder is stranded until the daily sweep.
+   */
+  it('never asks for a time at or before the reminder itself', async () => {
+    const next = at('2026-09-15T18:00:00Z');
+    const h = harness({ due: [], earliest: next });
+
+    await tick(NOW, h.deps);
+
+    expect(h.wokenAt[0]!.getTime()).toBeGreaterThan(next.getTime());
+  });
+
+  it('asks for nothing when nothing is pending', async () => {
+    const h = harness({ due: [], earliest: null });
+
+    const result = await tick(NOW, h.deps);
+
+    expect(h.wokenAt).toEqual([]);
+    expect(result.nextWakeUp).toBeNull();
+  });
+
+  /**
+   * Beyond the horizon is the daily sweep's job. A wake-up parked for weeks
+   * outlives edits to the reminder it was asked for.
+   */
+  it('leaves a reminder beyond the horizon to a later sweep', async () => {
+    const far = new Date(NOW.getTime() + WAKE_HORIZON_MS + 60_000);
+    const h = harness({ due: [], earliest: far });
+
+    await tick(NOW, h.deps);
+
+    expect(h.wokenAt).toEqual([]);
+  });
+
+  /**
+   * A backlog larger than one tick's limit shows up as "the earliest pending
+   * reminder is already overdue". It must be drained, and it must not become a
+   * tight loop of immediate callbacks — so it is asked for from now, not from
+   * the past.
+   */
+  it('drains a backlog from now rather than from the past', async () => {
+    const overdue = new Date(NOW.getTime() - 3_600_000);
+    const h = harness({ due: [], earliest: overdue });
+
+    await tick(NOW, h.deps);
+
+    expect(h.wokenAt).toEqual([new Date(NOW.getTime() + WAKE_MARGIN_MS)]);
+  });
+
+  it('asks once per tick, however many reminders it handled', async () => {
+    const h = harness({
+      due: [reminder(), reminder({ id: 'n2' }), reminder({ id: 'n3' })],
+      earliest: at('2026-09-15T18:00:00Z'),
+    });
+
+    await tick(NOW, h.deps);
+
+    expect(h.wokenAt).toHaveLength(1);
+  });
+});
+
+/**
+ * Creating a reminder: the wake-up is asked for *before* the row is written.
+ *
+ * A wake-up is a hint, so asking and then failing to store costs one empty
+ * tick. The other order fails silently in the worst way: a reminder stored
+ * with nothing to fire it answers 201 and then says nothing until the daily
+ * sweep — "take the tablet in ten minutes" arriving tomorrow.
+ */
+describe('saveReminder', () => {
+  it('asks for the wake-up first, and stores nothing if that fails', async () => {
+    const created: string[] = [];
+    const h = harness({ due: [] });
+
+    await expect(
+      saveReminder(reminder({ fireAt: at('2026-09-15T12:00:00Z') }), {
+        notifications: {
+          ...h.deps.notifications,
+          create: async (n) => void created.push(n.id),
+        },
+        wakeUps: {
+          description: 'down',
+          at: async () => {
+            throw new Error('queue unavailable');
+          },
+        },
+        now: NOW,
+      }),
+    ).rejects.toThrow('queue unavailable');
+
+    expect(created).toEqual([]);
+  });
+
+  it('stores the reminder once the wake-up is in place', async () => {
+    const order: string[] = [];
+    const h = harness({ due: [] });
+    const fireAt = new Date(NOW.getTime() + 600_000);
+
+    await saveReminder(reminder({ fireAt }), {
+      notifications: {
+        ...h.deps.notifications,
+        create: async () => void order.push('stored'),
+      },
+      wakeUps: { description: 'fake', at: async () => void order.push('woken') },
+      now: NOW,
+    });
+
+    expect(order).toEqual(['woken', 'stored']);
   });
 });

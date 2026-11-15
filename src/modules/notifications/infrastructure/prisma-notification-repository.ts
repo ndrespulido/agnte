@@ -120,6 +120,15 @@ export class PrismaNotificationRepository implements NotificationRepository {
     return rows.map(toNotification);
   }
 
+  async earliestPendingFireAt(): Promise<Date | null> {
+    const rows = await requireDatabase().$queryRaw<{ fire_at: Date | null }[]>`
+      SELECT min(fire_at) AS fire_at
+        FROM notifications.scheduled_notification
+       WHERE status = 'pending'
+    `;
+    return rows[0]?.fire_at ?? null;
+  }
+
   /**
    * Writes back what the dispatcher decided.
    *

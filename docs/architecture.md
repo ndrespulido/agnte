@@ -680,7 +680,8 @@ This is what makes the original medication/prescription/task use cases possible.
 ScheduledNotification { id, userId, verseId?, fireAt, kind, payload, status, attempts }
 ```
 
-- Cloud Scheduler → `/internal/notifications/tick` every 5 minutes.
+- ~~Cloud Scheduler → `/internal/notifications/tick` every 5 minutes.~~
+  Replaced: a wake-up at each reminder's own time. See the note below.
 - Claims due rows with `SELECT ... FOR UPDATE SKIP LOCKED` — safe if two
   instances tick concurrently.
 - **Web Push** primary (free; works on Android Chrome and iOS 16.4+ when
@@ -690,6 +691,45 @@ ScheduledNotification { id, userId, verseId?, fireAt, kind, payload, status, att
 - Quiet hours per user — never dispatch a medication reminder at 03:00 because
   of a timezone bug.
 
+> **The dispatcher is woken, not polled.** The five-minute cron shipped and
+> worked — a reminder was delivered end to end on it — and it was still the
+> wrong shape for this platform. Its deploy script accounted for what 288
+> wake-ups a day cost Cloud Run (nothing) and not for what they cost the
+> database: Neon suspends after five idle minutes, so a five-minute poll means
+> it never does, and the free plan's monthly compute allowance covers a little
+> over half a month of that. A feature that quietly spends the whole database
+> budget on asking "anything due?" is the opposite of §3.1.
+>
+> So each reminder asks for one callback at its own fire time, through the
+> deferred-jobs queue that already exists for thumbnails (§1.3), and the
+> service and database sleep until it arrives. Three rules hold it together:
+>
+> - **A wake-up is a hint, never the truth.** It names no reminder and carries
+>   no payload; it says "run a tick", and the tick claims whatever is actually
+>   due. A duplicate claims nothing, a late one claims what is overdue.
+> - **Every tick leaves the next wake-up behind.** One query for the earliest
+>   pending reminder covers a recurrence's next occurrence, a quiet-hours
+>   deferral, a retry's backoff and a backlog in the same line. Wake-ups are
+>   deduplicated by the second, or each duplicate would schedule its own
+>   successor and the callbacks per reminder would only grow.
+> - **The daily sweep runs a tick too.** A callback can be lost, and a reminder
+>   set weeks ahead is beyond the two-day horizon when it is created; the
+>   sweep's tick is what catches the first and schedules the second. Worst
+>   case for a lost wake-up is a day late, not never.
+>
+> Creating a reminder asks for the wake-up *before* writing the row. Asking and
+> then failing to store costs one empty tick; the other order stores a reminder
+> with nothing to fire it and answers 201. Wake-ups are asked for two seconds
+> after the fire time, because the queue's clock and the service's are two
+> clocks and an early callback finds nothing due.
+>
+> Reminders are also now accurate to seconds rather than to five minutes.
+> Locally there is no scheduler and no timer standing in for one: the tick
+> route is called by hand, like the retention sweep (§7.1). **Not proven in
+> production** — the scheduled-delivery half of Cloud Tasks cannot be reached
+> from the development sandbox, so the first real reminder after this deploys
+> is the test.
+>
 > **Built in two halves.** Email first and Web Push second, deliberately: Resend
 > was already wired and proven, while push needs VAPID keys, a service worker
 > and — on iOS — the PWA installed to the home screen before it delivers
@@ -1388,8 +1428,8 @@ Each step is one deliverable ending in a merged pull request.
 
 1. **Foundations.** Merge `claude/event-precision`, 
    `claude/push-test-notification` and `claude/pause-runbook`; finish the display half of event
-   precision; give the reminder tick a route (it has none, so no reminder has
-   ever fired in production); the monorepo and `core`; error codes.
+   precision; replace the five-minute reminder cron with wake-ups (§8.4); the
+   monorepo and `core`; error codes.
 2. **The spike** (12.6), which decides how steps 3 and 8 are built.
 3. **Composer and chat timeline.** Grammar, entries, reply-to-edit, the flip,
    paste, the `+` menu over what already exists.

@@ -29,6 +29,95 @@ class FakeTaskCreator implements TaskCreator {
   }
 }
 
+/**
+ * Scheduled, deduplicated jobs — what lets a reminder be woken at its own time
+ * instead of the service being polled (§8.4).
+ */
+describe('CloudTasksJobs, scheduled', () => {
+  const jobsWith = (client: TaskCreator) =>
+    new CloudTasksJobs(
+      client,
+      'agnte-prod',
+      'europe-west3',
+      'agnte-media-thumbnails',
+      'https://agnte.example.com',
+      'the-shared-secret',
+    );
+
+  type Sent = { task: { name?: string; scheduleTime?: { seconds: number } } };
+
+  it('sends neither a name nor a time for an ordinary job', async () => {
+    const client = new FakeTaskCreator();
+    await jobsWith(client).enqueue({ path: '/internal/x', body: {} });
+
+    const sent = client.calls[0] as Sent;
+    expect(sent.task.name).toBeUndefined();
+    expect(sent.task.scheduleTime).toBeUndefined();
+  });
+
+  it('carries the delivery time as whole seconds', async () => {
+    const client = new FakeTaskCreator();
+    await jobsWith(client).enqueue({
+      path: '/internal/x',
+      body: {},
+      notBefore: new Date('2026-09-15T17:00:00.750Z'),
+    });
+
+    expect((client.calls[0] as Sent).task.scheduleTime).toEqual({
+      seconds: Date.parse('2026-09-15T17:00:00Z') / 1000,
+    });
+  });
+
+  it('names a deduplicated job inside its queue', async () => {
+    const client = new FakeTaskCreator();
+    await jobsWith(client).enqueue({
+      path: '/internal/x',
+      body: {},
+      dedupeKey: 'tick-1',
+    });
+
+    expect((client.calls[0] as Sent).task.name).toBe(
+      'projects/agnte-prod/locations/europe-west3/queues/agnte-media-thumbnails/tasks/tick-1',
+    );
+  });
+
+  /**
+   * ALREADY_EXISTS on a deduplicated job is the dedupe working. Without a key
+   * the same error means something this adapter does not understand, and it
+   * must reach the caller rather than be swallowed.
+   */
+  it('absorbs a duplicate only when it asked for deduplication', async () => {
+    const taken = Object.assign(new Error('6 ALREADY_EXISTS'), { code: 6 });
+    const client: TaskCreator = {
+      queuePath: (p, l, q) => `projects/${p}/locations/${l}/queues/${q}`,
+      createTask: async () => {
+        throw taken;
+      },
+    };
+
+    await expect(
+      jobsWith(client).enqueue({ path: '/internal/x', body: {}, dedupeKey: 'tick-1' }),
+    ).resolves.toBeUndefined();
+
+    await expect(
+      jobsWith(client).enqueue({ path: '/internal/x', body: {} }),
+    ).rejects.toThrow('ALREADY_EXISTS');
+  });
+
+  it('lets any other failure through, deduplicated or not', async () => {
+    const client: TaskCreator = {
+      queuePath: (p, l, q) => `projects/${p}/locations/${l}/queues/${q}`,
+      createTask: async () => {
+        throw Object.assign(new Error('14 UNAVAILABLE'), { code: 14 });
+      },
+    };
+
+    await expect(
+      jobsWith(client).enqueue({ path: '/internal/x', body: {}, dedupeKey: 'tick-1' }),
+    ).rejects.toThrow('UNAVAILABLE');
+  });
+});
+
 describe('CloudTasksJobs', () => {
   it('targets the queue, the base URL and path, and signs the header', async () => {
     const client = new FakeTaskCreator();

@@ -6,6 +6,7 @@ import type {
   NotificationRepository,
   PreferenceRepository,
   ScheduledNotification,
+  WakeUps,
 } from '../domain/ports';
 
 /**
@@ -42,6 +43,7 @@ export interface DispatchDeps {
   readonly notifications: NotificationRepository;
   readonly preferences: PreferenceRepository;
   readonly delivery: NotificationDelivery;
+  readonly wakeUps: WakeUps;
 }
 
 export interface TickResult {
@@ -50,6 +52,51 @@ export interface TickResult {
   readonly deferred: number;
   readonly failed: number;
   readonly rescheduled: number;
+  /** When the next tick was asked for, or null when nothing is due in the horizon. */
+  readonly nextWakeUp: Date | null;
+}
+
+/**
+ * How far ahead a wake-up is asked for.
+ *
+ * Two days, against a sweep that runs daily: anything due later than this is
+ * left for a future sweep's tick to schedule, and the overlap means one missed
+ * sweep still leaves every reminder covered. Far inside the thirty days the
+ * queue accepts, on purpose — a wake-up parked for weeks is a wake-up that
+ * outlives edits to the reminder it was for.
+ */
+export const WAKE_HORIZON_MS = 48 * 60 * 60 * 1000;
+
+/**
+ * Asked for slightly after the reminder is due, never exactly on it.
+ *
+ * The queue's clock and this service's clock are two clocks. A wake-up that
+ * arrives a few milliseconds early finds nothing due, claims nothing, and — if
+ * it also asked for the same second again — is deduplicated into silence,
+ * stranding the reminder until the daily sweep. Two seconds late is invisible
+ * to a person and removes the race.
+ */
+export const WAKE_MARGIN_MS = 2_000;
+
+/**
+ * Asks for a wake-up at `fireAt`, if it is close enough to ask for.
+ *
+ * Exported because two callers need the identical rule: the tick, for whatever
+ * comes next, and the request that creates a reminder — which may be due
+ * sooner than anything the last tick knew about.
+ */
+export async function requestWakeUp(
+  fireAt: Date,
+  now: Date,
+  wakeUps: WakeUps,
+): Promise<Date | null> {
+  if (fireAt.getTime() - now.getTime() > WAKE_HORIZON_MS) return null;
+
+  // Never in the past: an overdue reminder is "as soon as possible", and a
+  // backlog must not turn into a tight loop of immediate callbacks.
+  const when = new Date(Math.max(fireAt.getTime(), now.getTime()) + WAKE_MARGIN_MS);
+  await wakeUps.at(when);
+  return when;
 }
 
 /**
@@ -81,7 +128,19 @@ export async function tick(now: Date, deps: DispatchDeps): Promise<TickResult> {
     }
   }
 
-  return { claimed: due.length, sent, deferred, failed, rescheduled };
+  /*
+   * Leave a wake-up behind for whatever is due next.
+   *
+   * One question to the table after the loop, rather than a wake-up per
+   * outcome: it covers a recurrence's next occurrence, a quiet-hours deferral,
+   * a retry's backoff and a backlog larger than this tick's limit in the same
+   * line, and it covers reminders this tick never touched. Each tick
+   * guarantees the next one, which is what lets the chain run with no cron.
+   */
+  const next = await deps.notifications.earliestPendingFireAt();
+  const nextWakeUp = next ? await requestWakeUp(next, now, deps.wakeUps) : null;
+
+  return { claimed: due.length, sent, deferred, failed, rescheduled, nextWakeUp };
 }
 
 async function handleOne(
