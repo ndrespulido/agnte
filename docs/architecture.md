@@ -1437,6 +1437,14 @@ the same verse; otherwise the form stays open and says why. Known loss: a
 note's line breaks collapse to spaces. A typed tag that already exists shows
 as an unselected chip beside its name in the new-tags box until saved.
 
+Later fixes to the same form: attachments now sit *above* the note, in one
+sideways strip that also holds voice notes, videos and files (the editor used
+to draw only pictures, so a voice note or a PDF added earlier was missing when
+the verse was reopened); the note box grows with its text; and nothing in the
+sheet may flex-shrink — the cause of the overflow, since the sheet is a
+capped-height flex column and squeezed the note's box to one row while its text
+kept its height. A chevron closes the editor and the read-only detail.
+
 Not built: **transcription of voice notes** (decided, but it is the second
 metered dependency and needs a provider, a key and the daily cap of §12.5
 before any code), stripping metadata from non-image files on erasure, video

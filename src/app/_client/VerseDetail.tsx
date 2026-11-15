@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { deleteVerse, fetchVerse, type VerseView } from './api';
 import { isImage, OtherMedia } from './Attachments';
+import { Icon } from './Icon';
 import { VerseSheet } from './VerseSheet';
 import { deepTimeLabel, headerLabel, placementOf, timeLabel } from '@agnte/core';
 import { failureMessage, useStrings } from './locale';
@@ -123,6 +124,17 @@ export function VerseDetail({
         aria-label={s.verse.label}
         onClick={(event) => event.stopPropagation()}
       >
+        {/* Put the verse down from the top, where it opened — the same chevron
+            the editor has. Close at the foot is still there for a keyboard. */}
+        <button
+          type="button"
+          className="sheet-minimise"
+          aria-label={s.common.close}
+          title={s.common.close}
+          onClick={onClose}
+        >
+          <Icon name="chevronDown" />
+        </button>
         {error !== null ? (
           <p className="notice error" role="alert">
             {failureMessage(error, s.verse.couldNotOpen)}
