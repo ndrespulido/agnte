@@ -1448,6 +1448,14 @@ The history up to this point has been public and should be treated as such.
 
 ### 12.7 Order of work
 
+> **Spike result (step 2): share `core`, keep two UIs.** React Native's list
+> on web cannot hold scroll position when older rows load above
+> (`maintainVisibleContentPosition` is not implemented there), and the manual
+> fix is defeated by estimated row heights. Measurements and what was not
+> tried are in `apps/mobile/SPIKE.md`. The native half is **untested on a
+> device**. `apps/mobile` is outside the npm workspace on purpose: its own
+> lockfile and React version, and never in the web image.
+
 Each step is one deliverable ending in a merged pull request.
 
 1. **Foundations.** Merge `claude/event-precision`, 

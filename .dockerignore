@@ -9,3 +9,6 @@ infra
 .local-storage
 *.md
 .env*
+
+# The native app: its own toolchain, its own lockfile, never in the web image.
+apps
