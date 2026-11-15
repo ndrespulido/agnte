@@ -1,4 +1,4 @@
-import type { Strings } from '@/shared/i18n';
+import type { Strings } from '@agnte/core';
 
 /**
  * Filtering the timeline by tag.

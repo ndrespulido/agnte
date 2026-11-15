@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { tokensCss } from '@/shared/design/css';
-import { dark, light, motion, tokens, type Palette } from '@/shared/design/tokens';
+import { dark, light, motion, tokens, type Palette } from '@agnte/core';
 
 /**
  * Two things are worth testing about a design system this early: that the

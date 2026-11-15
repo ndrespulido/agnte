@@ -30,7 +30,7 @@ import {
   useLocale,
   useStrings,
 } from './locale';
-import { isLocale } from '@/shared/i18n';
+import { isLocale } from '@agnte/core';
 
 /**
  * The shell: a glass date header pinned to the top, the timeline beneath it,

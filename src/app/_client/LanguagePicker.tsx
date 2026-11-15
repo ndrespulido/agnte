@@ -1,6 +1,6 @@
 'use client';
 
-import { LOCALES, type Locale } from '@/shared/i18n';
+import { LOCALES, type Locale } from '@agnte/core';
 import { setLocale, useLocale, useStrings } from './locale';
 import { saveLocale } from './api';
 

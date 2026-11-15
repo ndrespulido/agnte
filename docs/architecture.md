@@ -1411,6 +1411,14 @@ later is mechanical and there is no reason to pay for it now.
   rules. `format.ts` already carries a hand-copied duplicate of the verse
   module's timeline maths with a comment admitting what happens when they
   drift; a second client would make it three copies.
+  **Started:** `packages/core` (`@agnte/core`, an npm workspace) holds the
+  tokens, the string tables, date reading and the timeline scale; the verse
+  domain and the web client now share one copy of that arithmetic. It is
+  consumed as TypeScript source (`transpilePackages`), and ESLint forbids it
+  React, Next, Node built-ins and app code. The web app deliberately **stays
+  at the repository root** for now: moving it changes the image build and the
+  deploy for no gain until `apps/mobile` exists. The parser and the offline
+  queue's rules move in when the composer is built.
 - **API errors are consumed by code, not prose** (§8.6.1's open gap). A native
   build in someone's pocket for months cannot depend on English sentences, and
   `/v1` becomes additive-only from the first store release.

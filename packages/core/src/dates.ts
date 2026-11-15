@@ -1,4 +1,5 @@
-import type { Strings } from '@/shared/i18n';
+import type { Strings } from './i18n';
+import { yearsFromEpoch } from './timeline';
 
 /**
  * How a moment in time is written on the timeline.
@@ -108,20 +109,10 @@ function partsOf(placement: Extract<Placement, { kind: 'date' }>): CalendarParts
   };
 }
 
-/** A Julian year in milliseconds, as the domain's timeline scale defines it. */
-const MS_PER_JULIAN_YEAR = 365.25 * 24 * 60 * 60 * 1000;
-const TIMELINE_EPOCH_MS = Date.UTC(2000, 0, 1);
-
 /**
  * Where a verse sits on the timeline, in years from 2000 — the same number the
- * server stores as `timeline_years`.
- *
- * A deliberate second copy of `modules/verse/domain/timeline.ts`, for the same
- * reason `placementOf` above is one: importing the verse module from a client
- * component would pull its routes, and through them Prisma, into the browser
- * bundle. The rule is three lines and stated in both places; if they ever
- * disagree, a locally queued verse sorts into the wrong spot and snaps
- * elsewhere once it syncs, which is the visible symptom to look for.
+ * server stores as `timeline_years`, with one deliberate difference for a day
+ * (below).
  */
 export function timelinePosition(verse: Placeable): number {
   if (verse.deepTimeYears !== null) return verse.deepTimeYears;
@@ -141,13 +132,10 @@ export function timelinePosition(verse: Placeable): number {
      * what pages are fetched by; this only arranges what has been loaded.
      */
     const { year, month, date } = partsOf(placement);
-    return (
-      (new Date(year, month, date).getTime() - TIMELINE_EPOCH_MS) / MS_PER_JULIAN_YEAR
-    );
+    return yearsFromEpoch(new Date(year, month, date));
   }
 
-  const at = new Date(verse.eventStart ?? verse.createdAt);
-  return (at.getTime() - TIMELINE_EPOCH_MS) / MS_PER_JULIAN_YEAR;
+  return yearsFromEpoch(new Date(verse.eventStart ?? verse.createdAt));
 }
 
 /**

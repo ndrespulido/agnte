@@ -12,7 +12,7 @@ import {
   zh,
   type Locale,
   type Strings,
-} from '@/shared/i18n';
+} from '@agnte/core';
 
 /**
  * The string tables, and the rules for picking between them.

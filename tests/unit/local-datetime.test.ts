@@ -13,8 +13,8 @@ import { describe, expect, it } from 'vitest';
 process.env.TZ = 'Europe/Madrid';
 
 const { fromLocalDateTimeInput, toLocalDateTimeInput, localMomentLabel } =
-  await import('@/app/_client/format');
-const { en } = await import('@/shared/i18n');
+  await import('@agnte/core');
+const { en } = await import('@agnte/core');
 
 describe('reminder times are local, not UTC', () => {
   it('reads a summer wall-clock time as the instant it really is', () => {

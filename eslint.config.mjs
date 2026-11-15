@@ -115,7 +115,7 @@ export default tseslint.config(
   // Type-aware rules, scoped to source and tests. Config files at the repo root
   // are not in tsconfig, and asking the project service to type them fails.
   {
-    files: ['src/**/*.ts', 'src/**/*.tsx', 'tests/**/*.ts'],
+    files: ['src/**/*.ts', 'src/**/*.tsx', 'tests/**/*.ts', 'packages/*/src/**/*.ts'],
     languageOptions: {
       parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
     },
@@ -140,6 +140,30 @@ export default tseslint.config(
                 'implement it in infrastructure/.',
             },
             { group: ['@/modules/*/*', '@/modules/*/*/**'], message: BOUNDARY_MESSAGE },
+          ],
+        },
+      ],
+    },
+  },
+
+  // `@agnte/core` is what a React Native build imports (§12.6), so it may
+  // depend on nothing that only exists in a browser, in Next, or on a server.
+  // A rule rather than a convention: the first `import 'react'` here would
+  // typecheck, pass every web test, and break a client that is not built yet.
+  {
+    files: ['packages/core/src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: FRAMEWORK_AND_ORM,
+          patterns: [
+            {
+              group: ['@/*', 'next/*', 'react', 'react-dom', 'react/*', 'node:*'],
+              message:
+                '@agnte/core is shared with every client: no app code, no ' +
+                'framework and no Node built-ins.',
+            },
           ],
         },
       ],

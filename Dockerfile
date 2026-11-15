@@ -14,6 +14,9 @@ FROM node:22-slim AS base
 FROM base AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
+# Workspace manifests: `npm ci` links each workspace into node_modules and
+# fails if a package.json the lockfile names is missing.
+COPY packages/core/package.json ./packages/core/
 # The postinstall hook runs `prisma generate`, which needs the schema. Without
 # this the install fails here rather than at build time.
 COPY prisma ./prisma

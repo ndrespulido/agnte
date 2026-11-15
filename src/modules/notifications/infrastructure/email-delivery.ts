@@ -1,7 +1,7 @@
 import { contactFor } from '@/modules/identity';
 import { getEmailTransport } from '@/shared/infra/email';
 import { loadConfig } from '@/shared/infra/config';
-import { isLocale, stringsFor, DEFAULT_LOCALE } from '@/shared/i18n';
+import { isLocale, stringsFor, DEFAULT_LOCALE } from '@agnte/core';
 import type { NotificationDelivery } from '../domain/ports';
 
 /**

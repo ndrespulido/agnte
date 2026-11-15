@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { serverSaid, setLocale } from '@/app/_client/locale';
-import { en, es, fr, zh } from '@/shared/i18n';
+import { en, es, fr, zh } from '@agnte/core';
 import { VerseErrorCode } from '@/modules/verse/domain/errors';
 import { IdentityErrorCode } from '@/modules/identity/domain/errors';
 

@@ -9,8 +9,8 @@ import {
   toDateInput,
   toTimeInput,
   type EventPrecision,
-} from '@/app/_client/format';
-import { en } from '@/shared/i18n';
+} from '@agnte/core';
+import { en } from '@agnte/core';
 
 /**
  * A day and a moment, read from two sides of UTC (§2.1).
